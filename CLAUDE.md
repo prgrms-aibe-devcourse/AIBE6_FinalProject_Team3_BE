@@ -45,7 +45,7 @@ Google/Kakao OAuth2 login (access-token issuance only, no refresh token yet) is 
 - `com.algogyeyak.auth.jwt` — `JwtProvider` (issue/validate), `JwtUserPrincipal`, `JwtAuthenticationFilter`
 - `com.algogyeyak.auth.oauth` — per-provider attribute parsing (`GoogleOAuth2UserInfo`, `KakaoOAuth2UserInfo`), `CustomOAuth2UserService`, cookie-based `AuthorizationRequestRepository`
 - `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig` — OAuth2 login wiring, JWT delivered via httpOnly cookie
-- `com.algogyeyak.auth.controller.AuthController` — `GET /api/auth/me`, `POST /api/auth/logout`
+- `com.algogyeyak.auth.controller.AuthController` — `GET /auth/me`, `POST /auth/logout` (엔드포인트는 `/api` 프리픽스 없이 작성하는 것으로 팀 컨벤션 확정)
 
 Local email/password login and Redis-backed refresh tokens are not implemented yet — planned as a follow-up.
 

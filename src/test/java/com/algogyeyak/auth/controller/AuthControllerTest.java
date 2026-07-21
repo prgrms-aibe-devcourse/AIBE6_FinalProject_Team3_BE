@@ -29,7 +29,7 @@ class AuthControllerTest {
     void meReturnsCurrentUserWithValidAccessTokenCookie() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
 
-        mockMvc.perform(get("/api/auth/me")
+        mockMvc.perform(get("/auth/me")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
@@ -40,7 +40,7 @@ class AuthControllerTest {
 
     @Test
     void meRejectsRequestWithoutToken() throws Exception {
-        mockMvc.perform(get("/api/auth/me"))
+        mockMvc.perform(get("/auth/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error.code").value("COMMON_401"));
@@ -50,7 +50,7 @@ class AuthControllerTest {
     void logoutClearsCookieForAuthenticatedUser() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
 
-        mockMvc.perform(post("/api/auth/logout")
+        mockMvc.perform(post("/auth/logout")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));

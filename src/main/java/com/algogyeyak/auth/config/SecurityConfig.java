@@ -21,11 +21,11 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 
@@ -67,18 +67,18 @@ public class SecurityConfig {
                         .successHandler(oAuth2AuthenticationSuccessHandler)
                         .failureHandler(oAuth2AuthenticationFailureHandler)
                 )
-                // API 요청(/api/**)은 미인증 시 로그인 페이지로 리다이렉트하지 않고, 공통 응답 포맷(ApiResponse)의 401을 반환한다.
-                // 그 외 경로는 oauth2Login()의 기본 진입점(로그인 페이지 리다이렉트)을 그대로 사용한다.
+                // 이 백엔드는 서버 렌더링 보호 페이지 없이 REST 엔드포인트 + OAuth2 로그인 리다이렉트만 제공한다.
+                // OAuth2 로그인 관련 경로는 위에서 permitAll이라 이 진입점을 타지 않으므로, 미인증 시 항상
+                // 로그인 페이지 리다이렉트 대신 공통 응답 포맷(ApiResponse)의 401을 반환하면 된다.
                 .exceptionHandling(exception -> exception
-                        .defaultAuthenticationEntryPointFor(
-                                (request, response, authException) -> {
-                                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                                    ApiError error = ApiError.of(ErrorCode.UNAUTHORIZED.getCode(), ErrorCode.UNAUTHORIZED.getMessage());
-                                    response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.failure(error)));
-                                },
-                                PathPatternRequestMatcher.withDefaults().matcher("/api/**")
-                        )
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+                            ApiError error = ApiError.of(ErrorCode.UNAUTHORIZED.getCode(), ErrorCode.UNAUTHORIZED.getMessage());
+                            response.getOutputStream().write(
+                                    objectMapper.writeValueAsBytes(ApiResponse.failure(error)));
+                        })
                 )
                 .addFilterBefore(new JwtAuthenticationFilter(jwtProvider), UsernamePasswordAuthenticationFilter.class);
 
