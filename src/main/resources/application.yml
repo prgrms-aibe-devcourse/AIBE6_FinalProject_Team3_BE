@@ -1,3 +1,6 @@
 spring:
   application:
     name: algogyeyak
+
+kakao:
+  rest-api-key: ${KAKAO_REST_API_KEY:dummy-key-for-local}
