@@ -21,8 +21,16 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     @Transactional
     public OAuth2User loadUser(OAuth2UserRequest userRequest) throws OAuth2AuthenticationException {
         OAuth2User oAuth2User = super.loadUser(userRequest);
-
         String registrationId = userRequest.getClientRegistration().getRegistrationId();
+        return processOAuth2User(registrationId, oAuth2User);
+    }
+
+    /**
+     * provider가 이미 응답한 {@link OAuth2User} 속성으로 가입 여부를 확인하고 User를 생성/재사용한다.
+     * {@code super.loadUser(...)}(실제 HTTP 호출)와 분리해둔 덕에, 이 메서드는 속성 Map만 있으면
+     * 테스트에서 HTTP 목킹 없이 바로 호출해 검증할 수 있다.
+     */
+    OAuth2User processOAuth2User(String registrationId, OAuth2User oAuth2User) {
         OAuth2UserInfo userInfo = OAuth2UserInfoFactory.getOAuth2UserInfo(registrationId, oAuth2User.getAttributes());
         AuthProvider provider = AuthProvider.valueOf(registrationId.toUpperCase());
 

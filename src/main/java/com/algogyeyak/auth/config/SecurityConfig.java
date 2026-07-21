@@ -56,10 +56,13 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/oauth2/**", "/login/**",
                                 "/swagger-ui/**", "/v3/api-docs/**",
-                                "/actuator/health"
+                                "/actuator/health", "/h2-console/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
+                // H2 콘솔은 내부적으로 프레임(iframe)을 사용하는데, 기본 X-Frame-Options: DENY가 이를 막는다.
+                // 로컬 개발 편의를 위한 설정이라 H2 콘솔 경로에 한해 sameOrigin으로 완화한다.
+                .headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()))
                 .oauth2Login(oauth2 -> oauth2
                         .authorizationEndpoint(endpoint -> endpoint
                                 .authorizationRequestRepository(cookieAuthorizationRequestRepository))
