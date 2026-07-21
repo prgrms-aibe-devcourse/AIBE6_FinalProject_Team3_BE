@@ -29,10 +29,10 @@
 ./gradlew.bat test       # 전체 테스트
 
 # 단일 테스트 클래스
-./gradlew.bat test --tests "com.ll.algogyeyak.AlgogyeyakApplicationTests"
+./gradlew.bat test --tests "com.algogyeyak.AlgogyeyakApplicationTests"
 
 # 단일 테스트 메서드
-./gradlew.bat test --tests "com.ll.algogyeyak.AlgogyeyakApplicationTests.contextLoads"
+./gradlew.bat test --tests "com.algogyeyak.AlgogyeyakApplicationTests.contextLoads"
 ```
 
 Windows 환경이므로 `gradlew.bat`을 사용합니다.
@@ -43,11 +43,21 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 
 ## 알아둘 점
 
-메인 애플리케이션 패키지는 `com.algogyeyak`(`AlgogyeyakApplication.java`)인데, 기존 테스트는 `com.ll.algogyeyak`(Gradle `group`과 동일) 아래에 있습니다. 새 클래스를 추가하기 전에 팀 내에서 어느 패키지 컨벤션을 따를지 먼저 확인하세요.
+패키지 컨벤션은 `com.algogyeyak`(`AlgogyeyakApplication.java`)로 확정되었습니다. Gradle `group`(`com.ll`)과는 무관하니 새 클래스는 전부 `com.algogyeyak` 하위에 작성하세요.
 
 ## Current state
 
-Spring Initializr로 생성된 직후 단계입니다. 컨트롤러/서비스/리포지토리/엔티티/시큐리티 설정이 아직 없고, `contextLoads()` 플레이스홀더 테스트만 존재합니다.
+구글/카카오 OAuth2 로그인(Access Token 발급까지, Refresh Token은 아직 미구현)이 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(JWT 발급/검증/필터), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 JWT를 httpOnly 쿠키로 전달), `com.algogyeyak.auth.controller.AuthController`(`GET /api/auth/me`, `POST /api/auth/logout`). 로컬 이메일/비밀번호 로그인과 Redis 기반 Refresh Token은 다음 단계로 남아 있습니다.
+
+실제 구글/카카오 로그인을 로컬에서 테스트하려면 아래 환경변수가 필요합니다 (미설정 시 더미 값으로 기동은 되지만 실제 소셜 로그인은 동작하지 않습니다):
+
+| 환경변수 | 설명 |
+| --- | --- |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Cloud Console에서 발급 |
+| `KAKAO_CLIENT_ID` / `KAKAO_CLIENT_SECRET` | Kakao Developers에서 발급 |
+| `JWT_SECRET` | HS256 서명용 시크릿 (최소 32바이트 랜덤 문자열) |
+| `OAUTH2_REDIRECT_URI` | 로그인 성공 후 리다이렉트할 프론트엔드 콜백 URL (기본값 `http://localhost:3000/oauth/callback`) |
+| `CORS_ALLOWED_ORIGINS` | 허용할 프론트엔드 origin (기본값 `http://localhost:3000`) |
 
 ## Docs
 
