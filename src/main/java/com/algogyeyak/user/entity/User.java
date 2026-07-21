@@ -1,8 +1,8 @@
 package com.algogyeyak.user.entity;
 
-import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.user.enums.UserStatus;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -10,11 +10,15 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "users")
+@Table(name = "users", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_user_provider_provider_id", columnNames = {"provider", "provider_id"})
+})
+@EntityListeners(AuditingEntityListener.class)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User {
@@ -33,32 +37,47 @@ public class User {
     @Column(unique = true, nullable = false)
     private String nickname;
 
+    @Column(name = "profile_image_url")
     private String profileImageUrl;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private UserStatus status;
+    @Column(nullable = false, length = 20)
+    private AuthProvider provider;
+
+    @Column(name = "provider_id", nullable = false)
+    private String providerId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Role role;
 
     @CreatedDate
+    @Column(updatable = false)
     private LocalDateTime createdAt;
 
     @LastModifiedDate
     private LocalDateTime updatedAt;
 
     @Builder
-    private User(String email, String passwordHash, String nickname, UserStatus status) {
+    private User(String email, String nickname, String profileImageUrl, AuthProvider provider, String providerId, Role role) {
         this.email = email;
         this.passwordHash = passwordHash;
         this.nickname = nickname;
         this.status = status;
-    }
-
-    public void updateNickname(String nickname) {
-        this.nickname = nickname;
-    }
-
-    public void updateProfileImageUrl(String profileImageUrl) {
         this.profileImageUrl = profileImageUrl;
+        this.provider = provider;
+        this.providerId = providerId;
+        this.role = role;
+    }
+
+    public static User createOAuthUser(String email, String nickname, String profileImageUrl, AuthProvider provider, String providerId) {
+        return new User(email, nickname, profileImageUrl, provider, providerId, Role.USER);
+    }
+
+    public void updateProfile(String nickname, String profileImageUrl) {
+        this.nickname = nickname;
     }
 
     public boolean isWithdrawn() {

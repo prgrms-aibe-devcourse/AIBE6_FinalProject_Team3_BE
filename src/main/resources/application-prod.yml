@@ -1,3 +1,22 @@
 spring:
   application:
     name: algogyeyak
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+          kakao:
+            client-id: ${KAKAO_CLIENT_ID}
+            client-secret: ${KAKAO_CLIENT_SECRET}
+
+# 운영 프로필: dummy 기본값을 제공하지 않아, 아래 환경변수가 없으면 기동 자체가 실패한다 (fail-fast).
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+  oauth2:
+    state-signing-key: ${OAUTH2_STATE_SIGNING_KEY}
+  cookie:
+    secure: ${COOKIE_SECURE:true}
