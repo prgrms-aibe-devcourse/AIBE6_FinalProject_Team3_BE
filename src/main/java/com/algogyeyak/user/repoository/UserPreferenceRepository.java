@@ -1,6 +1,6 @@
-package com.algogyeyak.users.repoository;
+package com.algogyeyak.user.repoository;
 
-import com.algogyeyak.users.entity.UserPreference;
+import com.algogyeyak.user.entity.UserPreference;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;

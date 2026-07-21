@@ -1,9 +1,9 @@
-package com.algogyeyak.users.controller;
+package com.algogyeyak.user.controller;
 
-import com.algogyeyak.users.dto.ProfileRegisterRequest;
-import com.algogyeyak.users.dto.ProfileUpdateRequest;
-import com.algogyeyak.users.dto.UserProfileResponse;
-import com.algogyeyak.users.service.UserService;
+import com.algogyeyak.user.dto.ProfileRegisterRequest;
+import com.algogyeyak.user.dto.ProfileUpdateRequest;
+import com.algogyeyak.user.dto.UserProfileResponse;
+import com.algogyeyak.user.service.UserService;
 import com.algogyeyak.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

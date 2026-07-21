@@ -1,4 +1,4 @@
-package com.algogyeyak.users.enums;
+package com.algogyeyak.user.enums;
 
 public enum UserStatus {
     ACTIVE, WITHDRAWN

@@ -1,6 +1,6 @@
-package com.algogyeyak.users.repoository;
+package com.algogyeyak.user.repoository;
 
-import com.algogyeyak.users.entity.User;
+import com.algogyeyak.user.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface UserRepository extends JpaRepository<User, Long> {

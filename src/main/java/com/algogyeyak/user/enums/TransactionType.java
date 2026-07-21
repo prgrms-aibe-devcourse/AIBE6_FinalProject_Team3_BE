@@ -1,4 +1,4 @@
-package com.algogyeyak.users.enums;
+package com.algogyeyak.user.enums;
 
 public enum TransactionType {
     JEONSE, WOLSE, MAEMAE

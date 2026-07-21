@@ -1,4 +1,4 @@
-package com.algogyeyak.users.dto;
+package com.algogyeyak.user.dto;
 
 import lombok.Builder;
 import lombok.Getter;

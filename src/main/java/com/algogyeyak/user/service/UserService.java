@@ -1,12 +1,12 @@
-package com.algogyeyak.users.service;
+package com.algogyeyak.user.service;
 
-import com.algogyeyak.users.dto.ProfileRegisterRequest;
-import com.algogyeyak.users.dto.ProfileUpdateRequest;
-import com.algogyeyak.users.dto.UserProfileResponse;
-import com.algogyeyak.users.entity.User;
-import com.algogyeyak.users.entity.UserPreference;
-import com.algogyeyak.users.repoository.UserPreferenceRepository;
-import com.algogyeyak.users.repoository.UserRepository;
+import com.algogyeyak.user.dto.ProfileRegisterRequest;
+import com.algogyeyak.user.dto.ProfileUpdateRequest;
+import com.algogyeyak.user.dto.UserProfileResponse;
+import com.algogyeyak.user.entity.User;
+import com.algogyeyak.user.entity.UserPreference;
+import com.algogyeyak.user.repoository.UserPreferenceRepository;
+import com.algogyeyak.user.repoository.UserRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;

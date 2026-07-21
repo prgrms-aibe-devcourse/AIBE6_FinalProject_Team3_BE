@@ -1,6 +1,6 @@
-package com.algogyeyak.users.entity;
+package com.algogyeyak.user.entity;
 
-import com.algogyeyak.users.enums.TransactionType;
+import com.algogyeyak.user.enums.TransactionType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;

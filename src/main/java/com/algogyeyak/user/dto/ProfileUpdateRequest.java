@@ -1,6 +1,6 @@
-package com.algogyeyak.users.dto;
+package com.algogyeyak.user.dto;
 
-import com.algogyeyak.users.enums.TransactionType;
+import com.algogyeyak.user.enums.TransactionType;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;

@@ -1,6 +1,6 @@
-package com.algogyeyak.users.entity;
+package com.algogyeyak.user.entity;
 
-import com.algogyeyak.users.enums.UserStatus;
+import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import jakarta.persistence.*;
