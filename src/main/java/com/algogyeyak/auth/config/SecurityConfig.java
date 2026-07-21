@@ -6,11 +6,16 @@ import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CustomOAuth2UserService;
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.response.ApiError;
+import com.algogyeyak.global.response.ApiResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -34,6 +39,9 @@ public class SecurityConfig {
     private final OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
     private final CookieAuthorizationRequestRepository cookieAuthorizationRequestRepository;
     private final JwtProvider jwtProvider;
+
+    // 이 클래스 내부에서만 쓰는 단순 직렬화 용도라 Boot이 자동 구성하는 ObjectMapper 빈에 의존하지 않는다.
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
@@ -59,12 +67,16 @@ public class SecurityConfig {
                         .successHandler(oAuth2AuthenticationSuccessHandler)
                         .failureHandler(oAuth2AuthenticationFailureHandler)
                 )
-                // API 요청(/api/**)은 미인증 시 로그인 페이지로 리다이렉트하지 않고 401을 반환한다.
+                // API 요청(/api/**)은 미인증 시 로그인 페이지로 리다이렉트하지 않고, 공통 응답 포맷(ApiResponse)의 401을 반환한다.
                 // 그 외 경로는 oauth2Login()의 기본 진입점(로그인 페이지 리다이렉트)을 그대로 사용한다.
                 .exceptionHandling(exception -> exception
                         .defaultAuthenticationEntryPointFor(
-                                (request, response, authException) ->
-                                        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized"),
+                                (request, response, authException) -> {
+                                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                                    ApiError error = ApiError.of(ErrorCode.UNAUTHORIZED.getCode(), ErrorCode.UNAUTHORIZED.getMessage());
+                                    response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.failure(error)));
+                                },
                                 PathPatternRequestMatcher.withDefaults().matcher("/api/**")
                         )
                 )

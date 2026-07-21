@@ -16,7 +16,9 @@ spring:
             authorization-grant-type: authorization_code
             redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
             client-name: Kakao
-            scope: profile_nickname, account_email
+            # account_email은 카카오 콘솔에서 동의항목이 활성화(비즈니스 앱 검수 등)된 이후에만 요청 가능.
+            # 활성화 전에 요청하면 카카오가 인가 요청 자체를 거부한다 (KOE010 등). 승인되면 다시 추가할 것.
+            scope: profile_nickname
         provider:
           kakao:
             authorization-uri: https://kauth.kakao.com/oauth/authorize

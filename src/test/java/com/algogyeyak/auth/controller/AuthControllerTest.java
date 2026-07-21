@@ -32,15 +32,18 @@ class AuthControllerTest {
         mockMvc.perform(get("/api/auth/me")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.userId").value(1))
-                .andExpect(jsonPath("$.email").value("test@example.com"))
-                .andExpect(jsonPath("$.role").value("USER"));
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.userId").value(1))
+                .andExpect(jsonPath("$.data.email").value("test@example.com"))
+                .andExpect(jsonPath("$.data.role").value("USER"));
     }
 
     @Test
     void meRejectsRequestWithoutToken() throws Exception {
         mockMvc.perform(get("/api/auth/me"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("COMMON_401"));
     }
 
     @Test
@@ -49,6 +52,7 @@ class AuthControllerTest {
 
         mockMvc.perform(post("/api/auth/logout")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
     }
 }

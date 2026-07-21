@@ -3,6 +3,7 @@ package com.algogyeyak.auth.controller;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.auth.oauth.CookieUtils;
+import com.algogyeyak.global.response.ApiResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -25,13 +26,14 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<MeResponse> me(@AuthenticationPrincipal JwtUserPrincipal principal) {
-        return ResponseEntity.ok(new MeResponse(principal.userId(), principal.email(), principal.role().name()));
+    public ResponseEntity<ApiResponse<MeResponse>> me(@AuthenticationPrincipal JwtUserPrincipal principal) {
+        MeResponse body = new MeResponse(principal.userId(), principal.email(), principal.role().name());
+        return ResponseEntity.ok(ApiResponse.success(body));
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(HttpServletResponse response) {
+    public ResponseEntity<ApiResponse<Void>> logout(HttpServletResponse response) {
         cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
     }
 }

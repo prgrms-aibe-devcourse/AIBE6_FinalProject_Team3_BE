@@ -16,5 +16,7 @@ spring:
 app:
   jwt:
     secret: ${JWT_SECRET}
+  oauth2:
+    state-signing-key: ${OAUTH2_STATE_SIGNING_KEY}
   cookie:
     secure: ${COOKIE_SECURE:true}

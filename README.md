@@ -56,8 +56,10 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Cloud Console에서 발급 |
 | `KAKAO_CLIENT_ID` / `KAKAO_CLIENT_SECRET` | Kakao Developers에서 발급 |
 | `JWT_SECRET` | HS256 서명용 시크릿 (최소 32바이트 랜덤 문자열) |
+| `OAUTH2_STATE_SIGNING_KEY` | OAuth2 인가 요청을 담는 쿠키(`oauth2_auth_request`)의 HMAC 서명 키 (최소 32바이트 랜덤 문자열, `JWT_SECRET`과는 다른 값 권장) |
 | `OAUTH2_REDIRECT_URI` | 로그인 성공 후 리다이렉트할 프론트엔드 콜백 URL (기본값 `http://localhost:3000/oauth/callback`) |
 | `CORS_ALLOWED_ORIGINS` | 허용할 프론트엔드 origin (기본값 `http://localhost:3000`) |
+| `COOKIE_SECURE` | `access_token` 등 쿠키의 Secure 속성 (dev 기본값 `false`, prod 기본값 `true`) |
 
 ## Docs
 
