@@ -15,6 +15,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/auth")
 public class AuthController {
 
+    private final CookieUtils cookieUtils;
+
+    public AuthController(CookieUtils cookieUtils) {
+        this.cookieUtils = cookieUtils;
+    }
+
     public record MeResponse(Long userId, String email, String role) {
     }
 
@@ -25,7 +31,7 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(HttpServletResponse response) {
-        CookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
+        cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
         return ResponseEntity.noContent().build();
     }
 }

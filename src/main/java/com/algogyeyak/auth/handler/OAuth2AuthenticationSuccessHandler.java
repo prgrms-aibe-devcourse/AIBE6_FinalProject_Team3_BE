@@ -22,6 +22,7 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
 
     private final JwtProvider jwtProvider;
     private final CookieAuthorizationRequestRepository authorizationRequestRepository;
+    private final CookieUtils cookieUtils;
 
     @Value("${app.oauth2.authorized-redirect-uri}")
     private String authorizedRedirectUri;
@@ -32,7 +33,7 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
         User user = ((CustomOAuth2User) authentication.getPrincipal()).getUser();
 
         String accessToken = jwtProvider.createAccessToken(user.getId(), user.getEmail(), user.getRole());
-        CookieUtils.addCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, accessToken,
+        cookieUtils.addCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, accessToken,
                 (int) jwtProvider.getAccessTokenValiditySeconds());
 
         authorizationRequestRepository.removeAuthorizationRequest(request, response);

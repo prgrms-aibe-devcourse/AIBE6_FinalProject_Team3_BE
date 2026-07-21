@@ -6,6 +6,7 @@ import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CustomOAuth2UserService;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -15,6 +16,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -56,6 +58,15 @@ public class SecurityConfig {
                         .userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))
                         .successHandler(oAuth2AuthenticationSuccessHandler)
                         .failureHandler(oAuth2AuthenticationFailureHandler)
+                )
+                // API 요청(/api/**)은 미인증 시 로그인 페이지로 리다이렉트하지 않고 401을 반환한다.
+                // 그 외 경로는 oauth2Login()의 기본 진입점(로그인 페이지 리다이렉트)을 그대로 사용한다.
+                .exceptionHandling(exception -> exception
+                        .defaultAuthenticationEntryPointFor(
+                                (request, response, authException) ->
+                                        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized"),
+                                PathPatternRequestMatcher.withDefaults().matcher("/api/**")
+                        )
                 )
                 .addFilterBefore(new JwtAuthenticationFilter(jwtProvider), UsernamePasswordAuthenticationFilter.class);
 

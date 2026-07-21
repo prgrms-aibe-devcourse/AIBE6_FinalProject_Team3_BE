@@ -39,9 +39,8 @@ class AuthControllerTest {
 
     @Test
     void meRejectsRequestWithoutToken() throws Exception {
-        // oauth2Login()의 기본 진입점은 미인증 요청을 로그인(인가) 페이지로 리다이렉트한다.
         mockMvc.perform(get("/api/auth/me"))
-                .andExpect(status().is3xxRedirection());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
