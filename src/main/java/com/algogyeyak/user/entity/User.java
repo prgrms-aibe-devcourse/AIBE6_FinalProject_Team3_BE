@@ -77,10 +77,6 @@ public class User {
         return new User(email, nickname, profileImageUrl, provider, providerId, Role.USER);
     }
 
-    public void updateProfile(String nickname, String profileImageUrl) {
-        this.nickname = nickname;
-    }
-
     public void updateNickname(@Size(min = 2, max = 20, message = "닉네임은 2~20자여야 합니다.") String nickname) {
         this.nickname = nickname;
     }

@@ -44,12 +44,10 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         return new CustomOAuth2User(user, oAuth2User.getAttributes());
     }
 
+    // 재로그인 시 기존 회원의 닉네임/프로필 사진은 OAuth 제공자 값으로 덮어쓰지 않는다.
+    // 최초 가입 이후에는 프로필 등록/수정 화면에서 관리하는 값이 우선하므로 그대로 재사용한다.
     private User findOrCreateUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
         return userRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
-                .map(existing -> {
-                    existing.updateProfile(nickname, userInfo.getProfileImageUrl());
-                    return existing;
-                })
                 .orElseGet(() -> createUser(provider, userInfo, nickname));
     }
 

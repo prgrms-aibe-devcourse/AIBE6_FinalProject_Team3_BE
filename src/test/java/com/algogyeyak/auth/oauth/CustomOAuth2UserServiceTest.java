@@ -72,18 +72,20 @@ class CustomOAuth2UserServiceTest {
     }
 
     @Test
-    void reusesExistingUserAndUpdatesProfileWithoutSaving() {
+    void reusesExistingUserWithoutOverwritingCustomizedProfile() {
         UserRepository repository = mock(UserRepository.class);
         CustomOAuth2UserService service = new CustomOAuth2UserService(repository);
 
-        User existing = User.createOAuthUser("old@kakao.com", "옛날닉네임", "http://old", AuthProvider.KAKAO, "123");
+        // 로그인 이후 프로필 등록/수정 화면에서 닉네임과 사진을 직접 바꾼 상태를 가정한다.
+        User existing = User.createOAuthUser("old@kakao.com", "커스텀닉네임", "http://custom", AuthProvider.KAKAO, "123");
         when(repository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.of(existing));
 
         OAuth2User result = service.processOAuth2User("kakao", kakaoOAuth2User(123L, "새닉네임", "http://new", "old@kakao.com"));
 
+        // 재로그인 시 OAuth 제공자 값(새닉네임/http://new)이 아니라 기존에 커스터마이징한 값이 그대로 유지되어야 한다.
         User user = ((CustomOAuth2User) result).getUser();
-        assertEquals("새닉네임", user.getNickname());
-        assertEquals("http://new", user.getProfileImageUrl());
+        assertEquals("커스텀닉네임", user.getNickname());
+        assertEquals("http://custom", user.getProfileImageUrl());
 
         verify(repository, never()).saveAndFlush(any(User.class));
     }
