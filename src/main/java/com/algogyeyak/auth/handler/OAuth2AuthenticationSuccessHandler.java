@@ -32,7 +32,7 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
             throws IOException {
         User user = ((CustomOAuth2User) authentication.getPrincipal()).getUser();
 
-        String accessToken = jwtProvider.createAccessToken(user.getId(), user.getEmail(), user.getRole());
+        String accessToken = jwtProvider.createAccessToken(user.getId(), user.getEmail(), user.getNickname(), user.getRole());
         cookieUtils.addCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, accessToken,
                 (int) jwtProvider.getAccessTokenValiditySeconds());
 

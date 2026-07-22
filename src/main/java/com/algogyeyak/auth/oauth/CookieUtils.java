@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.oauth;
 
+import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -9,7 +10,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
+import javax.crypto.SecretKey;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -39,13 +40,15 @@ public class CookieUtils {
     );
 
     private final boolean secureCookie;
-    private final SecretKeySpec signingKey;
+    private final SecretKey signingKey;
 
     public CookieUtils(
             @Value("${app.cookie.secure:false}") boolean secureCookie,
             @Value("${app.oauth2.state-signing-key}") String stateSigningKey) {
         this.secureCookie = secureCookie;
-        this.signingKey = new SecretKeySpec(stateSigningKey.getBytes(StandardCharsets.UTF_8), HMAC_ALGORITHM);
+        // JwtProvider와 동일하게, HS256에 필요한 최소 키 길이(32바이트)를 만족하지 않으면
+        // 여기서 바로 기동 실패(WeakKeyException)하도록 한다 — 조용히 약한 서명 키로 뜨는 것을 방지.
+        this.signingKey = Keys.hmacShaKeyFor(stateSigningKey.getBytes(StandardCharsets.UTF_8));
     }
 
     public static Optional<Cookie> getCookie(HttpServletRequest request, String name) {

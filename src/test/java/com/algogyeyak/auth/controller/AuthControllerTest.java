@@ -27,7 +27,7 @@ class AuthControllerTest {
 
     @Test
     void meReturnsCurrentUserWithValidAccessTokenCookie() throws Exception {
-        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", "테스트유저", Role.USER);
 
         mockMvc.perform(get("/auth/me")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
@@ -35,6 +35,7 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.userId").value(1))
                 .andExpect(jsonPath("$.data.email").value("test@example.com"))
+                .andExpect(jsonPath("$.data.nickname").value("테스트유저"))
                 .andExpect(jsonPath("$.data.role").value("USER"));
     }
 
@@ -48,10 +49,18 @@ class AuthControllerTest {
 
     @Test
     void logoutClearsCookieForAuthenticatedUser() throws Exception {
-        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", "테스트유저", Role.USER);
 
         mockMvc.perform(post("/auth/logout")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void logoutSucceedsEvenWithoutValidToken() throws Exception {
+        // 토큰이 만료/위조되었거나 아예 없어도 로그아웃(쿠키 삭제)은 항상 가능해야 한다.
+        mockMvc.perform(post("/auth/logout"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
     }
