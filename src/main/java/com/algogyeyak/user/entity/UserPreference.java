@@ -1,5 +1,6 @@
 package com.algogyeyak.user.entity;
 
+import com.algogyeyak.user.enums.CurrentStage;
 import com.algogyeyak.user.enums.TransactionType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
@@ -26,12 +27,11 @@ public class UserPreference {
     @Enumerated(EnumType.STRING)
     private TransactionType transactionType;
 
-    // currentStage 값의 종류(예: "자취처음"/"취업준비" 등)가 명세서에 구체적으로
-    // 나열되어 있지 않아 우선 String으로 처리 — 확인 필요
-    private String currentStage;
+    @Enumerated(EnumType.STRING)
+    private CurrentStage currentStage;
 
     @Builder
-    private UserPreference(User user, String interestRegion, TransactionType transactionType, String currentStage) {
+    private UserPreference(User user, String interestRegion, TransactionType transactionType, CurrentStage currentStage) {
         this.user = user;
         this.interestRegion = interestRegion;
         this.transactionType = transactionType;
@@ -46,7 +46,7 @@ public class UserPreference {
         this.transactionType = transactionType;
     }
 
-    public void updateCurrentStage(String currentStage) {
+    public void updateCurrentStage(CurrentStage currentStage) {
         this.currentStage = currentStage;
     }
 }
