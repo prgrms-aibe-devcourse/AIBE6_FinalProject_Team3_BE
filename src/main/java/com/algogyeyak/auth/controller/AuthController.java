@@ -22,12 +22,12 @@ public class AuthController {
         this.cookieUtils = cookieUtils;
     }
 
-    public record MeResponse(Long userId, String email, String role) {
+    public record MeResponse(Long userId, String email, String nickname, String role) {
     }
 
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<MeResponse>> me(@AuthenticationPrincipal JwtUserPrincipal principal) {
-        MeResponse body = new MeResponse(principal.userId(), principal.email(), principal.role().name());
+        MeResponse body = new MeResponse(principal.userId(), principal.email(), principal.nickname(), principal.role().name());
         return ResponseEntity.ok(ApiResponse.success(body));
     }
 
