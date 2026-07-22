@@ -1,6 +1,6 @@
 package com.algogyeyak.auth.jwt;
 
-import com.algogyeyak.user.entity.Role;
+import com.algogyeyak.user.enums.Role;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -26,14 +26,13 @@ public class JwtProvider {
         this.accessTokenValiditySeconds = accessTokenValiditySeconds;
     }
 
-    public String createAccessToken(Long userId, String email, String nickname, Role role) {
+    public String createAccessToken(Long userId, String email, Role role) {
         Instant now = Instant.now();
         Instant expiry = now.plusSeconds(accessTokenValiditySeconds);
 
         return Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim("email", email)
-                .claim("nickname", nickname)
                 .claim("role", role.name())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
