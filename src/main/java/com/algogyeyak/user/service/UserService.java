@@ -1,5 +1,6 @@
 package com.algogyeyak.user.service;
 
+import com.algogyeyak.user.dto.NicknameCheckResponse;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
@@ -26,6 +27,15 @@ public class UserService {
         User user = getActiveUserOrThrow(userId);
         UserPreference preference = userPreferenceRepository.findByUserId(userId).orElse(null);
         return toResponse(user, preference);
+    }
+
+    public NicknameCheckResponse checkNicknameAvailable(Long userId, String nickname) {
+        if (!StringUtils.hasText(nickname)) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "닉네임을 입력해 주세요.");
+        }
+
+        boolean available = !userRepository.existsByNicknameAndIdNot(nickname, userId);
+        return NicknameCheckResponse.builder().available(available).build();
     }
 
     @Transactional

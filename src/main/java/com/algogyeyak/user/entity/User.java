@@ -4,6 +4,7 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.enums.UserStatus;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Size;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -65,7 +66,7 @@ public class User {
         this.email = email;
         this.passwordHash = passwordHash;
         this.nickname = nickname;
-        this.status = status;
+        this.status = UserStatus.ACTIVE;
         this.profileImageUrl = profileImageUrl;
         this.provider = provider;
         this.providerId = providerId;
@@ -78,6 +79,14 @@ public class User {
 
     public void updateProfile(String nickname, String profileImageUrl) {
         this.nickname = nickname;
+    }
+
+    public void updateNickname(@Size(min = 2, max = 20, message = "닉네임은 2~20자여야 합니다.") String nickname) {
+        this.nickname = nickname;
+    }
+
+    public void updateProfileImageUrl(String profileImageUrl) {
+        this.profileImageUrl = profileImageUrl;
     }
 
     public boolean isWithdrawn() {
@@ -93,7 +102,6 @@ public class User {
     public void withdraw() {
         if (isWithdrawn()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "이미 탈퇴한 사용자입니다.");
-            // 409가 더 적합해 보이나 현재 ErrorCode에 CONFLICT가 없어 INVALID_INPUT 사용 — 확인 필요
         }
 
         this.status = UserStatus.WITHDRAWN;

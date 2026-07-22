@@ -1,5 +1,6 @@
 package com.algogyeyak.user.controller;
 
+import com.algogyeyak.user.dto.NicknameCheckResponse;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
@@ -22,6 +23,13 @@ public class UserController {
     public ApiResponse<UserProfileResponse> getMyProfile(
             @AuthenticationPrincipal CustomUserDetails userDetails) {
         return ApiResponse.success(userService.getMyProfile(userDetails.getUserId()));
+    }
+
+    @GetMapping("/nickname-check")
+    public ApiResponse<NicknameCheckResponse> checkNickname(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @RequestParam String nickname) {
+        return ApiResponse.success(userService.checkNicknameAvailable(userDetails.getUserId(), nickname));
     }
 
     @PostMapping("/me/profile")
