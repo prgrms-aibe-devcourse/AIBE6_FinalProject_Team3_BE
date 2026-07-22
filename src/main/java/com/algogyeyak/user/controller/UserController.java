@@ -1,6 +1,7 @@
 package com.algogyeyak.user.controller;
 
 import com.algogyeyak.user.dto.NicknameCheckResponse;
+import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
@@ -21,36 +22,36 @@ public class UserController {
 
     @GetMapping("/me")
     public ApiResponse<UserProfileResponse> getMyProfile(
-            @AuthenticationPrincipal CustomUserDetails userDetails) {
-        return ApiResponse.success(userService.getMyProfile(userDetails.getUserId()));
+            @AuthenticationPrincipal JwtUserPrincipal userDetails) {
+        return ApiResponse.success(userService.getMyProfile(userDetails.userId()));
     }
 
     @GetMapping("/nickname-check")
     public ApiResponse<NicknameCheckResponse> checkNickname(
-            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
             @RequestParam String nickname) {
-        return ApiResponse.success(userService.checkNicknameAvailable(userDetails.getUserId(), nickname));
+        return ApiResponse.success(userService.checkNicknameAvailable(userDetails.userId(), nickname));
     }
 
     @PostMapping("/me/profile")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<UserProfileResponse> registerProfile(
-            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
             @Valid @RequestBody ProfileRegisterRequest request) {
-        return ApiResponse.success(userService.registerProfile(userDetails.getUserId(), request));
+        return ApiResponse.success(userService.registerProfile(userDetails.userId(), request));
     }
 
     @PatchMapping("/me")
     public ApiResponse<UserProfileResponse> updateMyProfile(
-            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
             @Valid @RequestBody ProfileUpdateRequest request) {
-        return ApiResponse.success(userService.updateMyProfile(userDetails.getUserId(), request));
+        return ApiResponse.success(userService.updateMyProfile(userDetails.userId(), request));
     }
 
     @DeleteMapping("/me")
     public ApiResponse<Void> withdraw(
-            @AuthenticationPrincipal CustomUserDetails userDetails) {
-        userService.withdraw(userDetails.getUserId());
+            @AuthenticationPrincipal JwtUserPrincipal userDetails) {
+        userService.withdraw(userDetails.userId());
         return ApiResponse.successWithoutData();
     }
 }

@@ -1,4 +1,4 @@
-package com.algogyeyak.user.repoository;
+package com.algogyeyak.user.repository;
 
 import com.algogyeyak.user.entity.UserPreference;
 import org.springframework.data.jpa.repository.JpaRepository;
