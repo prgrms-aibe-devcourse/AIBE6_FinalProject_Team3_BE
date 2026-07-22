@@ -2,6 +2,8 @@ package com.algogyeyak.user.entity;
 
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.user.enums.AuthProvider;
+import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Size;

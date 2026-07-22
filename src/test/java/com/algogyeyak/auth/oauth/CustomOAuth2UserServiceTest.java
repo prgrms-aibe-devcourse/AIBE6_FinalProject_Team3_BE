@@ -1,6 +1,6 @@
 package com.algogyeyak.auth.oauth;
 
-import com.algogyeyak.user.entity.AuthProvider;
+import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;

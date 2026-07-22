@@ -2,8 +2,8 @@ package com.algogyeyak.auth.controller;
 
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
-import com.algogyeyak.user.entity.AuthProvider;
-import com.algogyeyak.user.entity.Role;
+import com.algogyeyak.user.enums.AuthProvider;
+import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;

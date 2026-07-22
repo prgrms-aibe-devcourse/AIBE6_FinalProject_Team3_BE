@@ -1,6 +1,6 @@
 package com.algogyeyak.user.repository;
 
-import com.algogyeyak.user.entity.AuthProvider;
+import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 

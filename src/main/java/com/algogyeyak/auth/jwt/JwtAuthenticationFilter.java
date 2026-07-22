@@ -1,6 +1,6 @@
 package com.algogyeyak.auth.jwt;
 
-import com.algogyeyak.user.entity.Role;
+import com.algogyeyak.user.enums.Role;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

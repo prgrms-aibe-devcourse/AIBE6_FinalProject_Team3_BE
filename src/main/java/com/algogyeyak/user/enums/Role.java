@@ -1,4 +1,4 @@
-package com.algogyeyak.user.entity;
+package com.algogyeyak.user.enums;
 
 public enum Role {
     USER,
