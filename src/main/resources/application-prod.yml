@@ -11,6 +11,17 @@ spring:
           kakao:
             client-id: ${KAKAO_CLIENT_ID}
             client-secret: ${KAKAO_CLIENT_SECRET}
+  # H2 콘솔은 로컬 개발 편의용. 운영에서 인증 없이 DB 콘솔이 열려 있으면 안 되므로 명시적으로 끈다.
+  h2:
+    console:
+      enabled: false
+
+# 운영에서 API 문서/Swagger UI를 통해 전체 엔드포인트 구조가 노출되지 않도록 끈다.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
 
 # 운영 프로필: dummy 기본값을 제공하지 않아, 아래 환경변수가 없으면 기동 자체가 실패한다 (fail-fast).
 app:
@@ -18,5 +29,7 @@ app:
     secret: ${JWT_SECRET}
   oauth2:
     state-signing-key: ${OAUTH2_STATE_SIGNING_KEY}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
   cookie:
     secure: ${COOKIE_SECURE:true}
