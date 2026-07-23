@@ -7,14 +7,19 @@ import java.util.List;
 public record ApiError(
         String code,
         String message,
-        List<FieldError> fieldErrors
+        List<FieldError> fieldErrors,
+        String fallback
 ) {
     public static ApiError of(String code, String message) {
-        return new ApiError(code, message, null);
+        return new ApiError(code, message, null, null);
     }
 
     public static ApiError of(String code, String message, List<FieldError> fieldErrors) {
-        return new ApiError(code, message, fieldErrors);
+        return new ApiError(code, message, fieldErrors, null);
+    }
+
+    public static ApiError ofFallback(String code, String message, String fallback) {
+        return new ApiError(code, message, null, fallback);
     }
 
     public record FieldError(

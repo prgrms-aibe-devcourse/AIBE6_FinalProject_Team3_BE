@@ -18,6 +18,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -25,8 +26,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException exception) {
-        ErrorCode errorCode = exception.getErrorCode();
-        return buildErrorResponse(errorCode, exception.getMessage());
+        ApiError error = exception.getFallback() != null
+                ? ApiError.ofFallback(exception.getErrorCode().getCode(), exception.getMessage(), exception.getFallback())
+                : ApiError.of(exception.getErrorCode().getCode(), exception.getMessage());
+        return ResponseEntity.status(exception.getStatus()).body(ApiResponse.failure(error));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -60,6 +63,14 @@ public class GlobalExceptionHandler {
             MissingServletRequestParameterException exception
     ) {
         String message = exception.getParameterName() + " 파라미터는 필수입니다.";
+        return buildErrorResponse(ErrorCode.INVALID_INPUT, message);
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingServletRequestPartException(
+            MissingServletRequestPartException exception
+    ) {
+        String message = exception.getRequestPartName() + " 파트는 필수입니다.";
         return buildErrorResponse(ErrorCode.INVALID_INPUT, message);
     }
 
