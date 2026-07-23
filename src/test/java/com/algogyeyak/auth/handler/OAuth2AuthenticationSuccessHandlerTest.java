@@ -75,7 +75,7 @@ class OAuth2AuthenticationSuccessHandlerTest {
     }
 
     @Test
-    void issuesRefreshTokenCookieScopedToAuthPath() throws Exception {
+    void issuesRefreshTokenCookieScopedToRootPath() throws Exception {
         ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login/success");
         when(refreshTokenService.issue(any(User.class))).thenReturn("raw-refresh-token");
         when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
@@ -84,7 +84,9 @@ class OAuth2AuthenticationSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, authenticationFor(1L));
 
+        // path를 /auth로 좁히면 프론트 미들웨어가 보호 페이지 요청에서 이 쿠키를 아예 못 읽으므로,
+        // Access Token과 동일하게 "/"로 발급한다 (4-인자 addCookie는 CookieUtils에서 path="/"로 기본 처리).
         verify(cookieUtils).addCookie(eq(response), eq(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME),
-                eq("raw-refresh-token"), eq(1209600), eq("/auth"));
+                eq("raw-refresh-token"), eq(1209600));
     }
 }

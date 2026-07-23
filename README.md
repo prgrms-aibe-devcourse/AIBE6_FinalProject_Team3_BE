@@ -47,7 +47,7 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 
 ## Current state
 
-구글/카카오 OAuth2 로그인 및 Refresh Token이 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(Access Token 발급/검증/필터), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.token`(`RefreshTokenService`/`RefreshTokenRepository` — Redis 없이 DB로 관리, 유저당 1개 세션만 유지하며 재로그인/재발급 시 기존 행을 덮어씀), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 Access/Refresh Token을 httpOnly 쿠키로 전달, Refresh 쿠키는 `/auth` 경로로 제한), `com.algogyeyak.auth.controller.AuthController`(`GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`). 로컬 이메일/비밀번호 로그인은 다음 단계로 남아 있습니다.
+구글/카카오 OAuth2 로그인 및 Refresh Token이 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(Access Token 발급/검증/필터), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.token`(`RefreshTokenService`/`RefreshTokenRepository` — Redis 없이 DB로 관리, 유저당 1개 세션만 유지하며 재로그인/재발급 시 기존 행을 덮어씀), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 Access/Refresh Token을 httpOnly 쿠키로 전달, 둘 다 path `/` — 프론트 미들웨어가 보호 페이지 요청에서도 Refresh 쿠키를 읽어야 해서 path를 좁히지 않음), `com.algogyeyak.auth.controller.AuthController`(`GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`). 로컬 이메일/비밀번호 로그인은 다음 단계로 남아 있습니다.
 
 실제 구글/카카오 로그인을 로컬에서 테스트하려면 아래 환경변수가 필요합니다 (미설정 시 더미 값으로 기동은 되지만 실제 소셜 로그인은 동작하지 않습니다):
 
@@ -57,9 +57,13 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 | `KAKAO_CLIENT_ID` / `KAKAO_CLIENT_SECRET` | Kakao Developers에서 발급 |
 | `JWT_SECRET` | HS256 서명용 시크릿 (최소 32바이트 랜덤 문자열) |
 | `OAUTH2_STATE_SIGNING_KEY` | OAuth2 인가 요청을 담는 쿠키(`oauth2_auth_request`)의 HMAC 서명 키 (최소 32바이트 랜덤 문자열, `JWT_SECRET`과는 다른 값 권장) |
-| `OAUTH2_REDIRECT_URI` | 로그인 성공 후 리다이렉트할 프론트엔드 콜백 URL (기본값 `http://localhost:3000/oauth/callback`) |
-| `CORS_ALLOWED_ORIGINS` | 허용할 프론트엔드 origin (기본값 `http://localhost:3000`) |
+| `OAUTH2_REDIRECT_URI` | 로그인 성공 후 리다이렉트할 프론트엔드 콜백 URL (기본값 `http://app.localhost:3000/oauth/callback`) |
+| `CORS_ALLOWED_ORIGINS` | 허용할 프론트엔드 origin (기본값 `http://app.localhost:3000`) |
 | `COOKIE_SECURE` | `access_token` 등 쿠키의 Secure 속성 (dev 기본값 `false`, prod 기본값 `true`) |
+| `COOKIE_SAME_SITE` | 쿠키의 SameSite 속성 (기본값 `Lax`) |
+| `COOKIE_DOMAIN` | 쿠키의 Domain 속성 — 프론트/백엔드를 커스텀 서브도메인으로 배포할 때 `.example.com`처럼 지정 (dev 기본값 `.localhost`, prod 기본값 비어있음=host-only) |
+
+로컬에서는 프론트를 `http://localhost:3000`이 아니라 **`http://app.localhost:3000`**으로 접속해야 합니다(Chrome/Firefox는 `*.localhost`를 자동으로 `127.0.0.1`로 해석하며 hosts 파일 수정이 필요 없습니다). 백엔드도 `http://api.localhost:8080`으로 접속 가능합니다. 이렇게 해야 커스텀 서브도메인 배포 구조(`app.example.com`/`api.example.com` + `Domain=.example.com` 쿠키)를 로컬에서부터 동일하게 검증할 수 있습니다. 카카오/구글 개발자 콘솔의 Redirect URI에도 `http://api.localhost:8080/login/oauth2/code/{google|kakao}`를 등록해야 실제 소셜 로그인이 동작합니다.
 
 ## Docs
 

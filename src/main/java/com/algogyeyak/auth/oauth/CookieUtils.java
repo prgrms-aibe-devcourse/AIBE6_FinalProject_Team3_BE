@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import javax.crypto.Mac;
 import javax.crypto.SecretKey;
@@ -40,12 +41,18 @@ public class CookieUtils {
     );
 
     private final boolean secureCookie;
+    private final String sameSite;
+    private final String cookieDomain;
     private final SecretKey signingKey;
 
     public CookieUtils(
             @Value("${app.cookie.secure:false}") boolean secureCookie,
+            @Value("${app.cookie.same-site:Lax}") String sameSite,
+            @Value("${app.cookie.domain:}") String cookieDomain,
             @Value("${app.oauth2.state-signing-key}") String stateSigningKey) {
         this.secureCookie = secureCookie;
+        this.sameSite = sameSite;
+        this.cookieDomain = cookieDomain;
         // JwtProvider와 동일하게, HS256에 필요한 최소 키 길이(32바이트)를 만족하지 않으면
         // 여기서 바로 기동 실패(WeakKeyException)하도록 한다 — 조용히 약한 서명 키로 뜨는 것을 방지.
         this.signingKey = Keys.hmacShaKeyFor(stateSigningKey.getBytes(StandardCharsets.UTF_8));
@@ -70,29 +77,38 @@ public class CookieUtils {
 
     // Refresh Token처럼 더 민감하고 수명이 긴 쿠키는 path를 좁혀 노출 범위를 줄일 수 있게 오버로드한다.
     public void addCookie(HttpServletResponse response, String name, String value, int maxAgeSeconds, String path) {
-        ResponseCookie cookie = ResponseCookie.from(name, value)
+        ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(name, value)
                 .path(path)
                 .httpOnly(true)
                 .secure(secureCookie)
-                .sameSite("Lax")
-                .maxAge(maxAgeSeconds)
-                .build();
-        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+                .sameSite(sameSite)
+                .maxAge(maxAgeSeconds);
+        applyDomain(builder);
+        response.addHeader(HttpHeaders.SET_COOKIE, builder.build().toString());
     }
 
     public void deleteCookie(HttpServletResponse response, String name) {
         deleteCookie(response, name, "/");
     }
 
-    // 쿠키 삭제는 저장할 때와 동일한 path로 Set-Cookie를 내려줘야 브라우저가 실제로 지운다.
+    // 쿠키 삭제는 저장할 때와 동일한 path/domain으로 Set-Cookie를 내려줘야 브라우저가 실제로 지운다.
     public void deleteCookie(HttpServletResponse response, String name, String path) {
-        ResponseCookie cookie = ResponseCookie.from(name, "")
+        ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(name, "")
                 .path(path)
                 .httpOnly(true)
                 .secure(secureCookie)
-                .maxAge(0)
-                .build();
-        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+                .maxAge(0);
+        applyDomain(builder);
+        response.addHeader(HttpHeaders.SET_COOKIE, builder.build().toString());
+    }
+
+    // domain이 비어있으면(로컬 개발 등) 아예 지정하지 않아 host-only 쿠키로 남긴다 —
+    // 프론트/백엔드를 커스텀 서브도메인(app.example.com/api.example.com)으로 배포할 때만
+    // COOKIE_DOMAIN=.example.com 형태로 설정해 서브도메인 간 쿠키 공유를 켠다.
+    private void applyDomain(ResponseCookie.ResponseCookieBuilder builder) {
+        if (StringUtils.hasText(cookieDomain)) {
+            builder.domain(cookieDomain);
+        }
     }
 
     /**

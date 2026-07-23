@@ -46,11 +46,14 @@ public class AuthController {
     // 항상 최신 값이 반영되도록 매 요청마다 User 엔티티에서 조회한다.
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<MeResponse>> me(@AuthenticationPrincipal JwtUserPrincipal principal) {
-        User user = userRepository.findById(principal.userId()).orElse(null);
-        String nickname = user != null ? user.getNickname() : null;
-        String profileImageUrl = user != null ? user.getProfileImageUrl() : null;
+        // Access Token 자체는 유효해도 그 사이 탈퇴했거나 계정이 삭제된 사용자라면 세션을 더 이상
+        // 유효하다고 취급하면 안 된다 — 실제 계정 없이 success 응답을 내려주는 것을 방지한다.
+        User user = userRepository.findById(principal.userId())
+                .filter(found -> !found.isWithdrawn())
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
+
         MeResponse body = new MeResponse(
-                principal.userId(), principal.email(), nickname, profileImageUrl, principal.role().name());
+                principal.userId(), principal.email(), user.getNickname(), user.getProfileImageUrl(), principal.role().name());
         return ResponseEntity.ok(ApiResponse.success(body));
     }
 
@@ -60,7 +63,7 @@ public class AuthController {
                 .ifPresent(cookie -> refreshTokenService.revoke(cookie.getValue()));
 
         cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
-        cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "/auth");
+        cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
         return ResponseEntity.ok(ApiResponse.successWithoutData());
     }
 
@@ -78,7 +81,7 @@ public class AuthController {
         cookieUtils.addCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, accessToken,
                 (int) jwtProvider.getAccessTokenValiditySeconds());
         cookieUtils.addCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, result.rawToken(),
-                (int) refreshTokenService.getValiditySeconds(), "/auth");
+                (int) refreshTokenService.getValiditySeconds());
 
         return ResponseEntity.ok(ApiResponse.successWithoutData());
     }
