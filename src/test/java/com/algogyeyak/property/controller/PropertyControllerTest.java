@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -12,6 +14,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
@@ -22,6 +25,7 @@ import com.algogyeyak.property.dto.PropertyUpdateRequest;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.service.PropertyService;
+import com.algogyeyak.user.enums.Role;
 import java.time.LocalDateTime;
 import java.util.List;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,24 +33,36 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /**
- * 컨트롤러 슬라이스 테스트. 인증(Security) 도메인이 아직 없어 addFilters = false로
- * 시큐리티 필터를 끄고 컨트롤러 동작만 검증한다. 실제 인증 붙으면 이 부분 재검토 필요.
+ * 컨트롤러 슬라이스 테스트. 이 슬라이스에는 실제 SecurityConfig(OAuth2/JWT)가 로드되지 않고
+ * Boot의 기본 시큐리티 필터만 적용되는데, @AuthenticationPrincipal 해석은 이 필터가 SecurityContext를
+ * 읽어야 동작하므로 addFilters = false로 끄면 안 된다 (껐더니 principal이 항상 null로 들어옴).
+ * 대신 SecurityMockMvcRequestPostProcessors.authentication(...)으로 인증 정보를 주입해서 사용한다.
  */
 @WebMvcTest(PropertyController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@AutoConfigureMockMvc
 class PropertyControllerTest {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final Long USER_ID = 1L;
 
     @Autowired
     private MockMvc mockMvc;
 
     @MockitoBean
     private PropertyService propertyService;
+
+    private RequestPostProcessor asUser(Long userId) {
+        JwtUserPrincipal principal = new JwtUserPrincipal(userId, "test@example.com", Role.USER);
+        Authentication auth = new UsernamePasswordAuthenticationToken(principal, null, List.of());
+        return authentication(auth);
+    }
 
     @Test
     void 매물_등록에_성공하면_201과_응답본문을_반환한다() throws Exception {
@@ -77,7 +93,8 @@ class PropertyControllerTest {
         when(propertyService.register(anyLong(), any(PropertyRegisterRequest.class))).thenReturn(response);
 
         mockMvc.perform(post("/properties")
-                        .header("X-User-Id", 1L)
+                        .with(asUser(USER_ID))
+                        .with(csrf())
                         .contentType("application/json")
                         .content(OBJECT_MAPPER.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -101,7 +118,8 @@ class PropertyControllerTest {
         );
 
         mockMvc.perform(post("/properties")
-                        .header("X-User-Id", 1L)
+                        .with(asUser(USER_ID))
+                        .with(csrf())
                         .contentType("application/json")
                         .content(OBJECT_MAPPER.writeValueAsString(request)))
                 .andExpect(status().isBadRequest());
@@ -125,7 +143,8 @@ class PropertyControllerTest {
         when(propertyService.getMyProperties(anyLong())).thenReturn(List.of(item));
 
         mockMvc.perform(get("/properties")
-                        .header("X-User-Id", 1L))
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data[0].propertyId").value(101))
@@ -158,7 +177,8 @@ class PropertyControllerTest {
         when(propertyService.getProperty(anyLong(), anyLong())).thenReturn(response);
 
         mockMvc.perform(get("/properties/101")
-                        .header("X-User-Id", 1L))
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.description").value("역세권 오피스텔"))
@@ -171,7 +191,8 @@ class PropertyControllerTest {
                 .thenThrow(new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
 
         mockMvc.perform(get("/properties/999")
-                        .header("X-User-Id", 1L))
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
                 .andExpect(status().isNotFound());
     }
 
@@ -181,7 +202,8 @@ class PropertyControllerTest {
                 .thenThrow(new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED));
 
         mockMvc.perform(get("/properties/101")
-                        .header("X-User-Id", 1L))
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
                 .andExpect(status().isForbidden());
     }
 
@@ -213,7 +235,8 @@ class PropertyControllerTest {
         when(propertyService.update(anyLong(), anyLong(), any(PropertyUpdateRequest.class))).thenReturn(response);
 
         mockMvc.perform(patch("/properties/101")
-                        .header("X-User-Id", 1L)
+                        .with(asUser(USER_ID))
+                        .with(csrf())
                         .contentType("application/json")
                         .content(OBJECT_MAPPER.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -230,7 +253,8 @@ class PropertyControllerTest {
                 .thenThrow(new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
 
         mockMvc.perform(patch("/properties/999")
-                        .header("X-User-Id", 1L)
+                        .with(asUser(USER_ID))
+                        .with(csrf())
                         .contentType("application/json")
                         .content(OBJECT_MAPPER.writeValueAsString(request)))
                 .andExpect(status().isNotFound());
@@ -244,7 +268,8 @@ class PropertyControllerTest {
                 .thenThrow(new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED));
 
         mockMvc.perform(patch("/properties/101")
-                        .header("X-User-Id", 1L)
+                        .with(asUser(USER_ID))
+                        .with(csrf())
                         .contentType("application/json")
                         .content(OBJECT_MAPPER.writeValueAsString(request)))
                 .andExpect(status().isForbidden());
@@ -255,7 +280,8 @@ class PropertyControllerTest {
         PropertyUpdateRequest request = new PropertyUpdateRequest(null, null, 25.0, null);
 
         mockMvc.perform(patch("/properties/101")
-                        .header("X-User-Id", 1L)
+                        .with(asUser(USER_ID))
+                        .with(csrf())
                         .contentType("application/json")
                         .content(OBJECT_MAPPER.writeValueAsString(request)))
                 .andExpect(status().isBadRequest());
@@ -266,7 +292,8 @@ class PropertyControllerTest {
         doNothing().when(propertyService).delete(anyLong(), anyLong());
 
         mockMvc.perform(delete("/properties/101")
-                        .header("X-User-Id", 1L))
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
     }
@@ -277,7 +304,8 @@ class PropertyControllerTest {
                 .when(propertyService).delete(anyLong(), anyLong());
 
         mockMvc.perform(delete("/properties/999")
-                        .header("X-User-Id", 1L))
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
                 .andExpect(status().isNotFound());
     }
 
@@ -287,7 +315,8 @@ class PropertyControllerTest {
                 .when(propertyService).delete(anyLong(), anyLong());
 
         mockMvc.perform(delete("/properties/101")
-                        .header("X-User-Id", 1L))
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
                 .andExpect(status().isForbidden());
     }
 
@@ -297,7 +326,8 @@ class PropertyControllerTest {
                 .when(propertyService).delete(anyLong(), anyLong());
 
         mockMvc.perform(delete("/properties/101")
-                        .header("X-User-Id", 1L))
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
                 .andExpect(status().isConflict());
     }
 }

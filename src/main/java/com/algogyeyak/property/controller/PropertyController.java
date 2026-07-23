@@ -1,5 +1,6 @@
 package com.algogyeyak.property.controller;
 
+import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.response.ApiResponse;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
@@ -12,13 +13,13 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -29,16 +30,12 @@ public class PropertyController {
 
     private final PropertyService propertyService;
 
-    /**
-     * TODO: 인증(JWT) 구현되면 X-User-Id 헤더 대신 SecurityContext/@AuthenticationPrincipal에서
-     * userId를 가져오도록 교체할 것. 지금은 User/인증 도메인이 아직 없어 임시로 헤더로 받는다.
-     */
     @PostMapping
     public ResponseEntity<ApiResponse<PropertyRegisterResponse>> register(
-            @RequestHeader("X-User-Id") Long userId,
+            @AuthenticationPrincipal JwtUserPrincipal principal,
             @Valid @RequestBody PropertyRegisterRequest request
     ) {
-        PropertyRegisterResponse response = propertyService.register(userId, request);
+        PropertyRegisterResponse response = propertyService.register(principal.userId(), request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(response));
     }
 
@@ -47,9 +44,9 @@ public class PropertyController {
      */
     @GetMapping
     public ResponseEntity<ApiResponse<List<PropertyListResponse>>> list(
-            @RequestHeader("X-User-Id") Long userId
+            @AuthenticationPrincipal JwtUserPrincipal principal
     ) {
-        List<PropertyListResponse> response = propertyService.getMyProperties(userId);
+        List<PropertyListResponse> response = propertyService.getMyProperties(principal.userId());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -58,10 +55,10 @@ public class PropertyController {
      */
     @GetMapping("/{propertyId}")
     public ResponseEntity<ApiResponse<PropertyDetailResponse>> getProperty(
-            @RequestHeader("X-User-Id") Long userId,
+            @AuthenticationPrincipal JwtUserPrincipal principal,
             @PathVariable Long propertyId
     ) {
-        PropertyDetailResponse response = propertyService.getProperty(userId, propertyId);
+        PropertyDetailResponse response = propertyService.getProperty(principal.userId(), propertyId);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -71,11 +68,11 @@ public class PropertyController {
      */
     @PatchMapping("/{propertyId}")
     public ResponseEntity<ApiResponse<PropertyDetailResponse>> updateProperty(
-            @RequestHeader("X-User-Id") Long userId,
+            @AuthenticationPrincipal JwtUserPrincipal principal,
             @PathVariable Long propertyId,
             @Valid @RequestBody PropertyUpdateRequest request
     ) {
-        PropertyDetailResponse response = propertyService.update(userId, propertyId, request);
+        PropertyDetailResponse response = propertyService.update(principal.userId(), propertyId, request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -84,10 +81,10 @@ public class PropertyController {
      */
     @DeleteMapping("/{propertyId}")
     public ResponseEntity<ApiResponse<Void>> deleteProperty(
-            @RequestHeader("X-User-Id") Long userId,
+            @AuthenticationPrincipal JwtUserPrincipal principal,
             @PathVariable Long propertyId
     ) {
-        propertyService.delete(userId, propertyId);
+        propertyService.delete(principal.userId(), propertyId);
         return ResponseEntity.ok(ApiResponse.successWithoutData());
     }
 }
