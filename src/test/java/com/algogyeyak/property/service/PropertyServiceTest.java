@@ -14,6 +14,7 @@ import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
+import com.algogyeyak.property.dto.PropertyUpdateRequest;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyStatus;
@@ -236,6 +237,151 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
         assertThatThrownBy(() -> propertyService.getProperty(USER_ID, 1L))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void 매물_수정에_성공하면_변경된_가격과_설명이_반영된_응답을_반환한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description("역세권 오피스텔")
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+
+        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, "수정된 설명");
+
+        PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
+
+        assertThat(response.deposit()).isEqualTo(35_000_000L);
+        assertThat(response.area()).isEqualTo(25.0);
+        assertThat(response.description()).isEqualTo("수정된 설명");
+    }
+
+    @Test
+    void 존재하지_않는_매물을_수정하면_예외가_발생한다() {
+        when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
+
+        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, null);
+
+        assertThatThrownBy(() -> propertyService.update(USER_ID, 999L, request))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void 본인_소유가_아닌_매물을_수정하면_예외가_발생한다() {
+        Long otherUserId = 999L;
+        Property property = Property.builder()
+                .userId(otherUserId)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description(null)
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+
+        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, null);
+
+        assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void 전세_매물을_수정하면서_월임대료를_입력하면_예외가_발생한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description(null)
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+
+        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, 500_000L, 25.0, null);
+
+        assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void 매물_삭제에_성공하면_상태가_DELETED로_바뀐다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description(null)
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+
+        propertyService.delete(USER_ID, 1L);
+
+        assertThat(property.getStatus()).isEqualTo(PropertyStatus.DELETED);
+    }
+
+    @Test
+    void 존재하지_않는_매물을_삭제하면_예외가_발생한다() {
+        when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> propertyService.delete(USER_ID, 999L))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void 본인_소유가_아닌_매물을_삭제하면_예외가_발생한다() {
+        Long otherUserId = 999L;
+        Property property = Property.builder()
+                .userId(otherUserId)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description(null)
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+
+        assertThatThrownBy(() -> propertyService.delete(USER_ID, 1L))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void 이미_삭제된_매물을_다시_삭제하면_예외가_발생한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description(null)
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+        property.delete();
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+
+        assertThatThrownBy(() -> propertyService.delete(USER_ID, 1L))
                 .isInstanceOf(BusinessException.class);
     }
 

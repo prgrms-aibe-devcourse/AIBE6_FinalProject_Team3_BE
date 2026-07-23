@@ -2,8 +2,12 @@ package com.algogyeyak.property.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -14,6 +18,7 @@ import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
+import com.algogyeyak.property.dto.PropertyUpdateRequest;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.service.PropertyService;
@@ -178,5 +183,121 @@ class PropertyControllerTest {
         mockMvc.perform(get("/properties/101")
                         .header("X-User-Id", 1L))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void 매물_수정에_성공하면_200과_수정된_정보를_반환한다() throws Exception {
+        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, "수정된 설명");
+
+        PropertyDetailResponse response = new PropertyDetailResponse(
+                101L,
+                "OFFICETEL",
+                "JEONSE",
+                35_000_000L,
+                null,
+                25.0,
+                "수정된 설명",
+                new PropertyDetailResponse.AddressResponse(
+                        "서울특별시 강남구 테헤란로 123",
+                        "서울특별시 강남구 역삼동 123-45",
+                        37.4995539438207,
+                        127.031393491745
+                ),
+                List.of(),
+                PropertyDetailResponse.MarketComparisonResponse.unavailable(),
+                "ACTIVE",
+                LocalDateTime.of(2026, 7, 23, 10, 0),
+                LocalDateTime.of(2026, 7, 23, 11, 0)
+        );
+
+        when(propertyService.update(anyLong(), anyLong(), any(PropertyUpdateRequest.class))).thenReturn(response);
+
+        mockMvc.perform(patch("/properties/101")
+                        .header("X-User-Id", 1L)
+                        .contentType("application/json")
+                        .content(OBJECT_MAPPER.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.deposit").value(35_000_000))
+                .andExpect(jsonPath("$.data.description").value("수정된 설명"));
+    }
+
+    @Test
+    void 존재하지_않는_매물을_수정하면_404를_반환한다() throws Exception {
+        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, null);
+
+        when(propertyService.update(anyLong(), anyLong(), any(PropertyUpdateRequest.class)))
+                .thenThrow(new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
+
+        mockMvc.perform(patch("/properties/999")
+                        .header("X-User-Id", 1L)
+                        .contentType("application/json")
+                        .content(OBJECT_MAPPER.writeValueAsString(request)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void 본인_소유가_아닌_매물을_수정하면_403을_반환한다() throws Exception {
+        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, null);
+
+        when(propertyService.update(anyLong(), anyLong(), any(PropertyUpdateRequest.class)))
+                .thenThrow(new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED));
+
+        mockMvc.perform(patch("/properties/101")
+                        .header("X-User-Id", 1L)
+                        .contentType("application/json")
+                        .content(OBJECT_MAPPER.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void 보증금이_없으면_수정요청은_400을_반환한다() throws Exception {
+        PropertyUpdateRequest request = new PropertyUpdateRequest(null, null, 25.0, null);
+
+        mockMvc.perform(patch("/properties/101")
+                        .header("X-User-Id", 1L)
+                        .contentType("application/json")
+                        .content(OBJECT_MAPPER.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void 매물_삭제에_성공하면_200을_반환한다() throws Exception {
+        doNothing().when(propertyService).delete(anyLong(), anyLong());
+
+        mockMvc.perform(delete("/properties/101")
+                        .header("X-User-Id", 1L))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void 존재하지_않는_매물을_삭제하면_404를_반환한다() throws Exception {
+        doThrow(new BusinessException(ErrorCode.PROPERTY_NOT_FOUND))
+                .when(propertyService).delete(anyLong(), anyLong());
+
+        mockMvc.perform(delete("/properties/999")
+                        .header("X-User-Id", 1L))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void 본인_소유가_아닌_매물을_삭제하면_403을_반환한다() throws Exception {
+        doThrow(new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED))
+                .when(propertyService).delete(anyLong(), anyLong());
+
+        mockMvc.perform(delete("/properties/101")
+                        .header("X-User-Id", 1L))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void 이미_삭제된_매물을_다시_삭제하면_409를_반환한다() throws Exception {
+        doThrow(new BusinessException(ErrorCode.PROPERTY_ALREADY_DELETED))
+                .when(propertyService).delete(anyLong(), anyLong());
+
+        mockMvc.perform(delete("/properties/101")
+                        .header("X-User-Id", 1L))
+                .andExpect(status().isConflict());
     }
 }

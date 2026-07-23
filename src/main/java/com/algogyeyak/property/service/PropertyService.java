@@ -8,6 +8,7 @@ import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
+import com.algogyeyak.property.dto.PropertyUpdateRequest;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyImage;
@@ -101,6 +102,28 @@ public class PropertyService {
         return PropertyDetailResponse.from(property);
     }
 
+    /**
+     * 매물 수정. 주소/매물유형/거래유형은 등록 시 확정된 값이라 수정 대상이 아니고
+     * 가격(보증금/월임대료)/면적/설명만 변경한다. 거래유형은 기존 값 그대로 유지되므로
+     * 가격 조합 검증은 등록 때와 동일한 규칙(validatePriceCombination)을 그대로 적용한다.
+     */
+    @Transactional
+    public PropertyDetailResponse update(Long userId, Long propertyId, PropertyUpdateRequest request) {
+        Property property = findActiveProperty(propertyId);
+
+        if (!property.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
+        }
+
+        validatePriceCombination(property.getTransactionType(), request.deposit(), request.monthlyRent());
+
+        property.updatePriceInfo(request.deposit(), request.monthlyRent());
+        property.updateArea(request.area());
+        property.updateDescription(request.description());
+
+        return PropertyDetailResponse.from(property);
+    }
+
     private Property findActiveProperty(Long propertyId) {
         Property property = propertyRepository.findById(propertyId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
@@ -110,6 +133,27 @@ public class PropertyService {
         }
 
         return property;
+    }
+
+    /**
+     * 매물 삭제(soft delete). 조회/수정과 달리 이미 삭제된 매물은 PROPERTY_NOT_FOUND가 아니라
+     * PROPERTY_ALREADY_DELETED(409)로 구분한다 - 삭제 요청 자체는 대상 id가 유효했던 리소스라
+     * "없는 매물"과는 다른 의미이기 때문.
+     */
+    @Transactional
+    public void delete(Long userId, Long propertyId) {
+        Property property = propertyRepository.findById(propertyId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
+
+        if (!property.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
+        }
+
+        if (property.isDeleted()) {
+            throw new BusinessException(ErrorCode.PROPERTY_ALREADY_DELETED);
+        }
+
+        property.delete();
     }
 
     private void validatePriceCombination(TransactionType transactionType, Long deposit, Long monthlyRent) {

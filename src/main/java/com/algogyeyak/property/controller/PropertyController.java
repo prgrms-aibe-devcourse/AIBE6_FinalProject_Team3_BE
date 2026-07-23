@@ -5,13 +5,16 @@ import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
+import com.algogyeyak.property.dto.PropertyUpdateRequest;
 import com.algogyeyak.property.service.PropertyService;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -60,5 +63,31 @@ public class PropertyController {
     ) {
         PropertyDetailResponse response = propertyService.getProperty(userId, propertyId);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    /**
+     * 매물 수정. 가격/면적/설명만 수정 대상 (주소/매물유형/거래유형은 등록 시 확정값 유지).
+     * 본인 소유가 아니면 403, 존재하지 않으면 404.
+     */
+    @PatchMapping("/{propertyId}")
+    public ResponseEntity<ApiResponse<PropertyDetailResponse>> updateProperty(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long propertyId,
+            @Valid @RequestBody PropertyUpdateRequest request
+    ) {
+        PropertyDetailResponse response = propertyService.update(userId, propertyId, request);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    /**
+     * 매물 삭제(soft delete). 본인 소유가 아니면 403, 존재하지 않으면 404, 이미 삭제됐으면 409.
+     */
+    @DeleteMapping("/{propertyId}")
+    public ResponseEntity<ApiResponse<Void>> deleteProperty(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long propertyId
+    ) {
+        propertyService.delete(userId, propertyId);
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
     }
 }
