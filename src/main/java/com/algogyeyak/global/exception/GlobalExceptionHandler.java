@@ -17,6 +17,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -67,6 +68,14 @@ public class GlobalExceptionHandler {
             HttpMessageNotReadableException exception
     ) {
         return buildErrorResponse(ErrorCode.INVALID_INPUT, "요청 본문을 읽을 수 없습니다.");
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodArgumentTypeMismatchException(
+            MethodArgumentTypeMismatchException exception
+    ) {
+        String message = exception.getName() + " 파라미터의 값이 올바르지 않습니다.";
+        return buildErrorResponse(ErrorCode.INVALID_INPUT, message);
     }
 
     @ExceptionHandler(AuthenticationException.class)
