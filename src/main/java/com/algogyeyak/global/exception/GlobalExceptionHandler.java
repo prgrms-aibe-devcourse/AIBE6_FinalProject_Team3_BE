@@ -7,6 +7,7 @@ import jakarta.validation.ConstraintViolationException;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.core.PropertyReferenceException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -76,6 +77,11 @@ public class GlobalExceptionHandler {
     ) {
         String message = exception.getName() + " 파라미터의 값이 올바르지 않습니다.";
         return buildErrorResponse(ErrorCode.INVALID_INPUT, message);
+    }
+
+    @ExceptionHandler(PropertyReferenceException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePropertyReferenceException(PropertyReferenceException exception) {
+        return buildErrorResponse(ErrorCode.INVALID_SORT_FIELD, ErrorCode.INVALID_SORT_FIELD.getMessage());
     }
 
     @ExceptionHandler(AuthenticationException.class)
