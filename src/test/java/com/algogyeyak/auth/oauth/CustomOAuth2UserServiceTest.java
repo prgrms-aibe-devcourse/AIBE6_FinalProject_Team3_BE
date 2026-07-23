@@ -1,6 +1,6 @@
 package com.algogyeyak.auth.oauth;
 
-import com.algogyeyak.user.entity.AuthProvider;
+import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
@@ -57,7 +57,7 @@ class CustomOAuth2UserServiceTest {
         CustomOAuth2UserService service = new CustomOAuth2UserService(repository);
 
         when(repository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.empty());
-        when(repository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         OAuth2User result = service.processOAuth2User("kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com"));
 
@@ -68,24 +68,26 @@ class CustomOAuth2UserServiceTest {
         assertEquals(AuthProvider.KAKAO, user.getProvider());
         assertEquals("123", user.getProviderId());
 
-        verify(repository).save(any(User.class));
+        verify(repository).saveAndFlush(any(User.class));
     }
 
     @Test
-    void reusesExistingUserAndUpdatesProfileWithoutSaving() {
+    void reusesExistingUserWithoutOverwritingCustomizedProfile() {
         UserRepository repository = mock(UserRepository.class);
         CustomOAuth2UserService service = new CustomOAuth2UserService(repository);
 
-        User existing = User.createOAuthUser("old@kakao.com", "옛날닉네임", "http://old", AuthProvider.KAKAO, "123");
+        // 로그인 이후 프로필 등록/수정 화면에서 닉네임과 사진을 직접 바꾼 상태를 가정한다.
+        User existing = User.createOAuthUser("old@kakao.com", "커스텀닉네임", "http://custom", AuthProvider.KAKAO, "123");
         when(repository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.of(existing));
 
         OAuth2User result = service.processOAuth2User("kakao", kakaoOAuth2User(123L, "새닉네임", "http://new", "old@kakao.com"));
 
+        // 재로그인 시 OAuth 제공자 값(새닉네임/http://new)이 아니라 기존에 커스터마이징한 값이 그대로 유지되어야 한다.
         User user = ((CustomOAuth2User) result).getUser();
-        assertEquals("새닉네임", user.getNickname());
-        assertEquals("http://new", user.getProfileImageUrl());
+        assertEquals("커스텀닉네임", user.getNickname());
+        assertEquals("http://custom", user.getProfileImageUrl());
 
-        verify(repository, never()).save(any(User.class));
+        verify(repository, never()).saveAndFlush(any(User.class));
     }
 
     @Test
@@ -94,11 +96,31 @@ class CustomOAuth2UserServiceTest {
         CustomOAuth2UserService service = new CustomOAuth2UserService(repository);
 
         when(repository.findByProviderAndProviderId(AuthProvider.KAKAO, "999")).thenReturn(Optional.empty());
-        when(repository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         OAuth2User result = service.processOAuth2User("kakao", kakaoOAuth2User(999L, null, null, null));
 
         User user = ((CustomOAuth2User) result).getUser();
         assertEquals("kakao_999", user.getNickname());
+    }
+
+    @Test
+    void reusesWinnerRowWhenConcurrentFirstLoginHitsUniqueConstraint() {
+        UserRepository repository = mock(UserRepository.class);
+        CustomOAuth2UserService service = new CustomOAuth2UserService(repository);
+
+        User winner = User.createOAuthUser("test@kakao.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+
+        // 첫 조회 시점엔 아직 아무도 없다고 나오지만(레이스), save 시도 시 다른 스레드가 먼저 커밋해서 유니크 제약 위반이 난다.
+        when(repository.findByProviderAndProviderId(AuthProvider.KAKAO, "123"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        when(repository.saveAndFlush(any(User.class)))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("unique constraint violation"));
+
+        OAuth2User result = service.processOAuth2User("kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com"));
+
+        User user = ((CustomOAuth2User) result).getUser();
+        assertEquals(winner, user);
     }
 }

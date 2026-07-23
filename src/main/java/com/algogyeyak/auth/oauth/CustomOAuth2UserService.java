@@ -1,9 +1,10 @@
 package com.algogyeyak.auth.oauth;
 
-import com.algogyeyak.user.entity.AuthProvider;
+import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
@@ -38,21 +39,36 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                 ? userInfo.getNickname()
                 : provider.name().toLowerCase() + "_" + userInfo.getProviderId();
 
-        User user = userRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
-                .map(existing -> {
-                    existing.updateProfile(nickname, userInfo.getProfileImageUrl());
-                    return existing;
-                })
-                .orElseGet(() -> userRepository.save(
-                        User.createOAuthUser(
-                                userInfo.getEmail(),
-                                nickname,
-                                userInfo.getProfileImageUrl(),
-                                provider,
-                                userInfo.getProviderId()
-                        )
-                ));
+        User user = findOrCreateUser(provider, userInfo, nickname);
 
         return new CustomOAuth2User(user, oAuth2User.getAttributes());
+    }
+
+    // 재로그인 시 기존 회원의 닉네임/프로필 사진은 OAuth 제공자 값으로 덮어쓰지 않는다.
+    // 최초 가입 이후에는 프로필 등록/수정 화면에서 관리하는 값이 우선하므로 그대로 재사용한다.
+    private User findOrCreateUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
+        return userRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
+                .orElseGet(() -> createUser(provider, userInfo, nickname));
+    }
+
+    private User createUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
+        try {
+            // saveAndFlush로 이 자리에서 즉시 INSERT를 실행시켜, 유니크 제약 위반이
+            // (엔티티의 ID 생성 전략과 무관하게) 반드시 이 catch에서 잡히도록 보장한다.
+            return userRepository.saveAndFlush(
+                    User.createOAuthUser(
+                            userInfo.getEmail(),
+                            nickname,
+                            userInfo.getProfileImageUrl(),
+                            provider,
+                            userInfo.getProviderId()
+                    )
+            );
+        } catch (DataIntegrityViolationException e) {
+            // 같은 provider+providerId로 동시에 첫 로그인이 들어와 유니크 제약에 걸린 경우 —
+            // 먼저 커밋된 쪽의 row를 그대로 사용한다 (드문 동시 최초 로그인 레이스 대비).
+            return userRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
+                    .orElseThrow(() -> e);
+        }
     }
 }
