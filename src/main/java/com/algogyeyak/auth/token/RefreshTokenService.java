@@ -81,7 +81,11 @@ public class RefreshTokenService {
         }
     }
 
-    @Transactional
+    // findByTokenHash가 이미 이 행에 PESSIMISTIC_WRITE 락을 쥐고 있는 채로 REQUIRES_NEW를 쓰면
+    // (바깥 트랜잭션이 들고 있는 락을 안쪽 트랜잭션이 기다리는) 자기 자신과의 데드락이 난다 — 실제
+    // H2로 재현 확인함. 그래서 delete는 REQUIRES_NEW로 분리하지 않고 같은 트랜잭션에서 수행하되,
+    // noRollbackFor로 이 메서드가 BusinessException을 던지고 나가도 delete는 그대로 커밋되게 한다.
+    @Transactional(noRollbackFor = BusinessException.class)
     public RotationResult rotate(String rawToken) {
         RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(hash(rawToken))
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."));

@@ -76,6 +76,33 @@ class AuthControllerTest {
     }
 
     @Test
+    void meRejectsWhenUnderlyingUserNoLongerExists() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        when(userRepository.findById(eq(1L))).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/auth/me")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("COMMON_401"));
+    }
+
+    @Test
+    void meRejectsWhenUserHasWithdrawn() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createOAuthUser(
+                "test@example.com", "테스트유저", "https://example.com/avatar.png", AuthProvider.KAKAO, "123");
+        user.withdraw();
+        when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
+
+        mockMvc.perform(get("/auth/me")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("COMMON_401"));
+    }
+
+    @Test
     void logoutClearsCookieForAuthenticatedUser() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
 

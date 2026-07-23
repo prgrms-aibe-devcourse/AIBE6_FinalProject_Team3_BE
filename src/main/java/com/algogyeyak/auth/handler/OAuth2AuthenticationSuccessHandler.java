@@ -38,9 +38,12 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
         cookieUtils.addCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, accessToken,
                 (int) jwtProvider.getAccessTokenValiditySeconds());
 
+        // 프론트 미들웨어가 보호 페이지 요청(/home 등)에서 이 쿠키를 읽어 만료된 Access Token을
+        // 재발급해야 하는데, path를 /auth로 좁히면 브라우저가 그런 요청에 아예 쿠키를 실어보내지
+        // 않는다 — 그래서 Access Token과 동일하게 path를 "/"로 둔다.
         String refreshToken = refreshTokenService.issue(user);
         cookieUtils.addCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, refreshToken,
-                (int) refreshTokenService.getValiditySeconds(), "/auth");
+                (int) refreshTokenService.getValiditySeconds());
 
         authorizationRequestRepository.removeAuthorizationRequest(request, response);
         clearAuthenticationAttributes(request);
