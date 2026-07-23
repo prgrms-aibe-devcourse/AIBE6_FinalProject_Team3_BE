@@ -73,6 +73,8 @@ public class ChecklistItem {
     @Column(name = "issue_found", nullable = false)
     private boolean issueFound;
 
+    // "value"는 H2를 포함한 여러 DB의 예약어라 컬럼명을 그대로 쓰면 스키마 생성이 실패한다.
+    @Column(name = "item_value")
     private String value;
 
     @Builder
