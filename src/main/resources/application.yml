@@ -30,6 +30,7 @@ app:
   jwt:
     secret: ${JWT_SECRET:local-dev-only-secret-please-override-32-bytes-min}
     access-token-validity-seconds: 1800
+    refresh-token-validity-seconds: 1209600 # 14일
   oauth2:
     authorized-redirect-uri: ${OAUTH2_REDIRECT_URI:http://localhost:3000/oauth/callback}
     state-signing-key: ${OAUTH2_STATE_SIGNING_KEY:local-dev-only-state-signing-key-please-override-32-bytes-min}

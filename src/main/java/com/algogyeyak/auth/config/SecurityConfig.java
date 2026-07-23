@@ -57,7 +57,7 @@ public class SecurityConfig {
                                 "/oauth2/**", "/login/**",
                                 "/swagger-ui/**", "/v3/api-docs/**",
                                 "/actuator/health", "/h2-console/**",
-                                "/auth/logout"
+                                "/auth/logout", "/auth/refresh"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
