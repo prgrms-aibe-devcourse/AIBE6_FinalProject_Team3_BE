@@ -5,6 +5,7 @@ import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CookieUtils;
 import com.algogyeyak.auth.oauth.CustomOAuth2User;
+import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.user.entity.User;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -21,6 +22,7 @@ import java.io.IOException;
 public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
 
     private final JwtProvider jwtProvider;
+    private final RefreshTokenService refreshTokenService;
     private final CookieAuthorizationRequestRepository authorizationRequestRepository;
     private final CookieUtils cookieUtils;
 
@@ -35,6 +37,10 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
         String accessToken = jwtProvider.createAccessToken(user.getId(), user.getEmail(), user.getRole());
         cookieUtils.addCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, accessToken,
                 (int) jwtProvider.getAccessTokenValiditySeconds());
+
+        String refreshToken = refreshTokenService.issue(user);
+        cookieUtils.addCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, refreshToken,
+                (int) refreshTokenService.getValiditySeconds(), "/auth");
 
         authorizationRequestRepository.removeAuthorizationRequest(request, response);
         clearAuthenticationAttributes(request);

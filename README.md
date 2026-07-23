@@ -47,7 +47,7 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 
 ## Current state
 
-구글/카카오 OAuth2 로그인(Access Token 발급까지, Refresh Token은 아직 미구현)이 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(JWT 발급/검증/필터), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 JWT를 httpOnly 쿠키로 전달), `com.algogyeyak.auth.controller.AuthController`(`GET /auth/me`, `POST /auth/logout`). 로컬 이메일/비밀번호 로그인과 Refresh Token은 다음 단계로 남아 있습니다.
+구글/카카오 OAuth2 로그인 및 Refresh Token이 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(Access Token 발급/검증/필터), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.token`(`RefreshTokenService`/`RefreshTokenRepository` — Redis 없이 DB로 관리, 유저당 1개 세션만 유지하며 재로그인/재발급 시 기존 행을 덮어씀), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 Access/Refresh Token을 httpOnly 쿠키로 전달, Refresh 쿠키는 `/auth` 경로로 제한), `com.algogyeyak.auth.controller.AuthController`(`GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`). 로컬 이메일/비밀번호 로그인은 다음 단계로 남아 있습니다.
 
 실제 구글/카카오 로그인을 로컬에서 테스트하려면 아래 환경변수가 필요합니다 (미설정 시 더미 값으로 기동은 되지만 실제 소셜 로그인은 동작하지 않습니다):
 

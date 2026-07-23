@@ -2,6 +2,9 @@ package com.algogyeyak.auth.controller;
 
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
+import com.algogyeyak.auth.token.RefreshTokenService;
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.entity.User;
@@ -12,14 +15,21 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -35,6 +45,9 @@ class AuthControllerTest {
 
     @MockitoBean
     private UserRepository userRepository;
+
+    @MockitoBean
+    private RefreshTokenService refreshTokenService;
 
     @Test
     void meReturnsCurrentUserWithValidAccessTokenCookie() throws Exception {
@@ -78,5 +91,53 @@ class AuthControllerTest {
         mockMvc.perform(post("/auth/logout"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
+
+        verify(refreshTokenService, never()).revoke(any());
+    }
+
+    @Test
+    void logoutRevokesRefreshTokenWhenCookiePresent() throws Exception {
+        mockMvc.perform(post("/auth/logout")
+                        .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "raw-refresh-token")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(refreshTokenService).revoke("raw-refresh-token");
+    }
+
+    @Test
+    void refreshRejectsRequestWithoutRefreshTokenCookie() throws Exception {
+        mockMvc.perform(post("/auth/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("COMMON_401"));
+    }
+
+    @Test
+    void refreshIssuesNewAccessAndRefreshTokenCookiesForValidToken() throws Exception {
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(refreshTokenService.rotate("old-refresh-token"))
+                .thenReturn(new RefreshTokenService.RotationResult(user, "new-refresh-token"));
+        when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
+
+        mockMvc.perform(post("/auth/refresh")
+                        .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "old-refresh-token")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(header().string("Set-Cookie",
+                        containsString(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "=")))
+                .andExpect(header().stringValues("Set-Cookie", hasItem(containsString("new-refresh-token"))));
+    }
+
+    @Test
+    void refreshRejectsInvalidOrExpiredToken() throws Exception {
+        when(refreshTokenService.rotate("bad-token"))
+                .thenThrow(new BusinessException(ErrorCode.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."));
+
+        mockMvc.perform(post("/auth/refresh")
+                        .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "bad-token")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.message").value("유효하지 않은 Refresh Token입니다."));
     }
 }

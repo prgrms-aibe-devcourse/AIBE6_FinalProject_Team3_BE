@@ -3,20 +3,28 @@ package com.algogyeyak.auth.oauth;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
-@RequiredArgsConstructor
 public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
     private final UserRepository userRepository;
+    private final TransactionTemplate requiresNewTransactionTemplate;
+
+    public CustomOAuth2UserService(UserRepository userRepository, PlatformTransactionManager transactionManager) {
+        this.userRepository = userRepository;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     @Override
     @Transactional
@@ -52,18 +60,17 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     }
 
     private User createUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
+        User newUser = User.createOAuthUser(
+                userInfo.getEmail(), nickname, userInfo.getProfileImageUrl(), provider, userInfo.getProviderId());
+
         try {
-            // saveAndFlush로 이 자리에서 즉시 INSERT를 실행시켜, 유니크 제약 위반이
-            // (엔티티의 ID 생성 전략과 무관하게) 반드시 이 catch에서 잡히도록 보장한다.
-            return userRepository.saveAndFlush(
-                    User.createOAuthUser(
-                            userInfo.getEmail(),
-                            nickname,
-                            userInfo.getProfileImageUrl(),
-                            provider,
-                            userInfo.getProviderId()
-                    )
-            );
+            // INSERT를 별도(REQUIRES_NEW) 트랜잭션/세션에서 시도한다. 같은 세션에서 saveAndFlush가
+            // 유니크 제약 위반으로 실패한 뒤 그 세션으로 쿼리를 이어가면 Hibernate가
+            // "세션이 예외 이후 flush됨(AssertionFailure)"을 던진다 — RefreshTokenService.issue()에서
+            // 실제 H2로 재현 확인한 것과 동일한 문제라 같은 방식으로 격리한다. 실패해도 폐기되는
+            // 세션이 이 임시 트랜잭션뿐이도록 분리해, 바깥(loadUser()) 트랜잭션의 세션은 정상 상태로 남는다.
+            requiresNewTransactionTemplate.executeWithoutResult(status -> userRepository.saveAndFlush(newUser));
+            return newUser;
         } catch (DataIntegrityViolationException e) {
             // 같은 provider+providerId로 동시에 첫 로그인이 들어와 유니크 제약에 걸린 경우 —
             // 먼저 커밋된 쪽의 row를 그대로 사용한다 (드문 동시 최초 로그인 레이스 대비).
