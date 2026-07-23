@@ -4,6 +4,8 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
+import com.algogyeyak.property.dto.PropertyDetailResponse;
+import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
 import com.algogyeyak.property.entity.Property;
@@ -72,6 +74,42 @@ public class PropertyService {
         String notice = buildNoticeIfNeeded(request.propertyType(), addressResult);
 
         return PropertyRegisterResponse.of(saved, notice);
+    }
+
+    /**
+     * 본인이 등록한 매물 목록 조회. 개인 분석 도구 성격상 마켓플레이스식 전체조회가 아니라
+     * 요청자 본인 소유 + ACTIVE 상태 매물만 최신순으로 반환한다.
+     */
+    public List<PropertyListResponse> getMyProperties(Long userId) {
+        return propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(userId, PropertyStatus.ACTIVE)
+                .stream()
+                .map(PropertyListResponse::from)
+                .toList();
+    }
+
+    /**
+     * 매물 상세조회. 존재하지 않거나 이미 삭제된 매물은 PROPERTY_NOT_FOUND,
+     * 존재하지만 본인 소유가 아니면 PROPERTY_ACCESS_DENIED로 구분한다.
+     */
+    public PropertyDetailResponse getProperty(Long userId, Long propertyId) {
+        Property property = findActiveProperty(propertyId);
+
+        if (!property.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
+        }
+
+        return PropertyDetailResponse.from(property);
+    }
+
+    private Property findActiveProperty(Long propertyId) {
+        Property property = propertyRepository.findById(propertyId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
+
+        if (property.isDeleted()) {
+            throw new BusinessException(ErrorCode.PROPERTY_NOT_FOUND);
+        }
+
+        return property;
     }
 
     private void validatePriceCombination(TransactionType transactionType, Long deposit, Long monthlyRent) {
