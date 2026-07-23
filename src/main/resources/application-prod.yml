@@ -33,12 +33,7 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
   cookie:
     secure: ${COOKIE_SECURE:true}
-    # 프론트(Vercel)/백엔드(EC2)가 같은 origin으로 보이도록 맞추는 배포 구조(Vercel rewrite 또는
-    # 커스텀 서브도메인 + Domain=.example.com)라면 Lax로 충분하다. 그 구조를 포기하고 완전히
-    # 다른 도메인으로 그대로 배포한다면 SameSite=None으로 바꿔야 하는데, 그 경우에도 쿠키의
-    # Domain이 백엔드 호스트로 고정돼 있어 프론트 미들웨어(proxy.ts)가 여전히 쿠키를 못 보는
-    # 문제는 SameSite와 별개로 남는다 — 배포 구조를 먼저 정하고 반영할 것.
+    # SAME_SITE/DOMAIN 값은 배포 도메인 전략(커스텀 서브도메인 / Vercel rewrite / 도메인 공유 없음)에
+    # 따라 완전히 달라진다 — README.md의 "운영 배포 시 쿠키 설정" 표 참고 후 확정할 것.
     same-site: ${COOKIE_SAME_SITE:Lax}
-    # 커스텀 서브도메인(app.example.com/api.example.com)으로 배포하면 .example.com처럼 넣어야
-    # 서브도메인 간에 쿠키가 공유된다. 아직 정해지지 않았으면 비워둔다(host-only, 지금과 동일).
     domain: ${COOKIE_DOMAIN:}

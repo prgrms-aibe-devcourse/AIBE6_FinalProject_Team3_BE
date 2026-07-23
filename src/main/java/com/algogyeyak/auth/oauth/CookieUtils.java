@@ -72,13 +72,8 @@ public class CookieUtils {
     }
 
     public void addCookie(HttpServletResponse response, String name, String value, int maxAgeSeconds) {
-        addCookie(response, name, value, maxAgeSeconds, "/");
-    }
-
-    // Refresh Token처럼 더 민감하고 수명이 긴 쿠키는 path를 좁혀 노출 범위를 줄일 수 있게 오버로드한다.
-    public void addCookie(HttpServletResponse response, String name, String value, int maxAgeSeconds, String path) {
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(name, value)
-                .path(path)
+                .path("/")
                 .httpOnly(true)
                 .secure(secureCookie)
                 .sameSite(sameSite)
@@ -87,14 +82,10 @@ public class CookieUtils {
         response.addHeader(HttpHeaders.SET_COOKIE, builder.build().toString());
     }
 
-    public void deleteCookie(HttpServletResponse response, String name) {
-        deleteCookie(response, name, "/");
-    }
-
     // 쿠키 삭제는 저장할 때와 동일한 path/domain으로 Set-Cookie를 내려줘야 브라우저가 실제로 지운다.
-    public void deleteCookie(HttpServletResponse response, String name, String path) {
+    public void deleteCookie(HttpServletResponse response, String name) {
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(name, "")
-                .path(path)
+                .path("/")
                 .httpOnly(true)
                 .secure(secureCookie)
                 .maxAge(0);

@@ -49,7 +49,7 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 
 구글/카카오 OAuth2 로그인 및 Refresh Token이 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(Access Token 발급/검증/필터), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.token`(`RefreshTokenService`/`RefreshTokenRepository` — Redis 없이 DB로 관리, 유저당 1개 세션만 유지하며 재로그인/재발급 시 기존 행을 덮어씀), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 Access/Refresh Token을 httpOnly 쿠키로 전달, 둘 다 path `/` — 프론트 미들웨어가 보호 페이지 요청에서도 Refresh 쿠키를 읽어야 해서 path를 좁히지 않음), `com.algogyeyak.auth.controller.AuthController`(`GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`). 로컬 이메일/비밀번호 로그인은 다음 단계로 남아 있습니다.
 
-실제 구글/카카오 로그인을 로컬에서 테스트하려면 아래 환경변수가 필요합니다 (미설정 시 더미 값으로 기동은 되지만 실제 소셜 로그인은 동작하지 않습니다):
+실제 구글/카카오 로그인을 로컬에서 테스트하려면 아래 환경변수가 필요합니다 (미설정 시 더미 값으로 기동은 되지만 실제 소셜 로그인은 동작하지 않습니다). `.env.example`을 `backend/.env`로 복사해 값을 채워두면 `me.paulschwarz:springboot4-dotenv`(개발 전용 의존성)가 `bootRun` 시 자동으로 읽어들입니다 — 별도로 셸에 export하거나 IDE Run Configuration에 등록할 필요가 없습니다. **`.env`는 반드시 BOM 없는 UTF-8로 저장하세요** — 메모장 등으로 저장하면 파일 앞에 보이지 않는 BOM이 붙어 dotenv 파서가 `Malformed entry` 에러를 내며 기동에 실패합니다.
 
 | 환경변수 | 설명 |
 | --- | --- |
@@ -57,13 +57,25 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 | `KAKAO_CLIENT_ID` / `KAKAO_CLIENT_SECRET` | Kakao Developers에서 발급 |
 | `JWT_SECRET` | HS256 서명용 시크릿 (최소 32바이트 랜덤 문자열) |
 | `OAUTH2_STATE_SIGNING_KEY` | OAuth2 인가 요청을 담는 쿠키(`oauth2_auth_request`)의 HMAC 서명 키 (최소 32바이트 랜덤 문자열, `JWT_SECRET`과는 다른 값 권장) |
-| `OAUTH2_REDIRECT_URI` | 로그인 성공 후 리다이렉트할 프론트엔드 콜백 URL (기본값 `http://app.localhost:3000/oauth/callback`) |
-| `CORS_ALLOWED_ORIGINS` | 허용할 프론트엔드 origin (기본값 `http://app.localhost:3000`) |
+| `OAUTH2_REDIRECT_URI` | 로그인 성공 후 리다이렉트할 프론트엔드 콜백 URL (기본값 `http://localhost:3000/oauth/callback`) |
+| `CORS_ALLOWED_ORIGINS` | 허용할 프론트엔드 origin (기본값 `http://localhost:3000`) |
 | `COOKIE_SECURE` | `access_token` 등 쿠키의 Secure 속성 (dev 기본값 `false`, prod 기본값 `true`) |
 | `COOKIE_SAME_SITE` | 쿠키의 SameSite 속성 (기본값 `Lax`) |
-| `COOKIE_DOMAIN` | 쿠키의 Domain 속성 — 프론트/백엔드를 커스텀 서브도메인으로 배포할 때 `.example.com`처럼 지정 (dev 기본값 `.localhost`, prod 기본값 비어있음=host-only) |
+| `COOKIE_DOMAIN` | 쿠키의 Domain 속성 — 커스텀 서브도메인 배포 시에만 `.example.com`처럼 지정 (dev/prod 기본값 모두 비어있음=host-only) |
 
-로컬에서는 프론트를 `http://localhost:3000`이 아니라 **`http://app.localhost:3000`**으로 접속해야 합니다(Chrome/Firefox는 `*.localhost`를 자동으로 `127.0.0.1`로 해석하며 hosts 파일 수정이 필요 없습니다). 백엔드도 `http://api.localhost:8080`으로 접속 가능합니다. 이렇게 해야 커스텀 서브도메인 배포 구조(`app.example.com`/`api.example.com` + `Domain=.example.com` 쿠키)를 로컬에서부터 동일하게 검증할 수 있습니다. 카카오/구글 개발자 콘솔의 Redirect URI에도 `http://api.localhost:8080/login/oauth2/code/{google|kakao}`를 등록해야 실제 소셜 로그인이 동작합니다.
+로컬은 프론트/백엔드 모두 `http://localhost:3000` / `http://localhost:8080`을 그대로 씁니다. 한때 `app.localhost`/`api.localhost` + `Domain=.localhost`로 커스텀 서브도메인 배포 구조를 로컬에서부터 검증해보려 했으나, **크롬이 `localhost`를 public-suffix처럼 취급해 서브도메인이 `Domain=.localhost` 쿠키를 설정하는 것 자체를 거부**한다는 걸 확인해 되돌렸습니다 (`api.localhost`에서 심은 OAuth2 state 쿠키를 콜백 때 못 찾아 `authorization_request_not_found`로 로그인 자체가 실패했음). 커스텀 서브도메인 + 공유 쿠키가 실제로 동작하는지는 진짜 도메인이 생기거나 `lvh.me`/`nip.io` 같은 실제 등록된 서브도메인 지원 도메인을 쓸 때 검증하면 됩니다.
+
+### 운영 배포 시 쿠키 설정 (`COOKIE_SECURE` / `COOKIE_SAME_SITE` / `COOKIE_DOMAIN`)
+
+프론트(Vercel)와 백엔드(EC2)가 배포에서 브라우저 기준 "같은 site"로 보이는지에 따라 값이 완전히 달라집니다. 배포 도메인 전략이 정해지면 아래 표에서 해당하는 행의 값으로 설정하세요.
+
+| 시나리오 | `COOKIE_SECURE` | `COOKIE_SAME_SITE` | `COOKIE_DOMAIN` | 비고 |
+| --- | --- | --- | --- | --- |
+| **A. 커스텀 서브도메인** (`app.example.com` + `api.example.com`, 같은 등록 도메인) | `true` | `Lax` (기본값) | `.example.com` | 지금 코드가 이 시나리오를 전제로 만들어져 있음 — 로컬의 `.localhost` 설정과 동일한 구조 |
+| **B. Vercel rewrite** (`/api/*`를 EC2로 프록시, 브라우저는 Vercel origin만 봄) | `true` | `Lax` (기본값) | 비워둠(host-only) | 브라우저 입장에서 이미 같은 origin이라 `Domain` 지정이 필요 없음. 단, `proxy.ts`/`oauth/callback`이 지금처럼 EC2를 직접 부르는 구조라 rewrite에 맞춰 손봐야 함 (검토 예정) |
+| **C. 도메인 공유 없음** (완전히 별개 호스트, 위 둘 다 아닌 경우) | `true` | `None` | 비워둠(host-only, 어차피 못 맞춤) | ⚠️ `SameSite=None`만으로는 안 풀림 — 쿠키의 `Domain`이 EC2 자체 호스트로 고정돼 있어서, 프론트 미들웨어(`proxy.ts`)가 `/home` 같은 요청에서 쿠키를 여전히 못 봄. `SameSite=None; Secure`는 브라우저→EC2 API 호출 자체는 되게 해주지만, "로그인 게이트"/자동 refresh 로직은 별도로 재설계해야 함 |
+
+시나리오 A/B는 둘 다 `SameSite=Lax`로 충분하고, `SameSite=None`은 시나리오 C에서만, 그것도 부분적으로만 문제를 해결합니다. 지금은 시나리오 A를 기본값으로 잡아뒀습니다 — 실제 배포 전략(A/B/C 중 어느 것)이 확정되면 이 표를 기준으로 환경변수만 바꾸면 됩니다.
 
 ## Docs
 
