@@ -47,6 +47,6 @@ Google/Kakao OAuth2 login (access-token issuance only, no refresh token yet) is 
 - `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig` — OAuth2 login wiring, JWT delivered via httpOnly cookie
 - `com.algogyeyak.auth.controller.AuthController` — `GET /auth/me`, `POST /auth/logout` (엔드포인트는 `/api` 프리픽스 없이 작성하는 것으로 팀 컨벤션 확정)
 
-Local email/password login and Redis-backed refresh tokens are not implemented yet — planned as a follow-up.
+Local email/password login and refresh tokens are not implemented yet — planned as a follow-up.
 
 See [README.md](./README.md) for stack overview and getting-started instructions.
