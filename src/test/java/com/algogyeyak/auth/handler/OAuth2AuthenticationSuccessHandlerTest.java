@@ -5,6 +5,7 @@ import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CookieUtils;
 import com.algogyeyak.auth.oauth.CustomOAuth2User;
+import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.AuthProvider;
 import io.jsonwebtoken.Claims;
@@ -19,19 +20,22 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class OAuth2AuthenticationSuccessHandlerTest {
 
     private final JwtProvider jwtProvider =
             new JwtProvider("test-secret-key-must-be-at-least-32-bytes-long", 3600);
+    private final RefreshTokenService refreshTokenService = mock(RefreshTokenService.class);
     private final CookieAuthorizationRequestRepository authorizationRequestRepository =
             mock(CookieAuthorizationRequestRepository.class);
     private final CookieUtils cookieUtils = mock(CookieUtils.class);
-    private final OAuth2AuthenticationSuccessHandler handler =
-            new OAuth2AuthenticationSuccessHandler(jwtProvider, authorizationRequestRepository, cookieUtils);
+    private final OAuth2AuthenticationSuccessHandler handler = new OAuth2AuthenticationSuccessHandler(
+            jwtProvider, refreshTokenService, authorizationRequestRepository, cookieUtils);
 
     private Authentication authenticationFor(Long userId) {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
@@ -68,5 +72,19 @@ class OAuth2AuthenticationSuccessHandlerTest {
 
         verify(authorizationRequestRepository).removeAuthorizationRequest(request, response);
         assertEquals("https://example.com/login/success", response.getRedirectedUrl());
+    }
+
+    @Test
+    void issuesRefreshTokenCookieScopedToAuthPath() throws Exception {
+        ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login/success");
+        when(refreshTokenService.issue(any(User.class))).thenReturn("raw-refresh-token");
+        when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        handler.onAuthenticationSuccess(request, response, authenticationFor(1L));
+
+        verify(cookieUtils).addCookie(eq(response), eq(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME),
+                eq("raw-refresh-token"), eq(1209600), eq("/auth"));
     }
 }

@@ -8,6 +8,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.core.user.DefaultOAuth2User;
 import org.springframework.security.oauth2.core.user.OAuth2User;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.HashMap;
 import java.util.List;
@@ -54,7 +55,8 @@ class CustomOAuth2UserServiceTest {
     @Test
     void createsNewUserWhenNoExistingAccountForProvider() {
         UserRepository repository = mock(UserRepository.class);
-        CustomOAuth2UserService service = new CustomOAuth2UserService(repository);
+        CustomOAuth2UserService service =
+                new CustomOAuth2UserService(repository, mock(PlatformTransactionManager.class));
 
         when(repository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.empty());
         when(repository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -74,7 +76,8 @@ class CustomOAuth2UserServiceTest {
     @Test
     void reusesExistingUserWithoutOverwritingCustomizedProfile() {
         UserRepository repository = mock(UserRepository.class);
-        CustomOAuth2UserService service = new CustomOAuth2UserService(repository);
+        CustomOAuth2UserService service =
+                new CustomOAuth2UserService(repository, mock(PlatformTransactionManager.class));
 
         // 로그인 이후 프로필 등록/수정 화면에서 닉네임과 사진을 직접 바꾼 상태를 가정한다.
         User existing = User.createOAuthUser("old@kakao.com", "커스텀닉네임", "http://custom", AuthProvider.KAKAO, "123");
@@ -93,7 +96,8 @@ class CustomOAuth2UserServiceTest {
     @Test
     void fallsBackToGeneratedNicknameWhenKakaoNicknameMissing() {
         UserRepository repository = mock(UserRepository.class);
-        CustomOAuth2UserService service = new CustomOAuth2UserService(repository);
+        CustomOAuth2UserService service =
+                new CustomOAuth2UserService(repository, mock(PlatformTransactionManager.class));
 
         when(repository.findByProviderAndProviderId(AuthProvider.KAKAO, "999")).thenReturn(Optional.empty());
         when(repository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -107,7 +111,8 @@ class CustomOAuth2UserServiceTest {
     @Test
     void reusesWinnerRowWhenConcurrentFirstLoginHitsUniqueConstraint() {
         UserRepository repository = mock(UserRepository.class);
-        CustomOAuth2UserService service = new CustomOAuth2UserService(repository);
+        CustomOAuth2UserService service =
+                new CustomOAuth2UserService(repository, mock(PlatformTransactionManager.class));
 
         User winner = User.createOAuthUser("test@kakao.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
 

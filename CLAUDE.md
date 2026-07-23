@@ -40,14 +40,15 @@ Confirmed: all classes live under `com.algogyeyak` (matching `AlgogyeyakApplicat
 
 ## Current state
 
-Google/Kakao OAuth2 login (access-token issuance only, no refresh token yet) is implemented:
+Google/Kakao OAuth2 login with refresh tokens is implemented:
 - `com.algogyeyak.user` — `User` entity, `AuthProvider`/`Role` enums, `UserRepository`
-- `com.algogyeyak.auth.jwt` — `JwtProvider` (issue/validate), `JwtUserPrincipal`, `JwtAuthenticationFilter`
+- `com.algogyeyak.auth.jwt` — `JwtProvider` (issue/validate access tokens), `JwtUserPrincipal`, `JwtAuthenticationFilter`
 - `com.algogyeyak.auth.oauth` — per-provider attribute parsing (`GoogleOAuth2UserInfo`, `KakaoOAuth2UserInfo`), `CustomOAuth2UserService`, cookie-based `AuthorizationRequestRepository`
-- `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig` — OAuth2 login wiring, JWT delivered via httpOnly cookie
-- `com.algogyeyak.auth.controller.AuthController` — `GET /auth/me`, `POST /auth/logout` (엔드포인트는 `/api` 프리픽스 없이 작성하는 것으로 팀 컨벤션 확정)
+- `com.algogyeyak.auth.token` — `RefreshTokenService`/`RefreshTokenRepository`: DB-backed (no Redis), single session per user — a new login or refresh rotates/overwrites the one row for that `user_id`. Raw tokens are never stored, only a SHA-256 hash.
+- `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig` — OAuth2 login wiring, access/refresh JWT delivered via httpOnly cookies (refresh cookie scoped to `/auth`)
+- `com.algogyeyak.auth.controller.AuthController` — `GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh` (엔드포인트는 `/api` 프리픽스 없이 작성하는 것으로 팀 컨벤션 확정)
 
-Local email/password login and refresh tokens are not implemented yet — planned as a follow-up.
+Local email/password login is not implemented yet — planned as a follow-up.
 
 See [README.md](./README.md) for stack overview and getting-started instructions.
 
