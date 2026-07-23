@@ -1,0 +1,41 @@
+package com.algogyeyak.contractanalysis.controller;
+
+import com.algogyeyak.auth.jwt.JwtUserPrincipal;
+import com.algogyeyak.contractanalysis.dto.ContractAnalysisInputRequest;
+import com.algogyeyak.contractanalysis.dto.ContractAnalysisInputResponse;
+import com.algogyeyak.contractanalysis.entity.InputType;
+import com.algogyeyak.contractanalysis.service.ContractAnalysisInputService;
+import com.algogyeyak.global.response.ApiResponse;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+
+@RestController
+@RequestMapping("/contract-analysis")
+public class ContractAnalysisController {
+
+    private final ContractAnalysisInputService contractAnalysisInputService;
+
+    public ContractAnalysisController(ContractAnalysisInputService contractAnalysisInputService) {
+        this.contractAnalysisInputService = contractAnalysisInputService;
+    }
+
+    @PostMapping(value = "/inputs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ContractAnalysisInputResponse>> createInput(
+            @RequestParam InputType inputType,
+            @RequestParam(required = false) String text,
+            @RequestParam(required = false) Long propertyId,
+            @RequestPart(required = false) MultipartFile image,
+            @AuthenticationPrincipal JwtUserPrincipal principal
+    ) {
+        ContractAnalysisInputRequest request = new ContractAnalysisInputRequest(inputType, text, propertyId, image);
+        ContractAnalysisInputResponse response = contractAnalysisInputService.createInput(request, principal.userId());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+}

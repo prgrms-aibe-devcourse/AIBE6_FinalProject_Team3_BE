@@ -50,3 +50,17 @@ Google/Kakao OAuth2 login (access-token issuance only, no refresh token yet) is 
 Local email/password login and Redis-backed refresh tokens are not implemented yet — planned as a follow-up.
 
 See [README.md](./README.md) for stack overview and getting-started instructions.
+
+## contract-analysis 도메인 (진행 중 — 담당: 송민혁)
+
+- 패키지: `com.algogyeyak.contractanalysis`
+- 파이프라인: 계약문구입력 → OCR → 마스킹 → AI분석 (4개 엔드포인트, 순차 진행)
+  - POST /contract-analysis/inputs
+  - POST /contract-analysis/ocr
+  - POST /contract-analysis/masking
+  - POST /contract-analysis/analyze
+- 외부 API: Clova OCR(NCP), Gemini(gemini-2.5-flash) — 키는 환경변수로 분리, .env에 절대 커밋 금지
+- 마스킹 완료 전(`userConfirmed=true` 아니면) AI 분석 요청 절대 차단
+- 위험 신호는 등급(LOW/MEDIUM/HIGH) 없이 riskFlag(true/false) + 설명 방식 — 팀 전체 정책
+- 계약 문구 원본/마스킹 전 텍스트는 DB·로그에 영구 저장하지 않음 (개인정보 정책)
+- 분석 결과는 이력 조회 목적 저장 안 함 (MVP 범위 제외)
