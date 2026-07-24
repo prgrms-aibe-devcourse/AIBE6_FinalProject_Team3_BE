@@ -47,7 +47,9 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 
 ## Current state
 
-구글/카카오 OAuth2 로그인 및 Refresh Token이 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(Access Token 발급/검증/필터), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.token`(`RefreshTokenService`/`RefreshTokenRepository` — Redis 없이 DB로 관리, 유저당 1개 세션만 유지하며 재로그인/재발급 시 기존 행을 덮어씀), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 Access/Refresh Token을 httpOnly 쿠키로 전달, 둘 다 path `/` — 프론트 미들웨어가 보호 페이지 요청에서도 Refresh 쿠키를 읽어야 해서 path를 좁히지 않음), `com.algogyeyak.auth.controller.AuthController`(`GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`). 로컬 이메일/비밀번호 로그인은 다음 단계로 남아 있습니다.
+구글/카카오 OAuth2 로그인과 로컬 이메일/비밀번호 로그인 모두 Refresh Token과 함께 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(Access Token 발급/검증/필터), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.service.LocalAuthService`(이메일/비밀번호 가입·로그인 — 비밀번호는 BCrypt로 해시, 이메일은 trim+lowercase로 정규화해 저장/조회), `com.algogyeyak.auth.token`(`RefreshTokenService`/`RefreshTokenRepository` — Redis 없이 DB로 관리, 유저당 1개 세션만 유지하며 재로그인/재발급 시 기존 행을 덮어씀), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 Access/Refresh Token을 httpOnly 쿠키로 전달, 둘 다 path `/` — 프론트 미들웨어가 보호 페이지 요청에서도 Refresh 쿠키를 읽어야 해서 path를 좁히지 않음), `com.algogyeyak.auth.controller.AuthController`(`GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`, `POST /auth/signup`, `POST /auth/login`). 회원가입/로컬 로그인도 소셜 로그인과 동일하게 성공 시 즉시 쿠키를 발급해 자동 로그인 상태로 만듭니다.
+
+로컬 비밀번호 정책은 영문+숫자를 포함한 8~72자의 ASCII 출력 가능 문자(공백 제외)입니다 — BCrypt가 72바이트를 넘는 부분을 조용히 잘라버리는 문제 때문에 멀티바이트 문자를 막아 문자 수와 바이트 수를 일치시켰습니다 (`SignupRequest`의 `@Pattern` 참고).
 
 실제 구글/카카오 로그인을 로컬에서 테스트하려면 아래 환경변수가 필요합니다 (미설정 시 더미 값으로 기동은 되지만 실제 소셜 로그인은 동작하지 않습니다). `.env.example`을 `backend/.env`로 복사해 값을 채워두면 `me.paulschwarz:springboot4-dotenv`(개발 전용 의존성)가 `bootRun` 시 자동으로 읽어들입니다 — 별도로 셸에 export하거나 IDE Run Configuration에 등록할 필요가 없습니다. **`.env`는 반드시 BOM 없는 UTF-8로 저장하세요** — 메모장 등으로 저장하면 파일 앞에 보이지 않는 BOM이 붙어 dotenv 파서가 `Malformed entry` 에러를 내며 기동에 실패합니다.
 

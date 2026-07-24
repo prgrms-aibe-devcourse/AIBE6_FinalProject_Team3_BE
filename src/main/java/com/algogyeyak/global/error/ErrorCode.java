@@ -12,6 +12,11 @@ public enum ErrorCode {
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_500", "서버 내부 오류가 발생했습니다."),
     INVALID_SORT_FIELD(HttpStatus.BAD_REQUEST, "COMMON_400_SORT", "허용되지 않는 정렬 기준입니다."),
 
+    // Auth 도메인
+    AUTH_EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "AUTH_EMAIL_ALREADY_EXISTS", "이미 가입된 이메일입니다."),
+    AUTH_NICKNAME_ALREADY_EXISTS(HttpStatus.CONFLICT, "AUTH_NICKNAME_ALREADY_EXISTS", "이미 사용 중인 닉네임입니다."),
+    AUTH_INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "AUTH_INVALID_CREDENTIALS", "이메일 또는 비밀번호가 올바르지 않습니다."),
+
     // Property 도메인
     PROPERTY_NOT_FOUND(HttpStatus.NOT_FOUND, "PROPERTY_NOT_FOUND", "존재하지 않는 매물입니다."),
     PROPERTY_ACCESS_DENIED(HttpStatus.FORBIDDEN, "PROPERTY_ACCESS_DENIED", "본인이 등록한 매물만 접근할 수 있습니다."),

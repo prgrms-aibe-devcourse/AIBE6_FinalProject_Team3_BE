@@ -6,7 +6,9 @@ import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OAuth2UserInfoFactoryTest {
 
@@ -15,6 +17,7 @@ class OAuth2UserInfoFactoryTest {
         Map<String, Object> attributes = Map.of(
                 "sub", "1234567890",
                 "email", "test@gmail.com",
+                "email_verified", true,
                 "name", "Test User",
                 "picture", "https://example.com/pic.jpg"
         );
@@ -25,6 +28,16 @@ class OAuth2UserInfoFactoryTest {
         assertEquals("test@gmail.com", userInfo.getEmail());
         assertEquals("Test User", userInfo.getNickname());
         assertEquals("https://example.com/pic.jpg", userInfo.getProfileImageUrl());
+        assertTrue(userInfo.isEmailVerified());
+    }
+
+    @Test
+    void googleTreatsUnverifiedOrMissingEmailVerifiedClaimAsUnverified() {
+        Map<String, Object> unverified = Map.of("sub", "1", "email", "test@gmail.com", "email_verified", false);
+        Map<String, Object> missing = Map.of("sub", "1", "email", "test@gmail.com");
+
+        assertFalse(OAuth2UserInfoFactory.getOAuth2UserInfo("google", unverified).isEmailVerified());
+        assertFalse(OAuth2UserInfoFactory.getOAuth2UserInfo("google", missing).isEmailVerified());
     }
 
     @Test
@@ -35,6 +48,7 @@ class OAuth2UserInfoFactoryTest {
         );
         Map<String, Object> kakaoAccount = Map.of(
                 "email", "test@kakao.com",
+                "is_email_verified", true,
                 "profile", profile
         );
         Map<String, Object> attributes = Map.of(
@@ -48,6 +62,17 @@ class OAuth2UserInfoFactoryTest {
         assertEquals("test@kakao.com", userInfo.getEmail());
         assertEquals("카카오유저", userInfo.getNickname());
         assertEquals("https://example.com/kakao.jpg", userInfo.getProfileImageUrl());
+        assertTrue(userInfo.isEmailVerified());
+    }
+
+    @Test
+    void kakaoTreatsUnverifiedOrMissingFlagAsUnverified() {
+        Map<String, Object> unverifiedAccount = Map.of("email", "test@kakao.com", "is_email_verified", false);
+        Map<String, Object> withUnverifiedAccount = Map.of("id", 1L, "kakao_account", unverifiedAccount);
+        Map<String, Object> withoutAccount = Map.of("id", 1L);
+
+        assertFalse(OAuth2UserInfoFactory.getOAuth2UserInfo("kakao", withUnverifiedAccount).isEmailVerified());
+        assertFalse(OAuth2UserInfoFactory.getOAuth2UserInfo("kakao", withoutAccount).isEmailVerified());
     }
 
     @Test

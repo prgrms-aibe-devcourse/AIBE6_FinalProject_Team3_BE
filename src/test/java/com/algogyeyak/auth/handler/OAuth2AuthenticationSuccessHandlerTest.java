@@ -38,9 +38,13 @@ class OAuth2AuthenticationSuccessHandlerTest {
             jwtProvider, refreshTokenService, authorizationRequestRepository, cookieUtils);
 
     private Authentication authenticationFor(Long userId) {
+        return authenticationFor(userId, false);
+    }
+
+    private Authentication authenticationFor(Long userId, boolean linkedToExistingAccount) {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
         ReflectionTestUtils.setField(user, "id", userId);
-        CustomOAuth2User principal = new CustomOAuth2User(user, Map.of("id", "123"));
+        CustomOAuth2User principal = new CustomOAuth2User(user, Map.of("id", "123"), linkedToExistingAccount);
         return new UsernamePasswordAuthenticationToken(principal, null);
     }
 
@@ -72,6 +76,19 @@ class OAuth2AuthenticationSuccessHandlerTest {
 
         verify(authorizationRequestRepository).removeAuthorizationRequest(request, response);
         assertEquals("https://example.com/login/success", response.getRedirectedUrl());
+    }
+
+    @Test
+    void appendsAccountLinkedNoticeWhenLoginLinkedToExistingAccount() throws Exception {
+        ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login/success");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        handler.onAuthenticationSuccess(request, response, authenticationFor(1L, true));
+
+        // 새 계정 생성이 아니라 기존 계정에 방금 연동된 로그인이면, 로그인은 그대로 진행하되
+        // 프론트가 안내 배너를 띄울 수 있도록 신호만 쿼리 파라미터로 실어 보낸다.
+        assertEquals("https://example.com/login/success?notice=account_linked", response.getRedirectedUrl());
     }
 
     @Test
