@@ -1,0 +1,219 @@
+package com.algogyeyak.auth.service;
+
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.user.entity.User;
+import com.algogyeyak.user.enums.AuthProvider;
+import com.algogyeyak.user.repository.UserRepository;
+import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class LocalAuthServiceTest {
+
+    private final UserRepository userRepository = mock(UserRepository.class);
+    private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
+    private final LocalAuthService localAuthService =
+            new LocalAuthService(userRepository, passwordEncoder, mock(PlatformTransactionManager.class));
+
+    @Test
+    void signupCreatesLocalUserWithEncodedPassword() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(passwordEncoder.encode("password1")).thenReturn("encoded-hash");
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User user = localAuthService.signup("test@example.com", "password1", "테스트유저");
+
+        assertEquals("test@example.com", user.getEmail());
+        assertEquals("테스트유저", user.getNickname());
+        assertEquals("encoded-hash", user.getPasswordHash());
+        verify(userRepository).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void signupNormalizesEmailToLowercaseAndTrimmed() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User user = localAuthService.signup("  Test@Example.COM  ", "password1", "테스트유저");
+
+        assertEquals("test@example.com", user.getEmail());
+        verify(userRepository).existsByEmail("test@example.com");
+    }
+
+    @Test
+    void signupThrowsWhenEmailAlreadyExists() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(true);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        assertEquals(ErrorCode.AUTH_EMAIL_ALREADY_EXISTS, exception.getErrorCode());
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void signupThrowsWhenNicknameAlreadyExists() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(true);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        assertEquals(ErrorCode.AUTH_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void signupRecoversAsEmailDuplicateWhenConcurrentSignupHitsUniqueConstraint() {
+        when(userRepository.existsByEmail("test@example.com"))
+                .thenReturn(false) // 최초 체크 시점
+                .thenReturn(true); // INSERT 실패 후 재확인
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(userRepository.saveAndFlush(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        assertEquals(ErrorCode.AUTH_EMAIL_ALREADY_EXISTS, exception.getErrorCode());
+    }
+
+    @Test
+    void loginSucceedsWithMatchingPassword() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+
+        User result = localAuthService.login("test@example.com", "password1");
+
+        assertEquals(user, result);
+    }
+
+    @Test
+    void loginNormalizesEmailBeforeLookup() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+
+        User result = localAuthService.login("  Test@Example.COM  ", "password1");
+
+        assertEquals(user, result);
+    }
+
+    @Test
+    void loginThrowsWhenEmailNotFound() {
+        when(userRepository.findByEmail("unknown@example.com")).thenReturn(Optional.empty());
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.login("unknown@example.com", "password1"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+    }
+
+    @Test
+    void loginThrowsWhenPasswordDoesNotMatch() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong-password", "encoded-hash")).thenReturn(false);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.login("test@example.com", "wrong-password"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+    }
+
+    @Test
+    void loginThrowsForSocialOnlyAccountWithoutRevealingItExists() {
+        // 소셜 전용 가입은 passwordHash가 없다 — 계정 존재 여부를 드러내지 않도록 일반 자격 증명 오류와 동일하게 처리한다.
+        User socialUser = User.createOAuthUser("social@example.com", "소셜유저", null, AuthProvider.KAKAO, "999");
+        when(userRepository.findByEmail("social@example.com")).thenReturn(Optional.of(socialUser));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.login("social@example.com", "password1"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+    }
+
+    @Test
+    void loginThrowsWhenUserWithdrawn() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        user.withdraw();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        assertThrows(BusinessException.class, () -> localAuthService.login("test@example.com", "password1"));
+    }
+
+    @Test
+    void setPasswordSucceedsForOAuthOnlyAccountWithoutCurrentPassword() {
+        User user = User.createOAuthUser("social@example.com", "소셜유저", null, AuthProvider.KAKAO, "999");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+
+        localAuthService.setPassword(1L, null, "newPassword1");
+
+        assertEquals("new-encoded-hash", user.getPasswordHash());
+    }
+
+    @Test
+    void setPasswordRequiresCurrentPasswordWhenAlreadySet() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.setPassword(1L, null, "newPassword1"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+        assertEquals("encoded-hash", user.getPasswordHash());
+    }
+
+    @Test
+    void setPasswordRejectsWrongCurrentPassword() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong-current", "encoded-hash")).thenReturn(false);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.setPassword(1L, "wrong-current", "newPassword1"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+    }
+
+    @Test
+    void setPasswordSucceedsWithCorrectCurrentPassword() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("oldPassword1", "encoded-hash")).thenReturn(true);
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+
+        localAuthService.setPassword(1L, "oldPassword1", "newPassword1");
+
+        assertEquals("new-encoded-hash", user.getPasswordHash());
+    }
+
+    @Test
+    void setPasswordThrowsWhenUserNotFoundOrWithdrawn() {
+        when(userRepository.findById(1L)).thenReturn(Optional.empty());
+
+        assertThrows(BusinessException.class, () -> localAuthService.setPassword(1L, null, "newPassword1"));
+    }
+}

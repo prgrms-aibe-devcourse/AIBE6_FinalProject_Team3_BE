@@ -2,14 +2,17 @@ package com.algogyeyak.auth.oauth;
 
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletResponse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CookieUtilsTest {
 
     private final CookieUtils cookieUtils =
-            new CookieUtils(false, "test-state-signing-key-must-be-at-least-32-bytes");
+            new CookieUtils(false, "Lax", "", "test-state-signing-key-must-be-at-least-32-bytes");
 
     @Test
     void serializeThenDeserializeRoundTrips() {
@@ -54,11 +57,33 @@ class CookieUtilsTest {
     @Test
     void differentSigningKeyFailsSignatureCheck() {
         CookieUtils otherCookieUtils =
-                new CookieUtils(false, "different-state-signing-key-also-at-least-32-bytes");
+                new CookieUtils(false, "Lax", "", "different-state-signing-key-also-at-least-32-bytes");
         String serialized = otherCookieUtils.serialize("hello-world");
 
         Cookie cookie = new Cookie("test", serialized);
 
         assertThrows(CookieTamperedException.class, () -> cookieUtils.deserialize(cookie, String.class));
+    }
+
+    @Test
+    void addCookieOmitsDomainAttributeWhenNotConfigured() {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        cookieUtils.addCookie(response, "test", "value", 3600);
+
+        String setCookie = response.getHeader("Set-Cookie");
+        assertFalse(setCookie.contains("Domain"));
+    }
+
+    @Test
+    void addCookieIncludesDomainAttributeWhenConfigured() {
+        CookieUtils scopedCookieUtils =
+                new CookieUtils(false, "Lax", ".localhost", "test-state-signing-key-must-be-at-least-32-bytes");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        scopedCookieUtils.addCookie(response, "test", "value", 3600);
+
+        String setCookie = response.getHeader("Set-Cookie");
+        assertTrue(setCookie.contains("Domain=.localhost"));
     }
 }

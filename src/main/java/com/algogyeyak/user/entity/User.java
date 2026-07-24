@@ -64,7 +64,7 @@ public class User {
     private LocalDateTime updatedAt;
 
     @Builder
-    private User(String email, String nickname, String profileImageUrl, AuthProvider provider, String providerId, Role role) {
+    private User(String email, String passwordHash, String nickname, String profileImageUrl, AuthProvider provider, String providerId, Role role) {
         this.email = email;
         this.passwordHash = passwordHash;
         this.nickname = nickname;
@@ -76,7 +76,13 @@ public class User {
     }
 
     public static User createOAuthUser(String email, String nickname, String profileImageUrl, AuthProvider provider, String providerId) {
-        return new User(email, nickname, profileImageUrl, provider, providerId, Role.USER);
+        return new User(email, null, nickname, profileImageUrl, provider, providerId, Role.USER);
+    }
+
+    // 로컬 회원은 provider+provider_id 유니크 제약을 email로 대신 만족시킨다 — 소셜 로그인처럼
+    // 별도 식별자가 없고, email 자체가 이미 유니크하므로 조합 제약과 충돌하지 않는다.
+    public static User createLocalUser(String email, String passwordHash, String nickname) {
+        return new User(email, passwordHash, nickname, null, AuthProvider.LOCAL, email, Role.USER);
     }
 
     public void updateNickname(@Size(min = 2, max = 20, message = "닉네임은 2~20자여야 합니다.") String nickname) {
@@ -85,6 +91,30 @@ public class User {
 
     public void updateProfileImageUrl(String profileImageUrl) {
         this.profileImageUrl = profileImageUrl;
+    }
+
+    /**
+     * 이미 존재하는 계정(로컬 가입 또는 다른 소셜 제공자)에 새 소셜 로그인 수단을 연결한다.
+     * provider/providerId만 이번에 사용한 로그인 수단으로 덮어쓰고, email/닉네임/프로필사진/
+     * passwordHash는 그대로 둔다 — 그래야 로컬 로그인(passwordHash 존재 여부로만 판단)이나
+     * 이전에 연결했던 다른 소셜 로그인도 계속 사용할 수 있다(다음 로그인 때 email로 재조회되어
+     * provider/providerId가 다시 그 시점의 로그인 수단으로 갱신됨).
+     *
+     * 이 방향(소셜 로그인 → 기존 계정 연결)만 안전하다: OAuth 제공자가 이미 이메일 소유권을
+     * 검증했기 때문이다. 반대 방향(로컬 가입 시 이미 존재하는 소셜 계정에 비밀번호를 붙이는 것)은
+     * 이메일 소유권 검증 없이 아무나 타인의 이메일로 가입 시도만으로 계정을 탈취할 수 있게 되므로
+     * 절대 허용하면 안 된다 — LocalAuthService.signup은 이메일 중복을 그대로 거부해야 한다.
+     */
+    public void linkProvider(AuthProvider provider, String providerId) {
+        this.provider = provider;
+        this.providerId = providerId;
+    }
+
+    // 소셜 전용으로 가입한 계정이 처음 비밀번호를 설정하거나 기존 비밀번호를 변경할 때 사용한다.
+    // 현재 비밀번호 검증(이미 설정되어 있는 경우)은 호출 전에 서비스 레이어(LocalAuthService)에서
+    // 끝내고 온다는 전제다.
+    public void updatePasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
     }
 
     public boolean isWithdrawn() {

@@ -31,6 +31,14 @@ public class KakaoOAuth2UserInfo extends OAuth2UserInfo {
         return profileImageUrl != null ? String.valueOf(profileImageUrl) : null;
     }
 
+    // 카카오계정 이메일 인증 여부(is_email_verified) — 이메일 동의 자체를 안 받았거나(kakao_account
+    // 없음), 인증 전 계정이면 false로 취급한다.
+    @Override
+    public boolean isEmailVerified() {
+        Object verified = getKakaoAccount() != null ? getKakaoAccount().get("is_email_verified") : null;
+        return Boolean.parseBoolean(String.valueOf(verified));
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> getKakaoAccount() {
         return (Map<String, Object>) attributes.get("kakao_account");

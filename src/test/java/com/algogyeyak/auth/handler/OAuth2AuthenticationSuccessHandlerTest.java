@@ -38,9 +38,13 @@ class OAuth2AuthenticationSuccessHandlerTest {
             jwtProvider, refreshTokenService, authorizationRequestRepository, cookieUtils);
 
     private Authentication authenticationFor(Long userId) {
+        return authenticationFor(userId, false);
+    }
+
+    private Authentication authenticationFor(Long userId, boolean linkedToExistingAccount) {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
         ReflectionTestUtils.setField(user, "id", userId);
-        CustomOAuth2User principal = new CustomOAuth2User(user, Map.of("id", "123"));
+        CustomOAuth2User principal = new CustomOAuth2User(user, Map.of("id", "123"), linkedToExistingAccount);
         return new UsernamePasswordAuthenticationToken(principal, null);
     }
 
@@ -75,7 +79,20 @@ class OAuth2AuthenticationSuccessHandlerTest {
     }
 
     @Test
-    void issuesRefreshTokenCookieScopedToAuthPath() throws Exception {
+    void appendsAccountLinkedNoticeWhenLoginLinkedToExistingAccount() throws Exception {
+        ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login/success");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        handler.onAuthenticationSuccess(request, response, authenticationFor(1L, true));
+
+        // 새 계정 생성이 아니라 기존 계정에 방금 연동된 로그인이면, 로그인은 그대로 진행하되
+        // 프론트가 안내 배너를 띄울 수 있도록 신호만 쿼리 파라미터로 실어 보낸다.
+        assertEquals("https://example.com/login/success?notice=account_linked", response.getRedirectedUrl());
+    }
+
+    @Test
+    void issuesRefreshTokenCookieScopedToRootPath() throws Exception {
         ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login/success");
         when(refreshTokenService.issue(any(User.class))).thenReturn("raw-refresh-token");
         when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
@@ -84,7 +101,9 @@ class OAuth2AuthenticationSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, authenticationFor(1L));
 
+        // path를 /auth로 좁히면 프론트 미들웨어가 보호 페이지 요청에서 이 쿠키를 아예 못 읽으므로,
+        // Access Token과 동일하게 "/"로 발급한다 (4-인자 addCookie는 CookieUtils에서 path="/"로 기본 처리).
         verify(cookieUtils).addCookie(eq(response), eq(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME),
-                eq("raw-refresh-token"), eq(1209600), eq("/auth"));
+                eq("raw-refresh-token"), eq(1209600));
     }
 }
