@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.service;
 
+import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
@@ -11,8 +12,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
-
-import java.util.Locale;
 
 @Service
 public class LocalAuthService {
@@ -33,7 +32,7 @@ public class LocalAuthService {
 
     @Transactional
     public User signup(String email, String rawPassword, String nickname) {
-        String normalizedEmail = normalizeEmail(email);
+        String normalizedEmail = EmailNormalizer.normalize(email);
 
         if (userRepository.existsByEmail(normalizedEmail)) {
             throw new BusinessException(ErrorCode.AUTH_EMAIL_ALREADY_EXISTS);
@@ -61,7 +60,7 @@ public class LocalAuthService {
 
     @Transactional(readOnly = true)
     public User login(String email, String rawPassword) {
-        User user = userRepository.findByEmail(normalizeEmail(email))
+        User user = userRepository.findByEmail(EmailNormalizer.normalize(email))
                 .filter(found -> !found.isWithdrawn())
                 .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS));
 
@@ -75,9 +74,25 @@ public class LocalAuthService {
         return user;
     }
 
-    // 가입/로그인 조회 기준의 이메일 대소문자·앞뒤 공백 차이로 중복 가입이 뚫리거나 로그인이
-    // 실패하는 것을 막기 위해, DB에 저장/조회하는 시점에 항상 동일한 정규화 규칙을 적용한다.
-    private static String normalizeEmail(String email) {
-        return email.trim().toLowerCase(Locale.ROOT);
+    /**
+     * 로그인된 사용자 본인의 비밀번호를 설정/변경한다. 구글/카카오로만 가입한 계정은 OAuth가 이미
+     * 이메일 소유권을 검증해준 상태이므로, 로그인된 상태에서 비밀번호를 새로 설정하면 그 이메일로
+     * 로컬 로그인도 바로 가능해진다({@link #login}은 provider와 무관하게 email+passwordHash만 본다).
+     * 이미 비밀번호가 있는 계정은 탈취된 세션 하나만으로 비밀번호가 바뀌는 것을 막기 위해 현재
+     * 비밀번호 확인을 요구한다.
+     */
+    @Transactional
+    public void setPassword(Long userId, String currentPassword, String newPassword) {
+        User user = userRepository.findById(userId)
+                .filter(found -> !found.isWithdrawn())
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
+
+        String existingHash = user.getPasswordHash();
+        if (existingHash != null
+                && (currentPassword == null || !passwordEncoder.matches(currentPassword, existingHash))) {
+            throw new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS, "현재 비밀번호가 올바르지 않습니다.");
+        }
+
+        user.updatePasswordHash(passwordEncoder.encode(newPassword));
     }
 }

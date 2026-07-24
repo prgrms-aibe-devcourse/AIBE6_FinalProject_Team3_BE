@@ -1,6 +1,7 @@
 package com.algogyeyak.auth.controller;
 
 import com.algogyeyak.auth.dto.LoginRequest;
+import com.algogyeyak.auth.dto.PasswordUpdateRequest;
 import com.algogyeyak.auth.dto.SignupRequest;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
@@ -20,6 +21,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -83,6 +85,16 @@ public class AuthController {
         MeResponse body = new MeResponse(
                 principal.userId(), principal.email(), user.getNickname(), user.getProfileImageUrl(), principal.role().name());
         return ResponseEntity.ok(ApiResponse.success(body));
+    }
+
+    // 구글/카카오로만 가입한 계정도 여기서 비밀번호를 설정하면 그 즉시 같은 이메일로 로컬
+    // 로그인이 가능해진다 — OAuth가 이미 이 이메일의 소유권을 검증해줬으므로 안전하다.
+    @PatchMapping("/password")
+    public ResponseEntity<ApiResponse<Void>> updatePassword(
+            @AuthenticationPrincipal JwtUserPrincipal principal,
+            @Valid @RequestBody PasswordUpdateRequest request) {
+        localAuthService.setPassword(principal.userId(), request.getCurrentPassword(), request.getNewPassword());
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
     }
 
     @PostMapping("/logout")

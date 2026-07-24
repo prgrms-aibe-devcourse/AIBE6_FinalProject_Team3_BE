@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.oauth;
 
+import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
@@ -7,12 +8,15 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+
+import java.util.Optional;
 
 @Service
 public class CustomOAuth2UserService extends DefaultOAuth2UserService {
@@ -47,21 +51,72 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                 ? userInfo.getNickname()
                 : provider.name().toLowerCase() + "_" + userInfo.getProviderId();
 
-        User user = findOrCreateUser(provider, userInfo, nickname);
+        FindOrCreateResult result = findOrCreateUser(provider, userInfo, nickname);
 
-        return new CustomOAuth2User(user, oAuth2User.getAttributes());
+        return new CustomOAuth2User(result.user(), oAuth2User.getAttributes(), result.linked());
+    }
+
+    // linked: 새 계정 생성이 아니라 기존 계정(로컬 가입 또는 다른 소셜)에 이번 로그인 수단을 막
+    // 연결한 경우 true — OAuth2AuthenticationSuccessHandler가 이 값을 보고 프론트에 안내를 띄운다.
+    private record FindOrCreateResult(User user, boolean linked) {
     }
 
     // 재로그인 시 기존 회원의 닉네임/프로필 사진은 OAuth 제공자 값으로 덮어쓰지 않는다.
     // 최초 가입 이후에는 프로필 등록/수정 화면에서 관리하는 값이 우선하므로 그대로 재사용한다.
-    private User findOrCreateUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
-        return userRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
-                .orElseGet(() -> createUser(provider, userInfo, nickname));
+    private FindOrCreateResult findOrCreateUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
+        Optional<User> byProvider = userRepository.findByProviderAndProviderId(provider, userInfo.getProviderId());
+        if (byProvider.isPresent()) {
+            return new FindOrCreateResult(byProvider.get(), false);
+        }
+
+        Optional<User> linked = linkToExistingAccountByEmail(provider, userInfo);
+        if (linked.isPresent()) {
+            return new FindOrCreateResult(linked.get(), true);
+        }
+
+        return new FindOrCreateResult(createUser(provider, userInfo, nickname), false);
+    }
+
+    /**
+     * 이 provider+providerId로는 처음 로그인하는 경우, 같은 이메일로 이미 존재하는 계정(로컬 가입
+     * 또는 다른 소셜 제공자)이 있는지 찾아 연결한다. {@link #findVerifiedEmailMatch}가 검증된
+     * 이메일에 대해서만 결과를 주므로 이 방향의 자동 연동은 안전하다 — 반대로 로컬 가입이 기존
+     * 소셜 계정에 비밀번호를 붙이는 것은 이메일 소유권 검증이 없어 계정 탈취로 이어질 수 있어
+     * 절대 허용하지 않는다({@link com.algogyeyak.auth.service.LocalAuthService#signup}은 이메일
+     * 중복을 거부).
+     */
+    private Optional<User> linkToExistingAccountByEmail(AuthProvider provider, OAuth2UserInfo userInfo) {
+        return findVerifiedEmailMatch(userInfo).map(user -> {
+            user.linkProvider(provider, userInfo.getProviderId());
+            return user;
+        });
+    }
+
+    /**
+     * OAuth 제공자가 이메일 소유권을 검증해준 경우에만 이메일로 기존 계정을 찾는다. 검증되지 않은
+     * 이메일(Kakao의 {@code is_email_verified=false}, 아직 인증 전인 Google 계정 등)은 그 이메일의
+     * 실제 소유자가 아니어도 주장할 수 있는 값이라, 자동 연동은 물론 아래 {@link #createUser}의
+     * 유니크 제약 충돌 복구에도 사용하면 안 된다 — 그러지 않으면 검증 안 된 이메일 하나로 남의
+     * 계정에 로그인하게 될 수 있다.
+     */
+    private Optional<User> findVerifiedEmailMatch(OAuth2UserInfo userInfo) {
+        if (!userInfo.isEmailVerified()) {
+            return Optional.empty();
+        }
+        String email = EmailNormalizer.normalize(userInfo.getEmail());
+        return email == null ? Optional.empty() : userRepository.findByEmail(email);
     }
 
     private User createUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
+        // 검증되지 않은 이메일은 저장하지 않고 null로 둔다. 저장해버리면, 나중에 이 이메일의 실제
+        // 소유자가 검증된 OAuth(다른 provider 포함)로 로그인할 때 findVerifiedEmailMatch가 "이미
+        // 존재하는 계정"으로 착각해 이 row에 연동해버린다 — 검증 안 된 이메일로 아무나 먼저 만들어둔
+        // 계정에 진짜 소유자가 합쳐지는 계정 탈취로 이어질 수 있다. null이면 findByEmail로 절대
+        // 찾을 수 없으니 이 위험 자체가 차단된다. 로컬 가입/로그인과 동일한 정규화를 거치는 것도
+        // 마찬가지 이유(대소문자만 다른 이메일이 다른 계정으로 취급되는 것 방지)다.
+        String email = userInfo.isEmailVerified() ? EmailNormalizer.normalize(userInfo.getEmail()) : null;
         User newUser = User.createOAuthUser(
-                userInfo.getEmail(), nickname, userInfo.getProfileImageUrl(), provider, userInfo.getProviderId());
+                email, nickname, userInfo.getProfileImageUrl(), provider, userInfo.getProviderId());
 
         try {
             // INSERT를 별도(REQUIRES_NEW) 트랜잭션/세션에서 시도한다. 같은 세션에서 saveAndFlush가
@@ -72,10 +127,17 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             requiresNewTransactionTemplate.executeWithoutResult(status -> userRepository.saveAndFlush(newUser));
             return newUser;
         } catch (DataIntegrityViolationException e) {
-            // 같은 provider+providerId로 동시에 첫 로그인이 들어와 유니크 제약에 걸린 경우 —
-            // 먼저 커밋된 쪽의 row를 그대로 사용한다 (드문 동시 최초 로그인 레이스 대비).
+            // 같은 provider+providerId로 동시에 첫 로그인이 들어와 유니크 제약에 걸린 경우, 또는
+            // 검증된 이메일로 동시에 가입/연동이 먼저 커밋된 경우 — 먼저 커밋된 쪽의 row를 그대로
+            // 사용한다(드문 동시 레이스 대비). 그마저도 못 찾으면(검증 안 된 이메일이라 위 조회가
+            // 애초에 empty를 준 경우 포함) 이 예외를 raw로 흘려보내는 대신 AuthenticationException으로
+            // 감싼다 — 그래야 OAuth2LoginAuthenticationFilter가 이를 잡아
+            // OAuth2AuthenticationFailureHandler로 정상적으로 프론트에 에러 리다이렉트를 보내고,
+            // 서블릿까지 예외가 올라가 500으로 크래시하는 것을 막는다.
             return userRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
-                    .orElseThrow(() -> e);
+                    .or(() -> findVerifiedEmailMatch(userInfo))
+                    .orElseThrow(() -> new OAuth2AuthenticationException(
+                            new OAuth2Error("email_conflict", "이미 사용 중인 이메일입니다.", null), e));
         }
     }
 }

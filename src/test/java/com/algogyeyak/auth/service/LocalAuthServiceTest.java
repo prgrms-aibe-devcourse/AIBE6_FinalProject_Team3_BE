@@ -8,6 +8,7 @@ import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.Optional;
@@ -156,5 +157,63 @@ class LocalAuthServiceTest {
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
 
         assertThrows(BusinessException.class, () -> localAuthService.login("test@example.com", "password1"));
+    }
+
+    @Test
+    void setPasswordSucceedsForOAuthOnlyAccountWithoutCurrentPassword() {
+        User user = User.createOAuthUser("social@example.com", "소셜유저", null, AuthProvider.KAKAO, "999");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+
+        localAuthService.setPassword(1L, null, "newPassword1");
+
+        assertEquals("new-encoded-hash", user.getPasswordHash());
+    }
+
+    @Test
+    void setPasswordRequiresCurrentPasswordWhenAlreadySet() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.setPassword(1L, null, "newPassword1"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+        assertEquals("encoded-hash", user.getPasswordHash());
+    }
+
+    @Test
+    void setPasswordRejectsWrongCurrentPassword() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong-current", "encoded-hash")).thenReturn(false);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.setPassword(1L, "wrong-current", "newPassword1"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+    }
+
+    @Test
+    void setPasswordSucceedsWithCorrectCurrentPassword() {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("oldPassword1", "encoded-hash")).thenReturn(true);
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+
+        localAuthService.setPassword(1L, "oldPassword1", "newPassword1");
+
+        assertEquals("new-encoded-hash", user.getPasswordHash());
+    }
+
+    @Test
+    void setPasswordThrowsWhenUserNotFoundOrWithdrawn() {
+        when(userRepository.findById(1L)).thenReturn(Optional.empty());
+
+        assertThrows(BusinessException.class, () -> localAuthService.setPassword(1L, null, "newPassword1"));
     }
 }

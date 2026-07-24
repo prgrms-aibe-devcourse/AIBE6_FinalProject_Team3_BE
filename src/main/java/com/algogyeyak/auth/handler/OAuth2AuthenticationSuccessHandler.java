@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.io.IOException;
 
@@ -32,7 +33,8 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response, Authentication authentication)
             throws IOException {
-        User user = ((CustomOAuth2User) authentication.getPrincipal()).getUser();
+        CustomOAuth2User principal = (CustomOAuth2User) authentication.getPrincipal();
+        User user = principal.getUser();
 
         String accessToken = jwtProvider.createAccessToken(user.getId(), user.getEmail(), user.getRole());
         cookieUtils.addCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, accessToken,
@@ -48,6 +50,16 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
         authorizationRequestRepository.removeAuthorizationRequest(request, response);
         clearAuthenticationAttributes(request);
 
-        getRedirectStrategy().sendRedirect(request, response, authorizedRedirectUri);
+        // 새 계정을 만든 게 아니라 기존 계정(로컬 가입 또는 다른 소셜)에 방금 연동된 로그인이라면,
+        // 아무 안내 없이 조용히 로그인되는 게 사용자 입장에서 낯설 수 있어 프론트가 한 번 안내
+        // 배너를 띄울 수 있도록 신호만 실어 보낸다(로그인 자체를 막거나 확인받지는 않는다 — OAuth
+        // 제공자가 이미 이메일을 검증해줬으므로 확인 없이 진행해도 안전하다).
+        String targetUrl = principal.isLinkedToExistingAccount()
+                ? UriComponentsBuilder.fromUriString(authorizedRedirectUri)
+                        .queryParam("notice", "account_linked")
+                        .build().toUriString()
+                : authorizedRedirectUri;
+
+        getRedirectStrategy().sendRedirect(request, response, targetUrl);
     }
 }

@@ -24,12 +24,14 @@ import java.util.Optional;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -152,6 +154,68 @@ class AuthControllerTest {
                                 """))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error.code").value("AUTH_INVALID_CREDENTIALS"));
+    }
+
+    @Test
+    void updatePasswordRejectsRequestWithoutToken() throws Exception {
+        mockMvc.perform(patch("/auth/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword":"newPassword1"}
+                                """))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void updatePasswordSucceedsForOAuthOnlyAccountWithoutCurrentPassword() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "social@example.com", Role.USER);
+        User user = User.createOAuthUser("social@example.com", "소셜유저", null, AuthProvider.KAKAO, "999");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+
+        mockMvc.perform(patch("/auth/password")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword":"newPassword1"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        assertEquals("new-encoded-hash", user.getPasswordHash());
+    }
+
+    @Test
+    void updatePasswordRejectsWrongCurrentPassword() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong-current", "encoded-hash")).thenReturn(false);
+
+        mockMvc.perform(patch("/auth/password")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"wrong-current","newPassword":"newPassword1"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("AUTH_INVALID_CREDENTIALS"));
+    }
+
+    @Test
+    void updatePasswordRejectsInvalidNewPasswordFormat() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+
+        mockMvc.perform(patch("/auth/password")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword":"short"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("COMMON_400"));
     }
 
     @Test
