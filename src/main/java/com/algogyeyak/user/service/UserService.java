@@ -128,6 +128,7 @@ public class UserService {
                 .transactionType(preference != null && preference.getTransactionType() != null
                         ? preference.getTransactionType().name() : null)
                 .currentStage(preference != null ? preference.getCurrentStage() : null)
+                .hasPassword(user.getPasswordHash() != null)
                 .build();
     }
 }
