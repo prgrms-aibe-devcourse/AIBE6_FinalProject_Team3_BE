@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
@@ -48,6 +50,109 @@ class AuthControllerTest {
 
     @MockitoBean
     private RefreshTokenService refreshTokenService;
+
+    @MockitoBean
+    private PasswordEncoder passwordEncoder;
+
+    @Test
+    void signupCreatesUserAndIssuesAuthCookies() throws Exception {
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("새유저")).thenReturn(false);
+        when(passwordEncoder.encode("password1")).thenReturn("encoded-hash");
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> {
+            User user = invocation.getArgument(0);
+            ReflectionTestUtils.setField(user, "id", 1L);
+            return user;
+        });
+        when(refreshTokenService.issue(any(User.class))).thenReturn("new-refresh-token");
+        when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
+
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"new@example.com","password":"password1","nickname":"새유저"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.email").value("new@example.com"))
+                .andExpect(jsonPath("$.data.nickname").value("새유저"))
+                .andExpect(header().string("Set-Cookie",
+                        containsString(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "=")))
+                .andExpect(header().stringValues("Set-Cookie", hasItem(containsString("new-refresh-token"))));
+    }
+
+    @Test
+    void signupRejectsDuplicateEmail() throws Exception {
+        when(userRepository.existsByEmail("dup@example.com")).thenReturn(true);
+
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"dup@example.com","password":"password1","nickname":"닉네임"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("AUTH_EMAIL_ALREADY_EXISTS"));
+    }
+
+    @Test
+    void signupRejectsInvalidPayload() throws Exception {
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"not-an-email","password":"short","nickname":"닉"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("COMMON_400"));
+    }
+
+    @Test
+    void loginSucceedsAndIssuesAuthCookies() throws Exception {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+        when(refreshTokenService.issue(user)).thenReturn("new-refresh-token");
+        when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"test@example.com","password":"password1"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.email").value("test@example.com"))
+                .andExpect(header().string("Set-Cookie",
+                        containsString(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "=")));
+    }
+
+    @Test
+    void loginRejectsWrongPassword() throws Exception {
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong", "encoded-hash")).thenReturn(false);
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"test@example.com","password":"wrong"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("AUTH_INVALID_CREDENTIALS"));
+    }
+
+    @Test
+    void loginRejectsUnknownEmail() throws Exception {
+        when(userRepository.findByEmail("unknown@example.com")).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"unknown@example.com","password":"password1"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("AUTH_INVALID_CREDENTIALS"));
+    }
 
     @Test
     void meReturnsCurrentUserWithValidAccessTokenCookie() throws Exception {

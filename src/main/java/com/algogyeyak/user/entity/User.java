@@ -64,7 +64,7 @@ public class User {
     private LocalDateTime updatedAt;
 
     @Builder
-    private User(String email, String nickname, String profileImageUrl, AuthProvider provider, String providerId, Role role) {
+    private User(String email, String passwordHash, String nickname, String profileImageUrl, AuthProvider provider, String providerId, Role role) {
         this.email = email;
         this.passwordHash = passwordHash;
         this.nickname = nickname;
@@ -76,7 +76,13 @@ public class User {
     }
 
     public static User createOAuthUser(String email, String nickname, String profileImageUrl, AuthProvider provider, String providerId) {
-        return new User(email, nickname, profileImageUrl, provider, providerId, Role.USER);
+        return new User(email, null, nickname, profileImageUrl, provider, providerId, Role.USER);
+    }
+
+    // 로컬 회원은 provider+provider_id 유니크 제약을 email로 대신 만족시킨다 — 소셜 로그인처럼
+    // 별도 식별자가 없고, email 자체가 이미 유니크하므로 조합 제약과 충돌하지 않는다.
+    public static User createLocalUser(String email, String passwordHash, String nickname) {
+        return new User(email, passwordHash, nickname, null, AuthProvider.LOCAL, email, Role.USER);
     }
 
     public void updateNickname(@Size(min = 2, max = 20, message = "닉네임은 2~20자여야 합니다.") String nickname) {

@@ -1,9 +1,12 @@
 package com.algogyeyak.auth.controller;
 
+import com.algogyeyak.auth.dto.LoginRequest;
+import com.algogyeyak.auth.dto.SignupRequest;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.auth.oauth.CookieUtils;
+import com.algogyeyak.auth.service.LocalAuthService;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -12,10 +15,13 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -27,19 +33,41 @@ public class AuthController {
     private final UserRepository userRepository;
     private final JwtProvider jwtProvider;
     private final RefreshTokenService refreshTokenService;
+    private final LocalAuthService localAuthService;
 
     public AuthController(
             CookieUtils cookieUtils,
             UserRepository userRepository,
             JwtProvider jwtProvider,
-            RefreshTokenService refreshTokenService) {
+            RefreshTokenService refreshTokenService,
+            LocalAuthService localAuthService) {
         this.cookieUtils = cookieUtils;
         this.userRepository = userRepository;
         this.jwtProvider = jwtProvider;
         this.refreshTokenService = refreshTokenService;
+        this.localAuthService = localAuthService;
     }
 
     public record MeResponse(Long userId, String email, String nickname, String profileImageUrl, String role) {
+    }
+
+    // 소셜 로그인(OAuth2AuthenticationSuccessHandler)과 달리 리다이렉트가 아니라 REST 응답이므로,
+    // 가입 직후 바로 온보딩(프로필 등록) 화면으로 넘어갈 수 있도록 여기서도 access/refresh 쿠키를
+    // 즉시 발급해 자동 로그인 상태로 만든다.
+    @PostMapping("/signup")
+    public ResponseEntity<ApiResponse<MeResponse>> signup(
+            @Valid @RequestBody SignupRequest request, HttpServletResponse response) {
+        User user = localAuthService.signup(request.getEmail(), request.getPassword(), request.getNickname());
+        issueAuthCookies(response, user);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(toMeResponse(user)));
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<ApiResponse<MeResponse>> login(
+            @Valid @RequestBody LoginRequest request, HttpServletResponse response) {
+        User user = localAuthService.login(request.getEmail(), request.getPassword());
+        issueAuthCookies(response, user);
+        return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
     }
 
     // 닉네임/프로필 사진은 JWT 발급 시점(OAuth 최초 로그인) 값이 아니라, 프로필 등록·수정 이후에도
@@ -84,5 +112,20 @@ public class AuthController {
                 (int) refreshTokenService.getValiditySeconds());
 
         return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    private void issueAuthCookies(HttpServletResponse response, User user) {
+        String accessToken = jwtProvider.createAccessToken(user.getId(), user.getEmail(), user.getRole());
+        cookieUtils.addCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, accessToken,
+                (int) jwtProvider.getAccessTokenValiditySeconds());
+
+        String refreshToken = refreshTokenService.issue(user);
+        cookieUtils.addCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, refreshToken,
+                (int) refreshTokenService.getValiditySeconds());
+    }
+
+    private MeResponse toMeResponse(User user) {
+        return new MeResponse(
+                user.getId(), user.getEmail(), user.getNickname(), user.getProfileImageUrl(), user.getRole().name());
     }
 }

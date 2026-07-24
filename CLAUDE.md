@@ -40,15 +40,16 @@ Confirmed: all classes live under `com.algogyeyak` (matching `AlgogyeyakApplicat
 
 ## Current state
 
-Google/Kakao OAuth2 login with refresh tokens is implemented:
+Google/Kakao OAuth2 login and local email/password login, both with refresh tokens, are implemented:
 - `com.algogyeyak.user` — `User` entity, `AuthProvider`/`Role` enums, `UserRepository`
 - `com.algogyeyak.auth.jwt` — `JwtProvider` (issue/validate access tokens), `JwtUserPrincipal`, `JwtAuthenticationFilter`
 - `com.algogyeyak.auth.oauth` — per-provider attribute parsing (`GoogleOAuth2UserInfo`, `KakaoOAuth2UserInfo`), `CustomOAuth2UserService`, cookie-based `AuthorizationRequestRepository`
+- `com.algogyeyak.auth.service.LocalAuthService` — email/password 가입·로그인. 비밀번호는 `PasswordEncoder`(BCrypt, `SecurityConfig`에 빈 등록)로 해시하며, 이메일은 저장/조회 전에 항상 trim + lowercase로 정규화한다. `provider_id`는 소셜 로그인과 달리 별도 식별자가 없어 email 값을 그대로 재사용한다(`User.createLocalUser`)
 - `com.algogyeyak.auth.token` — `RefreshTokenService`/`RefreshTokenRepository`: DB-backed (no Redis), single session per user — a new login or refresh rotates/overwrites the one row for that `user_id`. Raw tokens are never stored, only a SHA-256 hash.
 - `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig` — OAuth2 login wiring, access/refresh JWT delivered via httpOnly cookies (both path `/` — the frontend middleware needs to read the refresh cookie on protected-page requests, which a narrower path would block)
-- `com.algogyeyak.auth.controller.AuthController` — `GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh` (엔드포인트는 `/api` 프리픽스 없이 작성하는 것으로 팀 컨벤션 확정)
+- `com.algogyeyak.auth.controller.AuthController` — `GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`, `POST /auth/signup`, `POST /auth/login` (엔드포인트는 `/api` 프리픽스 없이 작성하는 것으로 팀 컨벤션 확정). `signup`/`login` 모두 소셜 로그인과 동일하게 성공 시 access/refresh 쿠키를 즉시 발급해 자동 로그인 상태로 만든다.
 
-Local email/password login is not implemented yet — planned as a follow-up.
+비밀번호 정책: 영문+숫자를 포함한 8~72자의 ASCII 출력 가능 문자(공백 제외) — `SignupRequest`의 `@Pattern` 참고. BCrypt가 72바이트를 넘는 부분을 조용히 잘라버리는 문제 때문에 멀티바이트 문자를 막아 문자 수와 바이트 수를 일치시켰다.
 
 See [README.md](./README.md) for stack overview and getting-started instructions.
 
