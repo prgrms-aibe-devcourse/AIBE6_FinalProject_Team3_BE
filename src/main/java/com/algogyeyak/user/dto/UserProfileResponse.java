@@ -15,4 +15,5 @@ public class UserProfileResponse {
     private String interestRegion;
     private String transactionType;
     private CurrentStage currentStage;
+    private boolean hasPassword;
 }
