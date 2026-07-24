@@ -1,14 +1,19 @@
 package com.algogyeyak.checklist.controller;
 
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
+import com.algogyeyak.checklist.dto.ChecklistItemResponse;
+import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
 import com.algogyeyak.checklist.dto.ChecklistResponse;
 import com.algogyeyak.checklist.entity.Checklist;
+import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.service.ChecklistService;
 import com.algogyeyak.global.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -32,5 +37,20 @@ public class ChecklistController {
     ) {
         Checklist checklist = checklistService.createOrGetChecklist(userDetails.userId(), propertyId);
         return ApiResponse.success(ChecklistResponse.from(checklist));
+    }
+
+    /**
+     * 체크리스트 항목 하나를 갱신한다 (완료/미확인 전환, YES_NO/DATE/DOCUMENT_REQUEST 답변,
+     * 또는 CHECK 항목의 미흡+메모 표시).
+     */
+    @PatchMapping("/checklists/{checklistId}/items/{itemId}")
+    public ApiResponse<ChecklistItemResponse> updateChecklistItem(
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
+            @PathVariable Long checklistId,
+            @PathVariable Long itemId,
+            @RequestBody ChecklistItemUpdateRequest request
+    ) {
+        ChecklistItem item = checklistService.updateChecklistItem(userDetails.userId(), checklistId, itemId, request);
+        return ApiResponse.success(ChecklistItemResponse.from(item));
     }
 }

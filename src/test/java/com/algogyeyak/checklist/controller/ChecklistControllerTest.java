@@ -2,28 +2,34 @@ package com.algogyeyak.checklist.controller;
 
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
+import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.entity.ChecklistCategory;
 import com.algogyeyak.checklist.entity.ChecklistImportance;
+import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.service.ChecklistService;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.enums.Role;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -38,6 +44,8 @@ class ChecklistControllerTest {
 
     @Autowired
     private JwtProvider jwtProvider;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @MockitoBean
     private ChecklistService checklistService;
@@ -74,6 +82,46 @@ class ChecklistControllerTest {
     @DisplayName("인증 토큰 없이 요청하면 401을 반환한다")
     void createChecklistRejectsRequestWithoutToken() throws Exception {
         mockMvc.perform(post("/properties/10/checklists"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("인증된 사용자가 항목을 미흡으로 표시하면 갱신된 항목을 반환한다")
+    void updateChecklistItemMarksInsufficient() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+
+        ChecklistItem item = ChecklistItem.builder()
+                .category(ChecklistCategory.INDOOR)
+                .content("누수 확인")
+                .importance(ChecklistImportance.GENERAL)
+                .itemType(ChecklistItemType.CHECK)
+                .displayOrder(1)
+                .build();
+        ReflectionTestUtils.setField(item, "id", 200L);
+        ReflectionTestUtils.setField(item, "checked", true);
+        ReflectionTestUtils.setField(item, "userNote", "환기구 막힘");
+
+        when(checklistService.updateChecklistItem(eq(1L), eq(100L), eq(200L), any(ChecklistItemUpdateRequest.class)))
+                .thenReturn(item);
+
+        mockMvc.perform(patch("/checklists/100/items/200")
+                        .cookie(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ChecklistItemUpdateRequest(null, null, "환기구 막힘"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.checked").value(true))
+                .andExpect(jsonPath("$.data.userNote").value("환기구 막힘"))
+                .andExpect(jsonPath("$.data.issueFound").value(true));
+    }
+
+    @Test
+    @DisplayName("인증 토큰 없이 항목 수정을 요청하면 401을 반환한다")
+    void updateChecklistItemRejectsRequestWithoutToken() throws Exception {
+        mockMvc.perform(patch("/checklists/100/items/200")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ChecklistItemUpdateRequest(true, null, null))))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
     }

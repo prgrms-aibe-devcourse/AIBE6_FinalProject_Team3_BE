@@ -59,4 +59,50 @@ class ChecklistTest {
         assertThat(firstItem.isChecked()).isFalse();
         assertThat(firstItem.isIssueFound()).isFalse();
     }
+
+    @Test
+    @DisplayName("refreshStatus()는 체크된 항목이 없으면 NOT_STARTED로 유지한다")
+    void refreshStatusStaysNotStartedWithNoCheckedItems() {
+        User user = testUser();
+        List<ChecklistItemTemplate> templates = List.of(
+                template(ChecklistCategory.INDOOR, "누수 확인", ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1)
+        );
+        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+
+        checklist.refreshStatus();
+
+        assertThat(checklist.getStatus()).isEqualTo(ChecklistStatus.NOT_STARTED);
+    }
+
+    @Test
+    @DisplayName("refreshStatus()는 REQUIRED 항목을 모두 체크하면 COMPLETED가 된다")
+    void refreshStatusBecomesCompletedWhenAllRequiredChecked() {
+        User user = testUser();
+        List<ChecklistItemTemplate> templates = List.of(
+                template(ChecklistCategory.DOCUMENTS, "등기부등본 확인", ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 1),
+                template(ChecklistCategory.INDOOR, "누수 확인(일반)", ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 2)
+        );
+        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+        checklist.getItems().get(0).check(true);
+
+        checklist.refreshStatus();
+
+        assertThat(checklist.getStatus()).isEqualTo(ChecklistStatus.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("refreshStatus()는 REQUIRED 항목이 남아있으면 IN_PROGRESS가 된다")
+    void refreshStatusBecomesInProgressWhenSomeRequiredRemain() {
+        User user = testUser();
+        List<ChecklistItemTemplate> templates = List.of(
+                template(ChecklistCategory.DOCUMENTS, "등기부등본 확인", ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 1),
+                template(ChecklistCategory.DOCUMENTS, "계약조건 재확인", ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 2)
+        );
+        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+        checklist.getItems().get(0).check(true);
+
+        checklist.refreshStatus();
+
+        assertThat(checklist.getStatus()).isEqualTo(ChecklistStatus.IN_PROGRESS);
+    }
 }

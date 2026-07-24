@@ -106,4 +106,22 @@ public class Checklist {
 
         return checklist;
     }
+
+    /**
+     * 문항 상태가 바뀔 때마다 호출해 전체 진행 상태를 다시 계산한다.
+     * 체크된 항목이 하나도 없으면 NOT_STARTED, 필수(REQUIRED) 항목을 모두 체크했으면 COMPLETED,
+     * 그 외에는 IN_PROGRESS.
+     */
+    public void refreshStatus() {
+        boolean noneChecked = items.stream().noneMatch(ChecklistItem::isChecked);
+        if (noneChecked) {
+            this.status = ChecklistStatus.NOT_STARTED;
+            return;
+        }
+
+        boolean allRequiredChecked = items.stream()
+                .filter(item -> item.getImportance() == ChecklistImportance.REQUIRED)
+                .allMatch(ChecklistItem::isChecked);
+        this.status = allRequiredChecked ? ChecklistStatus.COMPLETED : ChecklistStatus.IN_PROGRESS;
+    }
 }
