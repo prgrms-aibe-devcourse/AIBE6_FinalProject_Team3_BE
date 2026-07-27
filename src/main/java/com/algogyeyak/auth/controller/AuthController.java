@@ -3,6 +3,7 @@ package com.algogyeyak.auth.controller;
 import com.algogyeyak.auth.dto.LoginRequest;
 import com.algogyeyak.auth.dto.PasswordUpdateRequest;
 import com.algogyeyak.auth.dto.SignupRequest;
+import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
@@ -13,10 +14,12 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.ApiResponse;
 import com.algogyeyak.user.entity.User;
+import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -36,6 +39,12 @@ public class AuthController {
     private final JwtProvider jwtProvider;
     private final RefreshTokenService refreshTokenService;
     private final LocalAuthService localAuthService;
+
+    @Value("${app.dev-login.enabled}")
+    private boolean devLoginEnabled;
+
+    @Value("${app.dev-login.email}")
+    private String devLoginEmail;
 
     public AuthController(
             CookieUtils cookieUtils,
@@ -95,6 +104,23 @@ public class AuthController {
             @Valid @RequestBody PasswordUpdateRequest request) {
         localAuthService.setPassword(principal.userId(), request.getCurrentPassword(), request.getNewPassword());
         return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    // 개발 편의용 "관리자로 로그인" 버튼. AdminAccountSeeder가 만들어둔 admin 계정으로 자격 증명
+    // 없이 바로 로그인시킨다 — devLoginEnabled가 false(운영 등)면 엔드포인트가 존재하는지조차
+    // 드러내지 않도록 404로 응답한다.
+    @PostMapping("/dev-login")
+    public ResponseEntity<ApiResponse<MeResponse>> devLogin(HttpServletResponse response) {
+        if (!devLoginEnabled) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+
+        User user = userRepository.findByEmail(EmailNormalizer.normalize(devLoginEmail))
+                .filter(found -> found.getRole() == Role.ADMIN)
+                .filter(found -> !found.isWithdrawn())
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        issueAuthCookies(response, user);
+        return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
     }
 
     @PostMapping("/logout")

@@ -1,5 +1,6 @@
 package com.algogyeyak.checklist.entity;
 
+import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.user.entity.User;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
@@ -31,9 +32,6 @@ import java.util.List;
 /**
  * 매물별 임장 체크리스트. 한 유저는 같은 매물에 대해 활성 체크리스트를 1개만 가진다
  * (user_id + property_id unique 제약).
- *
- * propertyId는 아직 Property 엔티티가 없어서 연관관계 없이 Long으로만 둔다.
- * Property 엔티티가 생기면 매물 존재/접근권한/삭제여부 검증 로직을 이어서 연결한다.
  */
 @Entity
 @Table(name = "checklists", uniqueConstraints = {
@@ -52,8 +50,9 @@ public class Checklist {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "property_id", nullable = false)
-    private Long propertyId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "property_id", nullable = false)
+    private Property property;
 
     @Column(name = "template_version", nullable = false)
     private int templateVersion;
@@ -73,9 +72,9 @@ public class Checklist {
     private LocalDateTime updatedAt;
 
     @Builder
-    private Checklist(User user, Long propertyId, int templateVersion) {
+    private Checklist(User user, Property property, int templateVersion) {
         this.user = user;
-        this.propertyId = propertyId;
+        this.property = property;
         this.templateVersion = templateVersion;
         this.status = ChecklistStatus.NOT_STARTED;
     }
@@ -84,10 +83,10 @@ public class Checklist {
      * 템플릿 목록을 스냅샷 복사해 체크리스트와 문항들을 함께 생성한다.
      * 이후 템플릿이 새 버전으로 바뀌어도 여기서 만들어진 문항 내용은 그대로 유지된다.
      */
-    public static Checklist createFrom(User user, Long propertyId, int templateVersion, List<ChecklistItemTemplate> templates) {
+    public static Checklist createFrom(User user, Property property, int templateVersion, List<ChecklistItemTemplate> templates) {
         Checklist checklist = Checklist.builder()
                 .user(user)
-                .propertyId(propertyId)
+                .property(property)
                 .templateVersion(templateVersion)
                 .build();
 
@@ -105,5 +104,39 @@ public class Checklist {
         }
 
         return checklist;
+    }
+
+    /**
+     * 문항 상태가 바뀔 때마다 호출해 전체 진행 상태를 다시 계산한다.
+     * 체크된 항목이 하나도 없으면 NOT_STARTED, 필수(REQUIRED) 항목을 모두 체크했으면 COMPLETED,
+     * 그 외에는 IN_PROGRESS.
+     */
+    public void refreshStatus() {
+        boolean noneChecked = items.stream().noneMatch(ChecklistItem::isChecked);
+        if (noneChecked) {
+            this.status = ChecklistStatus.NOT_STARTED;
+            return;
+        }
+
+        boolean allRequiredChecked = items.stream()
+                .filter(item -> item.getImportance() == ChecklistImportance.REQUIRED)
+                .allMatch(ChecklistItem::isChecked);
+        this.status = allRequiredChecked ? ChecklistStatus.COMPLETED : ChecklistStatus.IN_PROGRESS;
+    }
+
+    /**
+     * 등급/점수 없이 확인 완료도(개수)와 주의 항목 수로만 결과를 표현한다.
+     * 아직 시작 전(NOT_STARTED)이면 누락 개수 대신 시작 안내 메시지를 담아 반환한다.
+     */
+    public ChecklistResult computeResult() {
+        int totalCount = items.size();
+        int checkedCount = (int) items.stream().filter(ChecklistItem::isChecked).count();
+        int requiredMissingCount = (int) items.stream()
+                .filter(item -> item.getImportance() == ChecklistImportance.REQUIRED && !item.isChecked())
+                .count();
+        int issueCount = (int) items.stream().filter(ChecklistItem::hasIssue).count();
+        String message = status == ChecklistStatus.NOT_STARTED ? "체크리스트를 시작해보세요" : null;
+
+        return new ChecklistResult(status, checkedCount, totalCount, requiredMissingCount, issueCount, message);
     }
 }

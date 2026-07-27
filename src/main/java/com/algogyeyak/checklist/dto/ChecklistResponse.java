@@ -15,7 +15,7 @@ public record ChecklistResponse(
     public static ChecklistResponse from(Checklist checklist) {
         return new ChecklistResponse(
                 checklist.getId(),
-                checklist.getPropertyId(),
+                checklist.getProperty().getId(),
                 checklist.getTemplateVersion(),
                 checklist.getStatus(),
                 checklist.getItems().stream().map(ChecklistItemResponse::from).toList()

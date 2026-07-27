@@ -77,6 +77,9 @@ public class ChecklistItem {
     @Column(name = "item_value")
     private String value;
 
+    @Column(name = "user_note")
+    private String userNote;
+
     @Builder
     private ChecklistItem(
             Checklist checklist,
@@ -101,10 +104,30 @@ public class ChecklistItem {
     }
 
     /**
-     * CHECK 타입 문항의 확인 여부를 바꾼다 (값 입력이 없는 단순 체크).
+     * CHECK 타입 문항의 확인 여부를 바꾼다. 완료(true)든 미확인(false)이든, 이전에 남아있던
+     * 사용자 메모(userNote)는 의미가 없어지므로 함께 지운다.
      */
     public void check(boolean checked) {
+        if (itemType != ChecklistItemType.CHECK) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "이 항목은 확인 방식이 아닙니다.");
+        }
         this.checked = checked;
+        this.userNote = null;
+    }
+
+    /**
+     * CHECK 타입 문항을 "미흡"으로 표시하고 메모를 남긴다. 메모는 빈 문자열도 허용한다
+     * (미흡 표시만 하고 내용은 나중에 채우는 경우).
+     */
+    public void markInsufficient(String note) {
+        if (itemType != ChecklistItemType.CHECK) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "이 항목은 메모를 남길 수 있는 방식이 아닙니다.");
+        }
+        if (note == null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "메모는 null일 수 없습니다 (빈 문자열은 허용).");
+        }
+        this.checked = true;
+        this.userNote = note;
     }
 
     /**
@@ -153,6 +176,13 @@ public class ChecklistItem {
     private void markAnswered(String rawValue, boolean issueFound) {
         this.value = rawValue;
         this.checked = true;
-        this.issueFound = this.issueFound || issueFound;
+        this.issueFound = issueFound;
+    }
+
+    /**
+     * 자동 issueFound 규칙뿐 아니라, 사용자가 "미흡"으로 메모를 남긴 경우도 주의 항목으로 취급한다.
+     */
+    public boolean hasIssue() {
+        return issueFound || userNote != null;
     }
 }
