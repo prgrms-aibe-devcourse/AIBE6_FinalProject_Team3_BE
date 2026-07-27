@@ -12,6 +12,9 @@ import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.entity.ChecklistResult;
 import com.algogyeyak.checklist.entity.ChecklistStatus;
 import com.algogyeyak.checklist.service.ChecklistService;
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyType;
+import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.enums.Role;
@@ -69,7 +72,15 @@ class ChecklistControllerTest {
                 .displayOrder(1)
                 .active(true)
                 .build();
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, List.of(template));
+        Property property = Property.builder()
+                .userId(1L)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(10_000_000L)
+                .area(20.0)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 10L);
+        Checklist checklist = Checklist.createFrom(user, property, 1, List.of(template));
         when(checklistService.createOrGetChecklist(eq(1L), eq(10L))).thenReturn(checklist);
 
         mockMvc.perform(post("/properties/10/checklists")
@@ -186,7 +197,15 @@ class ChecklistControllerTest {
                 .displayOrder(1)
                 .active(true)
                 .build();
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, List.of(template));
+        Property property = Property.builder()
+                .userId(1L)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(10_000_000L)
+                .area(20.0)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 10L);
+        Checklist checklist = Checklist.createFrom(user, property, 1, List.of(template));
         when(checklistService.getChecklist(eq(1L), eq(10L))).thenReturn(checklist);
 
         mockMvc.perform(get("/properties/10/checklists")

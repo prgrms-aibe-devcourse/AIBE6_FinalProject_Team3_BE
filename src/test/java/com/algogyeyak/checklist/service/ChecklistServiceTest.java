@@ -13,6 +13,10 @@ import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyType;
+import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.repository.UserRepository;
@@ -37,8 +41,9 @@ class ChecklistServiceTest {
     private final ChecklistRepository checklistRepository = mock(ChecklistRepository.class);
     private final ChecklistItemTemplateRepository templateRepository = mock(ChecklistItemTemplateRepository.class);
     private final UserRepository userRepository = mock(UserRepository.class);
+    private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final ChecklistService checklistService =
-            new ChecklistService(checklistRepository, templateRepository, userRepository);
+            new ChecklistService(checklistRepository, templateRepository, userRepository, propertyRepository);
 
     private User user(Long id) {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
@@ -46,10 +51,22 @@ class ChecklistServiceTest {
         return user;
     }
 
+    private Property property(Long id, Long ownerId) {
+        Property property = Property.builder()
+                .userId(ownerId)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(10_000_000L)
+                .area(20.0)
+                .build();
+        ReflectionTestUtils.setField(property, "id", id);
+        return property;
+    }
+
     @Test
     @DisplayName("이미 체크리스트가 있으면 새로 만들지 않고 기존 것을 반환한다")
     void returnsExistingChecklistWithoutCreatingNew() {
-        Checklist existing = Checklist.createFrom(user(1L), 10L, 1, List.of());
+        Checklist existing = Checklist.createFrom(user(1L), property(10L, 1L), 1, List.of());
         when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.of(existing));
 
         Checklist result = checklistService.createOrGetChecklist(1L, 10L);
@@ -64,6 +81,7 @@ class ChecklistServiceTest {
         User user = user(1L);
         when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
         when(templateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of(
                 ChecklistItemTemplate.builder()
                         .version(3)
@@ -94,7 +112,7 @@ class ChecklistServiceTest {
                 .displayOrder(1)
                 .active(true)
                 .build();
-        return Checklist.createFrom(user, 10L, 1, List.of(template));
+        return Checklist.createFrom(user, property(10L, 1L), 1, List.of(template));
     }
 
     @Test
@@ -109,7 +127,7 @@ class ChecklistServiceTest {
                 .version(1).category(ChecklistCategory.DOCUMENTS).content("등기부등본 확인")
                 .importance(ChecklistImportance.REQUIRED).itemType(ChecklistItemType.CHECK)
                 .displayOrder(2).active(true).build();
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, List.of(generalTemplate, requiredTemplate));
+        Checklist checklist = Checklist.createFrom(user, property(10L, 1L), 1, List.of(generalTemplate, requiredTemplate));
         ReflectionTestUtils.setField(checklist, "id", 100L);
         ChecklistItem item = checklist.getItems().get(0);
         ReflectionTestUtils.setField(item, "id", 200L);
