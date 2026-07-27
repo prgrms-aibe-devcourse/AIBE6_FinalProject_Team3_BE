@@ -53,6 +53,8 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 
 실제 구글/카카오 로그인을 로컬에서 테스트하려면 아래 환경변수가 필요합니다 (미설정 시 더미 값으로 기동은 되지만 실제 소셜 로그인은 동작하지 않습니다). `.env.example`을 `backend/.env`로 복사해 값을 채워두면 `me.paulschwarz:springboot4-dotenv`(개발 전용 의존성)가 `bootRun` 시 자동으로 읽어들입니다 — 별도로 셸에 export하거나 IDE Run Configuration에 등록할 필요가 없습니다. **`.env`는 반드시 BOM 없는 UTF-8로 저장하세요** — 메모장 등으로 저장하면 파일 앞에 보이지 않는 BOM이 붙어 dotenv 파서가 `Malformed entry` 에러를 내며 기동에 실패합니다.
 
+dotenv는 원래 JVM의 working directory 기준으로 `.env`를 찾습니다. 이 프로젝트를 루트 폴더(`aibe6_team3_final_project`)로 열었다면 IntelliJ가 생성하는 Run Configuration의 working directory가 `backend`가 아니라 그 루트로 잡혀 `.env`를 못 찾는 경우가 있는데, `com.algogyeyak.global.config.DotenvDirectoryEnvironmentPostProcessor`가 기동 시 working directory에 `.env`가 없으면 `backend/.env`가 있는지 확인해 자동으로 그 위치를 알려주므로 — working directory를 `backend`로 직접 맞추거나 Run Configuration에 환경변수를 등록하는 등 팀원별 IDE 설정이 필요 없습니다.
+
 | 환경변수 | 설명 |
 | --- | --- |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Cloud Console에서 발급 |
