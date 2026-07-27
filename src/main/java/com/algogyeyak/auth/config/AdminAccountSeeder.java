@@ -2,6 +2,7 @@ package com.algogyeyak.auth.config;
 
 import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.user.entity.User;
+import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,10 +48,23 @@ public class AdminAccountSeeder implements ApplicationRunner {
         Optional<User> existing = userRepository.findByEmail(normalizedEmail);
 
         if (existing.isPresent()) {
+            User user = existing.get();
+
+            // DEV_LOGIN_EMAIL이 실수로 실제 소셜 로그인 사용자의 이메일과 겹치면(공유 DB에 오타 등으로
+            // 잘못 설정된 경우) 아래 healing 로직이 그 실제 계정의 비밀번호를 지우고 ADMIN으로
+            // 승격시켜버릴 수 있다 — 이 시더가 만드는 계정은 항상 LOCAL이므로, LOCAL이 아닌 계정이
+            // 걸리면 절대 건드리지 않고 기동을 실패시켜 설정 오류를 바로 드러낸다.
+            if (user.getProvider() != AuthProvider.LOCAL) {
+                throw new IllegalStateException(
+                        "app.dev-login.email(" + normalizedEmail + ")이 LOCAL이 아닌 기존 계정(provider="
+                                + user.getProvider() + ")과 일치합니다 — 실수로 실제 사용자 이메일과 겹쳤을 수 있어"
+                                + " 자동으로 ADMIN 승격/비밀번호 초기화를 하지 않고 기동을 중단합니다."
+                                + " DEV_LOGIN_EMAIL 설정을 확인하세요.");
+            }
+
             // 예전 버전의 시더가 비밀번호를 넣어 만들어뒀거나, ADMIN이 아닌 상태로 남아있을 수 있다 —
             // 매 기동마다 다시 안전한 상태(비밀번호 없음, ADMIN)로 되돌려 놓는다. 그냥 건너뛰기만
             // 하면 과거 버그의 흔적이 영구 DB에서는 계속 남아있게 된다.
-            User user = existing.get();
             boolean changed = false;
             if (user.getPasswordHash() != null) {
                 user.updatePasswordHash(null);
