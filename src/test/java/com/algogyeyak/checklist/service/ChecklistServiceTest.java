@@ -1,6 +1,7 @@
 package com.algogyeyak.checklist.service;
 
 import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
+import com.algogyeyak.checklist.dto.ChecklistOverviewResponse;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.entity.ChecklistCategory;
 import com.algogyeyak.checklist.entity.ChecklistImportance;
@@ -14,6 +15,7 @@ import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.repository.PropertyRepository;
@@ -144,6 +146,43 @@ class ChecklistServiceTest {
                 .satisfies(exception ->
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
                 );
+    }
+
+    @Test
+    @DisplayName("매물마다 체크리스트 유무에 따라 상태를 매칭해 목록을 반환한다")
+    void listMyChecklistsMatchesEachPropertyWithItsChecklist() {
+        Property started = property(10L, 1L);
+        Property notStarted = property(20L, 1L);
+        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
+                .thenReturn(List.of(started, notStarted));
+
+        Checklist checklist = checklistWithOneCheckItem(user(1L));
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+        checklist.getItems().get(0).check(true);
+        checklist.refreshStatus();
+        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of(checklist));
+
+        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).propertyId()).isEqualTo(10L);
+        assertThat(result.get(0).checklistId()).isEqualTo(100L);
+        assertThat(result.get(0).status()).isEqualTo(ChecklistStatus.COMPLETED);
+        assertThat(result.get(1).propertyId()).isEqualTo(20L);
+        assertThat(result.get(1).checklistId()).isNull();
+        assertThat(result.get(1).status()).isEqualTo(ChecklistStatus.NOT_STARTED);
+    }
+
+    @Test
+    @DisplayName("매물이 하나도 없으면 빈 목록을 반환한다")
+    void listMyChecklistsReturnsEmptyListWhenNoProperties() {
+        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
+                .thenReturn(List.of());
+        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of());
+
+        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
+
+        assertThat(result).isEmpty();
     }
 
     private Checklist checklistWithOneCheckItem(User user) {

@@ -1,6 +1,7 @@
 package com.algogyeyak.checklist.service;
 
 import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
+import com.algogyeyak.checklist.dto.ChecklistOverviewResponse;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
@@ -10,6 +11,7 @@ import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
@@ -18,6 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -114,5 +118,19 @@ public class ChecklistService {
         }
 
         return checklist.computeResult();
+    }
+
+    /**
+     * 로그인 유저의 매물 전체 + 매물별 체크리스트 현황을 반환한다. 체크리스트를 아직 시작 안 한
+     * 매물도 포함되며(checklistId=null, status=NOT_STARTED), 삭제된 매물은 제외한다.
+     */
+    public List<ChecklistOverviewResponse> listMyChecklists(Long userId) {
+        List<Property> properties = propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(userId, PropertyStatus.ACTIVE);
+        Map<Long, Checklist> checklistsByPropertyId = checklistRepository.findAllByUserId(userId).stream()
+                .collect(Collectors.toMap(checklist -> checklist.getProperty().getId(), checklist -> checklist));
+
+        return properties.stream()
+                .map(property -> ChecklistOverviewResponse.from(property, checklistsByPropertyId.get(property.getId())))
+                .toList();
     }
 }
