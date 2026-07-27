@@ -5,6 +5,8 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -25,6 +27,8 @@ import java.util.Optional;
  */
 @Component
 public class AdminAccountSeeder implements ApplicationRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminAccountSeeder.class);
 
     private final UserRepository userRepository;
 
@@ -53,13 +57,17 @@ public class AdminAccountSeeder implements ApplicationRunner {
             // DEV_LOGIN_EMAIL이 실수로 실제 소셜 로그인 사용자의 이메일과 겹치면(공유 DB에 오타 등으로
             // 잘못 설정된 경우) 아래 healing 로직이 그 실제 계정의 비밀번호를 지우고 ADMIN으로
             // 승격시켜버릴 수 있다 — 이 시더가 만드는 계정은 항상 LOCAL이므로, LOCAL이 아닌 계정이
-            // 걸리면 절대 건드리지 않고 기동을 실패시켜 설정 오류를 바로 드러낸다.
+            // 걸리면 절대 건드리지 않는다. 여기서 예외를 던지면 ApplicationRunner라 애플리케이션
+            // 기동 자체가 실패하는데, 계정 하나의 이메일 충돌 때문에 배포 전체가 못 뜨는 건
+            // 지나치다 — 대신 이 계정만 건드리지 않고 넘어가고(dev-login은 ADMIN role만 로그인
+            // 시키므로 이 계정으로는 계속 로그인 안 됨), 설정을 고칠 수 있도록 크게 로그를 남긴다.
             if (user.getProvider() != AuthProvider.LOCAL) {
-                throw new IllegalStateException(
-                        "app.dev-login.email(" + normalizedEmail + ")이 LOCAL이 아닌 기존 계정(provider="
-                                + user.getProvider() + ")과 일치합니다 — 실수로 실제 사용자 이메일과 겹쳤을 수 있어"
-                                + " 자동으로 ADMIN 승격/비밀번호 초기화를 하지 않고 기동을 중단합니다."
-                                + " DEV_LOGIN_EMAIL 설정을 확인하세요.");
+                log.error(
+                        "app.dev-login.email({})이 LOCAL이 아닌 기존 계정(provider={})과 일치합니다 — 실수로 실제"
+                                + " 사용자 이메일과 겹쳤을 수 있어 이 계정은 건드리지 않고 건너뜁니다."
+                                + " DEV_LOGIN_EMAIL 설정을 확인하세요.",
+                        normalizedEmail, user.getProvider());
+                return;
             }
 
             // 예전 버전의 시더가 비밀번호를 넣어 만들어뒀거나, ADMIN이 아닌 상태로 남아있을 수 있다 —

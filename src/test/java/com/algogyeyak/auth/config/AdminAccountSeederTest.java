@@ -14,7 +14,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -114,26 +113,26 @@ class AdminAccountSeederTest {
     }
 
     @Test
-    @DisplayName("같은 이메일의 계정이 KAKAO면(실제 소셜 사용자와 겹침) 건드리지 않고 기동을 실패시킨다")
-    void failsFastWhenMatchingAccountIsKakao() throws Exception {
+    @DisplayName("같은 이메일의 계정이 KAKAO면(실제 소셜 사용자와 겹침) 건드리지 않고 넘어간다(기동은 실패시키지 않는다)")
+    void skipsWithoutThrowingWhenMatchingAccountIsKakao() throws Exception {
         enableWith("admin@algogyeyak.local");
         User existing = User.createOAuthUser("admin@algogyeyak.local", "관리자", null, AuthProvider.KAKAO, "999");
         when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(existing));
 
-        assertThrows(IllegalStateException.class, () -> seeder.run(new DefaultApplicationArguments()));
+        seeder.run(new DefaultApplicationArguments());
 
         assertEquals(Role.USER, existing.getRole());
         verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
-    @DisplayName("같은 이메일의 계정이 GOOGLE이면(실제 소셜 사용자와 겹침) 건드리지 않고 기동을 실패시킨다")
-    void failsFastWhenMatchingAccountIsGoogle() throws Exception {
+    @DisplayName("같은 이메일의 계정이 GOOGLE이면(실제 소셜 사용자와 겹침) 건드리지 않고 넘어간다(기동은 실패시키지 않는다)")
+    void skipsWithoutThrowingWhenMatchingAccountIsGoogle() throws Exception {
         enableWith("admin@algogyeyak.local");
         User existing = User.createOAuthUser("admin@algogyeyak.local", "관리자", null, AuthProvider.GOOGLE, "999");
         when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(existing));
 
-        assertThrows(IllegalStateException.class, () -> seeder.run(new DefaultApplicationArguments()));
+        seeder.run(new DefaultApplicationArguments());
 
         assertEquals(Role.USER, existing.getRole());
         verify(userRepository, never()).save(any(User.class));
