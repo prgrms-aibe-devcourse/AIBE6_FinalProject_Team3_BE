@@ -7,6 +7,7 @@ import com.algogyeyak.checklist.entity.ChecklistImportance;
 import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
+import com.algogyeyak.checklist.entity.ChecklistResult;
 import com.algogyeyak.checklist.entity.ChecklistStatus;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
@@ -208,6 +209,49 @@ class ChecklistServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                );
+    }
+
+    @Test
+    @DisplayName("본인 체크리스트의 결과를 조회하면 computeResult()와 동일한 결과를 반환한다")
+    void getChecklistResultReturnsComputedResult() {
+        User user = user(1L);
+        Checklist checklist = checklistWithOneCheckItem(user);
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+        checklist.getItems().get(0).check(true);
+        checklist.refreshStatus();
+        when(checklistRepository.findById(100L)).thenReturn(Optional.of(checklist));
+
+        ChecklistResult result = checklistService.getChecklistResult(1L, 100L);
+
+        assertThat(result).isEqualTo(checklist.computeResult());
+        assertThat(result.checkedCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 체크리스트의 결과를 조회하면 NOT_FOUND 예외가 발생한다")
+    void getChecklistResultThrowsWhenChecklistNotFound() {
+        when(checklistRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> checklistService.getChecklistResult(1L, 999L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("본인 소유가 아닌 체크리스트의 결과를 조회하면 FORBIDDEN 예외가 발생한다")
+    void getChecklistResultThrowsWhenNotOwner() {
+        User owner = user(1L);
+        Checklist checklist = checklistWithOneCheckItem(owner);
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+        when(checklistRepository.findById(100L)).thenReturn(Optional.of(checklist));
+
+        assertThatThrownBy(() -> checklistService.getChecklistResult(999L, 100L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
                 );
     }
 }

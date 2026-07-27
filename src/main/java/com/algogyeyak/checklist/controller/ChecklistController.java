@@ -4,12 +4,15 @@ import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.checklist.dto.ChecklistItemResponse;
 import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
 import com.algogyeyak.checklist.dto.ChecklistResponse;
+import com.algogyeyak.checklist.dto.ChecklistResultResponse;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.entity.ChecklistItem;
+import com.algogyeyak.checklist.entity.ChecklistResult;
 import com.algogyeyak.checklist.service.ChecklistService;
 import com.algogyeyak.global.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -52,5 +55,17 @@ public class ChecklistController {
     ) {
         ChecklistItem item = checklistService.updateChecklistItem(userDetails.userId(), checklistId, itemId, request);
         return ApiResponse.success(ChecklistItemResponse.from(item));
+    }
+
+    /**
+     * 체크리스트 결과(확인 완료도/필수 확인 누락 수/주의 항목 수)를 조회한다.
+     */
+    @GetMapping("/checklists/{checklistId}/result")
+    public ApiResponse<ChecklistResultResponse> getChecklistResult(
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
+            @PathVariable Long checklistId
+    ) {
+        ChecklistResult result = checklistService.getChecklistResult(userDetails.userId(), checklistId);
+        return ApiResponse.success(ChecklistResultResponse.from(result));
     }
 }

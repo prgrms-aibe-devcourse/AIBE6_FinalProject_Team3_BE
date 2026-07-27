@@ -9,6 +9,8 @@ import com.algogyeyak.checklist.entity.ChecklistImportance;
 import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
+import com.algogyeyak.checklist.entity.ChecklistResult;
+import com.algogyeyak.checklist.entity.ChecklistStatus;
 import com.algogyeyak.checklist.service.ChecklistService;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.AuthProvider;
@@ -29,6 +31,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -122,6 +125,47 @@ class ChecklistControllerTest {
         mockMvc.perform(patch("/checklists/100/items/200")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new ChecklistItemUpdateRequest(true, null, null))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("인증된 사용자가 체크리스트 결과를 조회하면 결과를 반환한다")
+    void getChecklistResultReturnsResult() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        ChecklistResult result = new ChecklistResult(ChecklistStatus.IN_PROGRESS, 1, 2, 1, 0, null);
+        when(checklistService.getChecklistResult(eq(1L), eq(100L))).thenReturn(result);
+
+        mockMvc.perform(get("/checklists/100/result")
+                        .cookie(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.data.checkedCount").value(1))
+                .andExpect(jsonPath("$.data.totalCount").value(2))
+                .andExpect(jsonPath("$.data.requiredMissingCount").value(1))
+                .andExpect(jsonPath("$.data.issueCount").value(0))
+                .andExpect(jsonPath("$.data.message").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("체크리스트를 시작하지 않았으면 시작 안내 메시지를 함께 반환한다")
+    void getChecklistResultReturnsStartMessageWhenNotStarted() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        ChecklistResult result = new ChecklistResult(ChecklistStatus.NOT_STARTED, 0, 2, 2, 0, "체크리스트를 시작해보세요");
+        when(checklistService.getChecklistResult(eq(1L), eq(100L))).thenReturn(result);
+
+        mockMvc.perform(get("/checklists/100/result")
+                        .cookie(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("NOT_STARTED"))
+                .andExpect(jsonPath("$.data.message").value("체크리스트를 시작해보세요"));
+    }
+
+    @Test
+    @DisplayName("인증 토큰 없이 결과를 조회하면 401을 반환한다")
+    void getChecklistResultRejectsRequestWithoutToken() throws Exception {
+        mockMvc.perform(get("/checklists/100/result"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
     }

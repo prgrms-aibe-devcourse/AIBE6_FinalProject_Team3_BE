@@ -4,6 +4,7 @@ import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
+import com.algogyeyak.checklist.entity.ChecklistResult;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
@@ -77,5 +78,20 @@ public class ChecklistService {
         checklist.refreshStatus();
 
         return item;
+    }
+
+    /**
+     * 체크리스트 결과(확인 완료도, 필수 확인 누락 수, 주의 항목 수)를 조회한다.
+     * 등급/점수는 없고, 아직 시작 전이면 시작 안내 메시지가 담긴 결과를 그대로 반환한다.
+     */
+    public ChecklistResult getChecklistResult(Long userId, Long checklistId) {
+        Checklist checklist = checklistRepository.findById(checklistId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다."));
+
+        if (!checklist.getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "본인의 체크리스트만 조회할 수 있습니다.");
+        }
+
+        return checklist.computeResult();
     }
 }
