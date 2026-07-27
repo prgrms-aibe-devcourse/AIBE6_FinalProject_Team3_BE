@@ -216,4 +216,21 @@ class LocalAuthServiceTest {
 
         assertThrows(BusinessException.class, () -> localAuthService.setPassword(1L, null, "newPassword1"));
     }
+
+    @Test
+    void setPasswordRejectsDevLoginAdminAccountEvenWithoutExistingPassword() {
+        ReflectionTestUtils.setField(localAuthService, "devLoginEmail", "admin@algogyeyak.local");
+        User admin = User.createLocalUser("admin@algogyeyak.local", null, "관리자");
+        ReflectionTestUtils.setField(admin, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(admin));
+
+        // dev-login 관리자 계정은 비밀번호가 없는 상태(existingHash == null)라 일반적인 "최초 설정"
+        // 경로를 타지만, 이 계정만은 예외적으로 항상 거부되어야 한다 — 그래야 dev-login 세션
+        // 하나로 이 계정에 영구적인 로컬 로그인 수단을 만드는 것을 막을 수 있다.
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.setPassword(1L, null, "newPassword1"));
+
+        assertEquals(ErrorCode.FORBIDDEN, exception.getErrorCode());
+        assertEquals(null, admin.getPasswordHash());
+    }
 }
