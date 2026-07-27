@@ -89,6 +89,17 @@ class ChecklistItemTest {
     }
 
     @Test
+    @DisplayName("신탁등기 여부를 Y로 답했다가 N으로 정정하면 주의 항목 표시가 풀린다")
+    void correctingAnswerFromYesToNoClearsIssueFound() {
+        ChecklistItem item = yesNoItem(ChecklistItemCode.TRUST_REGISTRATION);
+
+        item.answer("Y");
+        item.answer("N");
+
+        assertThat(item.isIssueFound()).isFalse();
+    }
+
+    @Test
     @DisplayName("신탁등기 여부에 N으로 답하면 주의 항목으로 반영되지 않는다")
     void trustRegistrationNoDoesNotMarkIssueFound() {
         ChecklistItem item = yesNoItem(ChecklistItemCode.TRUST_REGISTRATION);
@@ -194,6 +205,88 @@ class ChecklistItemTest {
         ChecklistItem item = documentRequestItem(ChecklistItemCode.DATE_OF_CONFIRMATION_REQUEST);
 
         assertThatThrownBy(() -> item.answer("MAYBE"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                );
+    }
+
+    @Test
+    @DisplayName("CHECK 항목에 markInsufficient()를 호출하면 확인 상태가 되고 메모가 저장된다")
+    void markInsufficientSavesNoteAndMarksChecked() {
+        ChecklistItem item = checkTypeItem();
+
+        item.markInsufficient("환기구가 막혀있었어요");
+
+        assertThat(item.isChecked()).isTrue();
+        assertThat(item.getUserNote()).isEqualTo("환기구가 막혀있었어요");
+    }
+
+    @Test
+    @DisplayName("빈 문자열 메모도 허용된다(미흡 표시만, 메모 내용 없음)")
+    void markInsufficientAllowsEmptyNote() {
+        ChecklistItem item = checkTypeItem();
+
+        item.markInsufficient("");
+
+        assertThat(item.isChecked()).isTrue();
+        assertThat(item.getUserNote()).isEqualTo("");
+    }
+
+    @Test
+    @DisplayName("CHECK가 아닌 항목에 markInsufficient()를 호출하면 INVALID_INPUT 예외가 발생한다")
+    void markInsufficientRejectsNonCheckType() {
+        ChecklistItem item = yesNoItem(null);
+
+        assertThatThrownBy(() -> item.markInsufficient("메모"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                );
+    }
+
+    @Test
+    @DisplayName("미흡 표시 후 check(true)로 완료 처리하면 메모가 지워진다")
+    void completingAfterInsufficientClearsNote() {
+        ChecklistItem item = checkTypeItem();
+        item.markInsufficient("확인 필요");
+
+        item.check(true);
+
+        assertThat(item.isChecked()).isTrue();
+        assertThat(item.getUserNote()).isNull();
+    }
+
+    @Test
+    @DisplayName("check(false)로 미확인 처리하면 메모도 함께 지워진다")
+    void uncheckingClearsNote() {
+        ChecklistItem item = checkTypeItem();
+        item.markInsufficient("확인 필요");
+
+        item.check(false);
+
+        assertThat(item.isChecked()).isFalse();
+        assertThat(item.getUserNote()).isNull();
+    }
+
+    @Test
+    @DisplayName("CHECK가 아닌 항목에 check()를 호출하면 INVALID_INPUT 예외가 발생한다")
+    void checkRejectsNonCheckType() {
+        ChecklistItem item = yesNoItem(null);
+
+        assertThatThrownBy(() -> item.check(true))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                );
+    }
+
+    @Test
+    @DisplayName("markInsufficient()에 null을 전달하면 INVALID_INPUT 예외가 발생한다")
+    void markInsufficientRejectsNullNote() {
+        ChecklistItem item = checkTypeItem();
+
+        assertThatThrownBy(() -> item.markInsufficient(null))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
