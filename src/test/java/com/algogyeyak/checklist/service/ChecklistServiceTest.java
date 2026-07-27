@@ -102,6 +102,50 @@ class ChecklistServiceTest {
         verify(checklistRepository).save(any(Checklist.class));
     }
 
+    @Test
+    @DisplayName("존재하지 않는 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void createChecklistThrowsWhenPropertyNotFound() {
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> checklistService.createOrGetChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("삭제된 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void createChecklistThrowsWhenPropertyDeleted() {
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(deletedProperty));
+
+        assertThatThrownBy(() -> checklistService.createOrGetChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("본인 소유가 아닌 매물이면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
+    void createChecklistThrowsWhenNotPropertyOwner() {
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 999L)));
+
+        assertThatThrownBy(() -> checklistService.createOrGetChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
+                );
+    }
+
     private Checklist checklistWithOneCheckItem(User user) {
         ChecklistItemTemplate template = ChecklistItemTemplate.builder()
                 .version(1)
