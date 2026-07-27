@@ -1,6 +1,7 @@
 package com.algogyeyak.checklist.service;
 
 import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
+import com.algogyeyak.checklist.dto.ChecklistOverviewResponse;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.entity.ChecklistCategory;
 import com.algogyeyak.checklist.entity.ChecklistImportance;
@@ -13,6 +14,11 @@ import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyStatus;
+import com.algogyeyak.property.entity.PropertyType;
+import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.repository.UserRepository;
@@ -37,8 +43,9 @@ class ChecklistServiceTest {
     private final ChecklistRepository checklistRepository = mock(ChecklistRepository.class);
     private final ChecklistItemTemplateRepository templateRepository = mock(ChecklistItemTemplateRepository.class);
     private final UserRepository userRepository = mock(UserRepository.class);
+    private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final ChecklistService checklistService =
-            new ChecklistService(checklistRepository, templateRepository, userRepository);
+            new ChecklistService(checklistRepository, templateRepository, userRepository, propertyRepository);
 
     private User user(Long id) {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
@@ -46,10 +53,22 @@ class ChecklistServiceTest {
         return user;
     }
 
+    private Property property(Long id, Long ownerId) {
+        Property property = Property.builder()
+                .userId(ownerId)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(10_000_000L)
+                .area(20.0)
+                .build();
+        ReflectionTestUtils.setField(property, "id", id);
+        return property;
+    }
+
     @Test
     @DisplayName("이미 체크리스트가 있으면 새로 만들지 않고 기존 것을 반환한다")
     void returnsExistingChecklistWithoutCreatingNew() {
-        Checklist existing = Checklist.createFrom(user(1L), 10L, 1, List.of());
+        Checklist existing = Checklist.createFrom(user(1L), property(10L, 1L), 1, List.of());
         when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.of(existing));
 
         Checklist result = checklistService.createOrGetChecklist(1L, 10L);
@@ -64,6 +83,7 @@ class ChecklistServiceTest {
         User user = user(1L);
         when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
         when(templateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of(
                 ChecklistItemTemplate.builder()
                         .version(3)
@@ -84,6 +104,87 @@ class ChecklistServiceTest {
         verify(checklistRepository).save(any(Checklist.class));
     }
 
+    @Test
+    @DisplayName("존재하지 않는 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void createChecklistThrowsWhenPropertyNotFound() {
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> checklistService.createOrGetChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("삭제된 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void createChecklistThrowsWhenPropertyDeleted() {
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(deletedProperty));
+
+        assertThatThrownBy(() -> checklistService.createOrGetChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("본인 소유가 아닌 매물이면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
+    void createChecklistThrowsWhenNotPropertyOwner() {
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L)));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 999L)));
+
+        assertThatThrownBy(() -> checklistService.createOrGetChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
+                );
+    }
+
+    @Test
+    @DisplayName("매물마다 체크리스트 유무에 따라 상태를 매칭해 목록을 반환한다")
+    void listMyChecklistsMatchesEachPropertyWithItsChecklist() {
+        Property started = property(10L, 1L);
+        Property notStarted = property(20L, 1L);
+        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
+                .thenReturn(List.of(started, notStarted));
+
+        Checklist checklist = checklistWithOneCheckItem(user(1L));
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+        checklist.getItems().get(0).check(true);
+        checklist.refreshStatus();
+        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of(checklist));
+
+        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).propertyId()).isEqualTo(10L);
+        assertThat(result.get(0).checklistId()).isEqualTo(100L);
+        assertThat(result.get(0).status()).isEqualTo(ChecklistStatus.COMPLETED);
+        assertThat(result.get(1).propertyId()).isEqualTo(20L);
+        assertThat(result.get(1).checklistId()).isNull();
+        assertThat(result.get(1).status()).isEqualTo(ChecklistStatus.NOT_STARTED);
+    }
+
+    @Test
+    @DisplayName("매물이 하나도 없으면 빈 목록을 반환한다")
+    void listMyChecklistsReturnsEmptyListWhenNoProperties() {
+        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
+                .thenReturn(List.of());
+        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of());
+
+        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
+
+        assertThat(result).isEmpty();
+    }
+
     private Checklist checklistWithOneCheckItem(User user) {
         ChecklistItemTemplate template = ChecklistItemTemplate.builder()
                 .version(1)
@@ -94,7 +195,7 @@ class ChecklistServiceTest {
                 .displayOrder(1)
                 .active(true)
                 .build();
-        return Checklist.createFrom(user, 10L, 1, List.of(template));
+        return Checklist.createFrom(user, property(10L, 1L), 1, List.of(template));
     }
 
     @Test
@@ -109,7 +210,7 @@ class ChecklistServiceTest {
                 .version(1).category(ChecklistCategory.DOCUMENTS).content("등기부등본 확인")
                 .importance(ChecklistImportance.REQUIRED).itemType(ChecklistItemType.CHECK)
                 .displayOrder(2).active(true).build();
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, List.of(generalTemplate, requiredTemplate));
+        Checklist checklist = Checklist.createFrom(user, property(10L, 1L), 1, List.of(generalTemplate, requiredTemplate));
         ReflectionTestUtils.setField(checklist, "id", 100L);
         ChecklistItem item = checklist.getItems().get(0);
         ReflectionTestUtils.setField(item, "id", 200L);
