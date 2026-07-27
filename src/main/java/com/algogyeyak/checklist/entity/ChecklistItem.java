@@ -178,4 +178,11 @@ public class ChecklistItem {
         this.checked = true;
         this.issueFound = issueFound;
     }
+
+    /**
+     * 자동 issueFound 규칙뿐 아니라, 사용자가 "미흡"으로 메모를 남긴 경우도 주의 항목으로 취급한다.
+     */
+    public boolean hasIssue() {
+        return issueFound || userNote != null;
+    }
 }

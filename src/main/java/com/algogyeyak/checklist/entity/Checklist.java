@@ -124,4 +124,20 @@ public class Checklist {
                 .allMatch(ChecklistItem::isChecked);
         this.status = allRequiredChecked ? ChecklistStatus.COMPLETED : ChecklistStatus.IN_PROGRESS;
     }
+
+    /**
+     * 등급/점수 없이 확인 완료도(개수)와 주의 항목 수로만 결과를 표현한다.
+     * 아직 시작 전(NOT_STARTED)이면 누락 개수 대신 시작 안내 메시지를 담아 반환한다.
+     */
+    public ChecklistResult computeResult() {
+        int totalCount = items.size();
+        int checkedCount = (int) items.stream().filter(ChecklistItem::isChecked).count();
+        int requiredMissingCount = (int) items.stream()
+                .filter(item -> item.getImportance() == ChecklistImportance.REQUIRED && !item.isChecked())
+                .count();
+        int issueCount = (int) items.stream().filter(ChecklistItem::hasIssue).count();
+        String message = status == ChecklistStatus.NOT_STARTED ? "체크리스트를 시작해보세요" : null;
+
+        return new ChecklistResult(status, checkedCount, totalCount, requiredMissingCount, issueCount, message);
+    }
 }
