@@ -81,6 +81,15 @@ public class ChecklistService {
     }
 
     /**
+     * 유저-매물 조합의 체크리스트를 문항까지 포함해 조회한다. 없으면 생성하지 않고 NOT_FOUND를 던진다
+     * (생성은 createOrGetChecklist가 담당).
+     */
+    public Checklist getChecklist(Long userId, Long propertyId) {
+        return checklistRepository.findByUserIdAndPropertyId(userId, propertyId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다."));
+    }
+
+    /**
      * 체크리스트 결과(확인 완료도, 필수 확인 누락 수, 주의 항목 수)를 조회한다.
      * 등급/점수는 없고, 아직 시작 전이면 시작 안내 메시지가 담긴 결과를 그대로 반환한다.
      */

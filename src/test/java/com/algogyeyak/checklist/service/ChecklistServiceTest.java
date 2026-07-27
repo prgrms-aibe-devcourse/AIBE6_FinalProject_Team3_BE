@@ -254,4 +254,29 @@ class ChecklistServiceTest {
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
                 );
     }
+
+    @Test
+    @DisplayName("본인 매물의 체크리스트를 조회하면 문항까지 포함해 반환한다")
+    void getChecklistReturnsChecklistWithItems() {
+        User user = user(1L);
+        Checklist checklist = checklistWithOneCheckItem(user);
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.of(checklist));
+
+        Checklist result = checklistService.getChecklist(1L, 10L);
+
+        assertThat(result).isEqualTo(checklist);
+        assertThat(result.getItems()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("해당 매물에 체크리스트가 없으면 NOT_FOUND 예외가 발생한다")
+    void getChecklistThrowsWhenNoneExists() {
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                );
+    }
 }

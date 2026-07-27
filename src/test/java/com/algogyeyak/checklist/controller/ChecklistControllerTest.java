@@ -169,4 +169,39 @@ class ChecklistControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
     }
+
+    @Test
+    @DisplayName("인증된 사용자가 매물 체크리스트를 조회하면 문항까지 포함해 반환한다")
+    void getChecklistReturnsChecklistForAuthenticatedUser() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        ReflectionTestUtils.setField(user, "id", 1L);
+
+        ChecklistItemTemplate template = ChecklistItemTemplate.builder()
+                .version(1)
+                .category(ChecklistCategory.INDOOR)
+                .content("누수 확인")
+                .importance(ChecklistImportance.GENERAL)
+                .itemType(ChecklistItemType.CHECK)
+                .displayOrder(1)
+                .active(true)
+                .build();
+        Checklist checklist = Checklist.createFrom(user, 10L, 1, List.of(template));
+        when(checklistService.getChecklist(eq(1L), eq(10L))).thenReturn(checklist);
+
+        mockMvc.perform(get("/properties/10/checklists")
+                        .cookie(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.propertyId").value(10))
+                .andExpect(jsonPath("$.data.items[0].content").value("누수 확인"));
+    }
+
+    @Test
+    @DisplayName("인증 토큰 없이 체크리스트를 조회하면 401을 반환한다")
+    void getChecklistRejectsRequestWithoutToken() throws Exception {
+        mockMvc.perform(get("/properties/10/checklists"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+    }
 }
