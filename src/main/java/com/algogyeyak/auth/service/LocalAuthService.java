@@ -5,6 +5,7 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,9 @@ public class LocalAuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final TransactionTemplate requiresNewTransactionTemplate;
+
+    @Value("${app.dev-login.email}")
+    private String devLoginEmail;
 
     public LocalAuthService(
             UserRepository userRepository,
@@ -86,6 +90,17 @@ public class LocalAuthService {
         User user = userRepository.findById(userId)
                 .filter(found -> !found.isWithdrawn())
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
+
+        // 개발용 dev-login 관리자 계정(AdminAccountSeeder)은 passwordHash가 항상 null이어야
+        // dev-login 스위치가 꺼졌을 때 이 계정으로 들어올 방법이 완전히 사라진다. 여기서 비밀번호
+        // 설정을 허용하면 dev-login 세션 하나로 이 계정에 영구적인 로컬 로그인 수단을 만들어버려
+        // 그 안전장치가 무의미해지므로, 이 이메일에 대해서는 통째로 막는다. devLoginEmail이 null이면
+        // (단위 테스트처럼 @Value가 주입되지 않은 경우) 이 검사 자체를 건너뛴다.
+        String normalizedDevLoginEmail = EmailNormalizer.normalize(devLoginEmail);
+        if (normalizedDevLoginEmail != null
+                && normalizedDevLoginEmail.equals(EmailNormalizer.normalize(user.getEmail()))) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "이 계정은 비밀번호를 설정할 수 없습니다.");
+        }
 
         String existingHash = user.getPasswordHash();
         if (existingHash != null

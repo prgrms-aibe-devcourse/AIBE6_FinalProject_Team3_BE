@@ -47,6 +47,9 @@ class AuthControllerTest {
     @Autowired
     private JwtProvider jwtProvider;
 
+    @Autowired
+    private AuthController authController;
+
     @MockitoBean
     private UserRepository userRepository;
 
@@ -216,6 +219,107 @@ class AuthControllerTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("COMMON_400"));
+    }
+
+    @Test
+    void devLoginReturnsNotFoundWhenDisabled() throws Exception {
+        // application.yml 기본값(DEV_LOGIN_ENABLED 미설정)이라 테스트 컨텍스트에서는 항상 꺼져 있어야 한다 —
+        // 운영에서 이 스위치가 꺼진 채로 배포됐을 때와 동일한 상황을 별도 설정 없이 검증한다.
+        mockMvc.perform(post("/auth/dev-login"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void devLoginIssuesAuthCookiesForSeededAdminWhenEnabled() throws Exception {
+        ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        try {
+            // AdminAccountSeeder가 실제로 만드는 시드 계정과 동일하게 passwordHash 없이 구성한다 —
+            // dev-login은 비밀번호를 검사하지 않는다.
+            User admin = User.createLocalUser("admin@algogyeyak.local", null, "관리자");
+            ReflectionTestUtils.setField(admin, "id", 1L);
+            ReflectionTestUtils.setField(admin, "role", Role.ADMIN);
+            when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(admin));
+            when(refreshTokenService.issue(admin)).thenReturn("new-refresh-token");
+            when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
+
+            mockMvc.perform(post("/auth/dev-login"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.role").value("ADMIN"))
+                    .andExpect(header().string("Set-Cookie",
+                            containsString(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "=")));
+        } finally {
+            // 다른 테스트에 영향이 없도록 기본값(false)으로 되돌린다.
+            ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+        }
+    }
+
+    @Test
+    void devLoginNormalizesConfiguredEmailBeforeLookup() throws Exception {
+        ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        ReflectionTestUtils.setField(authController, "devLoginEmail", "  Admin@Algogyeyak.Local  ");
+        try {
+            User admin = User.createLocalUser("admin@algogyeyak.local", null, "관리자");
+            ReflectionTestUtils.setField(admin, "id", 1L);
+            ReflectionTestUtils.setField(admin, "role", Role.ADMIN);
+            when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(admin));
+            when(refreshTokenService.issue(admin)).thenReturn("new-refresh-token");
+            when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
+
+            mockMvc.perform(post("/auth/dev-login"))
+                    .andExpect(status().isOk());
+        } finally {
+            ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+        }
+    }
+
+    @Test
+    void devLoginReturnsNotFoundWhenEnabledButSeededAdminMissing() throws Exception {
+        ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        try {
+            when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.empty());
+
+            mockMvc.perform(post("/auth/dev-login"))
+                    .andExpect(status().isNotFound());
+        } finally {
+            ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+        }
+    }
+
+    @Test
+    void devLoginReturnsNotFoundWhenAccountAtConfiguredEmailIsNotAdmin() throws Exception {
+        ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        try {
+            // 예: 어떤 이유로 이 이메일에 일반 USER 계정이 걸려 있는 경우 — dev-login이 그 계정으로
+            // 로그인시키면 안 되므로 Role.ADMIN이 아니면 "찾을 수 없음"과 동일하게 취급한다.
+            User notAdmin = User.createLocalUser("admin@algogyeyak.local", null, "일반유저");
+            when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(notAdmin));
+
+            mockMvc.perform(post("/auth/dev-login"))
+                    .andExpect(status().isNotFound());
+        } finally {
+            ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+        }
+    }
+
+    @Test
+    void devLoginReturnsNotFoundWhenSeededAdminHasBeenWithdrawn() throws Exception {
+        ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        try {
+            User admin = User.createLocalUser("admin@algogyeyak.local", null, "관리자");
+            admin.grantAdminRole();
+            admin.withdraw();
+            when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(admin));
+
+            mockMvc.perform(post("/auth/dev-login"))
+                    .andExpect(status().isNotFound());
+        } finally {
+            ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+        }
     }
 
     @Test
