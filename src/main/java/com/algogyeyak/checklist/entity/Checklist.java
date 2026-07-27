@@ -106,4 +106,38 @@ public class Checklist {
 
         return checklist;
     }
+
+    /**
+     * 문항 상태가 바뀔 때마다 호출해 전체 진행 상태를 다시 계산한다.
+     * 체크된 항목이 하나도 없으면 NOT_STARTED, 필수(REQUIRED) 항목을 모두 체크했으면 COMPLETED,
+     * 그 외에는 IN_PROGRESS.
+     */
+    public void refreshStatus() {
+        boolean noneChecked = items.stream().noneMatch(ChecklistItem::isChecked);
+        if (noneChecked) {
+            this.status = ChecklistStatus.NOT_STARTED;
+            return;
+        }
+
+        boolean allRequiredChecked = items.stream()
+                .filter(item -> item.getImportance() == ChecklistImportance.REQUIRED)
+                .allMatch(ChecklistItem::isChecked);
+        this.status = allRequiredChecked ? ChecklistStatus.COMPLETED : ChecklistStatus.IN_PROGRESS;
+    }
+
+    /**
+     * 등급/점수 없이 확인 완료도(개수)와 주의 항목 수로만 결과를 표현한다.
+     * 아직 시작 전(NOT_STARTED)이면 누락 개수 대신 시작 안내 메시지를 담아 반환한다.
+     */
+    public ChecklistResult computeResult() {
+        int totalCount = items.size();
+        int checkedCount = (int) items.stream().filter(ChecklistItem::isChecked).count();
+        int requiredMissingCount = (int) items.stream()
+                .filter(item -> item.getImportance() == ChecklistImportance.REQUIRED && !item.isChecked())
+                .count();
+        int issueCount = (int) items.stream().filter(ChecklistItem::hasIssue).count();
+        String message = status == ChecklistStatus.NOT_STARTED ? "체크리스트를 시작해보세요" : null;
+
+        return new ChecklistResult(status, checkedCount, totalCount, requiredMissingCount, issueCount, message);
+    }
 }

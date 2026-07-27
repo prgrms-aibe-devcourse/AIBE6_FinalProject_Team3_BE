@@ -47,3 +47,8 @@ app:
 
 kakao:
   rest-api-key: ${KAKAO_REST_API_KEY:dummy-key-for-local}
+
+clova:
+  ocr:
+    invoke-url: ${CLOVA_OCR_INVOKE_URL:https://dummy-clova-ocr-invoke-url.apigw.ntruss.com/custom/v1/dummy/general}
+    secret-key: ${CLOVA_OCR_SECRET_KEY:dummy-secret-key-for-local}

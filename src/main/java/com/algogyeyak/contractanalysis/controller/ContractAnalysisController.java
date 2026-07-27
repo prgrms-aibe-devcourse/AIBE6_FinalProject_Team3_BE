@@ -3,8 +3,10 @@ package com.algogyeyak.contractanalysis.controller;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisInputRequest;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisInputResponse;
+import com.algogyeyak.contractanalysis.dto.ContractAnalysisOcrResponse;
 import com.algogyeyak.contractanalysis.entity.InputType;
 import com.algogyeyak.contractanalysis.service.ContractAnalysisInputService;
+import com.algogyeyak.contractanalysis.service.ContractAnalysisOcrService;
 import com.algogyeyak.global.response.ApiResponse;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -21,9 +23,14 @@ import org.springframework.web.multipart.MultipartFile;
 public class ContractAnalysisController {
 
     private final ContractAnalysisInputService contractAnalysisInputService;
+    private final ContractAnalysisOcrService contractAnalysisOcrService;
 
-    public ContractAnalysisController(ContractAnalysisInputService contractAnalysisInputService) {
+    public ContractAnalysisController(
+            ContractAnalysisInputService contractAnalysisInputService,
+            ContractAnalysisOcrService contractAnalysisOcrService
+    ) {
         this.contractAnalysisInputService = contractAnalysisInputService;
+        this.contractAnalysisOcrService = contractAnalysisOcrService;
     }
 
     @PostMapping(value = "/inputs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -36,6 +43,14 @@ public class ContractAnalysisController {
     ) {
         ContractAnalysisInputRequest request = new ContractAnalysisInputRequest(inputType, text, propertyId, image);
         ContractAnalysisInputResponse response = contractAnalysisInputService.createInput(request, principal.userId());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PostMapping(value = "/ocr", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ContractAnalysisOcrResponse>> recognizeText(
+            @RequestPart MultipartFile image
+    ) {
+        ContractAnalysisOcrResponse response = contractAnalysisOcrService.recognize(image);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 }

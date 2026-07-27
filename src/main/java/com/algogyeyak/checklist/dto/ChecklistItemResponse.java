@@ -14,7 +14,8 @@ public record ChecklistItemResponse(
         ChecklistItemType itemType,
         boolean checked,
         boolean issueFound,
-        String value
+        String value,
+        String userNote
 ) {
     public static ChecklistItemResponse from(ChecklistItem item) {
         return new ChecklistItemResponse(
@@ -25,8 +26,9 @@ public record ChecklistItemResponse(
                 item.getImportance(),
                 item.getItemType(),
                 item.isChecked(),
-                item.isIssueFound(),
-                item.getValue()
+                item.isIssueFound() || item.getUserNote() != null,
+                item.getValue(),
+                item.getUserNote()
         );
     }
 }
