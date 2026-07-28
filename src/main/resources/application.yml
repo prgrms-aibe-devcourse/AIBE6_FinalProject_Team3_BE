@@ -44,6 +44,11 @@ app:
     # 커스텀 서브도메인 구조를 이 값으로 흉내낼 수 없다. 실제 커스텀 서브도메인 배포 시에만
     # .example.com처럼 설정할 것 — README의 "운영 배포 시 쿠키 설정" 표 참고.
     domain: ${COOKIE_DOMAIN:}
+  # 개발 편의용 "관리자로 로그인" 버튼(POST /auth/dev-login)의 스위치. 기본값은 false이며,
+  # 운영(application-prod.yml)에서는 환경변수 없이 false로 고정해 실수로 켜지는 것을 막는다.
+  dev-login:
+    enabled: ${DEV_LOGIN_ENABLED:false}
+    email: ${DEV_LOGIN_EMAIL:admin@algogyeyak.local}
 
 kakao:
   rest-api-key: ${KAKAO_REST_API_KEY:dummy-key-for-local}

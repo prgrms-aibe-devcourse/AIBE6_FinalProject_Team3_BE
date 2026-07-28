@@ -1,6 +1,7 @@
 package com.algogyeyak.checklist.service;
 
 import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
+import com.algogyeyak.checklist.dto.ChecklistOverviewResponse;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
@@ -9,6 +10,9 @@ import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyStatus;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -25,10 +31,11 @@ public class ChecklistService {
     private final ChecklistRepository checklistRepository;
     private final ChecklistItemTemplateRepository checklistItemTemplateRepository;
     private final UserRepository userRepository;
+    private final PropertyRepository propertyRepository;
 
     /**
      * 유저-매물 조합에 이미 체크리스트가 있으면 그대로 반환하고(멱등), 없으면 현재 활성 템플릿으로
-     * 새로 생성해 저장한다. 매물 존재/접근권한 검증은 Property 엔티티가 아직 없어 이번 스코프에서 제외한다 (TODO).
+     * 새로 생성해 저장한다.
      */
     @Transactional
     public Checklist createOrGetChecklist(Long userId, Long propertyId) {
@@ -40,10 +47,19 @@ public class ChecklistService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "사용자를 찾을 수 없습니다."));
 
+        Property property = propertyRepository.findById(propertyId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
+        if (property.isDeleted()) {
+            throw new BusinessException(ErrorCode.PROPERTY_NOT_FOUND);
+        }
+        if (!property.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
+        }
+
         List<ChecklistItemTemplate> templates = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc();
         int templateVersion = templates.isEmpty() ? 0 : templates.get(0).getVersion();
 
-        Checklist checklist = Checklist.createFrom(user, propertyId, templateVersion, templates);
+        Checklist checklist = Checklist.createFrom(user, property, templateVersion, templates);
         return checklistRepository.save(checklist);
     }
 
@@ -72,7 +88,7 @@ public class ChecklistService {
         } else if (request.userNote() != null) {
             item.markInsufficient(request.userNote());
         } else {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "변경할 값을 하나 이상 보내야 합니다.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "변경할 값을 하나 이상 보내야 합니다.");
         }
 
         checklist.refreshStatus();
@@ -102,5 +118,19 @@ public class ChecklistService {
         }
 
         return checklist.computeResult();
+    }
+
+    /**
+     * 로그인 유저의 매물 전체 + 매물별 체크리스트 현황을 반환한다. 체크리스트를 아직 시작 안 한
+     * 매물도 포함되며(checklistId=null, status=NOT_STARTED), 삭제된 매물은 제외한다.
+     */
+    public List<ChecklistOverviewResponse> listMyChecklists(Long userId) {
+        List<Property> properties = propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(userId, PropertyStatus.ACTIVE);
+        Map<Long, Checklist> checklistsByPropertyId = checklistRepository.findAllByUserId(userId).stream()
+                .collect(Collectors.toMap(checklist -> checklist.getProperty().getId(), checklist -> checklist));
+
+        return properties.stream()
+                .map(property -> ChecklistOverviewResponse.from(property, checklistsByPropertyId.get(property.getId())))
+                .toList();
     }
 }

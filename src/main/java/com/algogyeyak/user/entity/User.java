@@ -117,6 +117,12 @@ public class User {
         this.passwordHash = passwordHash;
     }
 
+    // 개발용 admin 시드 계정(AdminAccountSeeder)에서만 사용한다. 일반 가입 경로(createOAuthUser/
+    // createLocalUser)는 항상 Role.USER로 생성되며, 이 메서드 외에는 ADMIN으로 승격할 방법이 없다.
+    public void grantAdminRole() {
+        this.role = Role.ADMIN;
+    }
+
     public boolean isWithdrawn() {
         return this.status == UserStatus.WITHDRAWN;
     }
@@ -129,7 +135,7 @@ public class User {
      */
     public void withdraw() {
         if (isWithdrawn()) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "이미 탈퇴한 사용자입니다.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "이미 탈퇴한 사용자입니다.");
         }
 
         this.status = UserStatus.WITHDRAWN;

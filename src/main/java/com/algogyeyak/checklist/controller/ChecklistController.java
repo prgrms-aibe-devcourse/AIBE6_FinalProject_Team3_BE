@@ -3,6 +3,7 @@ package com.algogyeyak.checklist.controller;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.checklist.dto.ChecklistItemResponse;
 import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
+import com.algogyeyak.checklist.dto.ChecklistOverviewResponse;
 import com.algogyeyak.checklist.dto.ChecklistResponse;
 import com.algogyeyak.checklist.dto.ChecklistResultResponse;
 import com.algogyeyak.checklist.entity.Checklist;
@@ -10,6 +11,7 @@ import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.entity.ChecklistResult;
 import com.algogyeyak.checklist.service.ChecklistService;
 import com.algogyeyak.global.response.ApiResponse;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -79,5 +81,15 @@ public class ChecklistController {
     ) {
         ChecklistResult result = checklistService.getChecklistResult(userDetails.userId(), checklistId);
         return ApiResponse.success(ChecklistResultResponse.from(result));
+    }
+
+    /**
+     * 내 매물 전체 + 매물별 체크리스트 현황을 조회한다.
+     */
+    @GetMapping("/checklists")
+    public ApiResponse<List<ChecklistOverviewResponse>> listMyChecklists(
+            @AuthenticationPrincipal JwtUserPrincipal userDetails
+    ) {
+        return ApiResponse.success(checklistService.listMyChecklists(userDetails.userId()));
     }
 }

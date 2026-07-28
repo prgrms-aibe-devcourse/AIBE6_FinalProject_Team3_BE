@@ -1,9 +1,13 @@
 package com.algogyeyak.checklist.entity;
 
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyType;
+import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.AuthProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -14,6 +18,18 @@ class ChecklistTest {
 
     private User testUser() {
         return User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+    }
+
+    private Property testProperty(Long id) {
+        Property property = Property.builder()
+                .userId(1L)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(10_000_000L)
+                .area(20.0)
+                .build();
+        ReflectionTestUtils.setField(property, "id", id);
+        return property;
     }
 
     private ChecklistItemTemplate template(
@@ -45,10 +61,10 @@ class ChecklistTest {
                 template(ChecklistCategory.DOCUMENTS, "신탁등기 여부", ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, ChecklistItemCode.TRUST_REGISTRATION, 2)
         );
 
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+        Checklist checklist = Checklist.createFrom(user, testProperty(10L), 1, templates);
 
         assertThat(checklist.getUser()).isEqualTo(user);
-        assertThat(checklist.getPropertyId()).isEqualTo(10L);
+        assertThat(checklist.getProperty().getId()).isEqualTo(10L);
         assertThat(checklist.getTemplateVersion()).isEqualTo(1);
         assertThat(checklist.getStatus()).isEqualTo(ChecklistStatus.NOT_STARTED);
 
@@ -67,7 +83,7 @@ class ChecklistTest {
         List<ChecklistItemTemplate> templates = List.of(
                 template(ChecklistCategory.INDOOR, "누수 확인", ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1)
         );
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+        Checklist checklist = Checklist.createFrom(user, testProperty(10L), 1, templates);
 
         checklist.refreshStatus();
 
@@ -82,7 +98,7 @@ class ChecklistTest {
                 template(ChecklistCategory.DOCUMENTS, "등기부등본 확인", ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 1),
                 template(ChecklistCategory.INDOOR, "누수 확인(일반)", ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 2)
         );
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+        Checklist checklist = Checklist.createFrom(user, testProperty(10L), 1, templates);
         checklist.getItems().get(0).check(true);
 
         checklist.refreshStatus();
@@ -98,7 +114,7 @@ class ChecklistTest {
                 template(ChecklistCategory.DOCUMENTS, "등기부등본 확인", ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 1),
                 template(ChecklistCategory.DOCUMENTS, "계약조건 재확인", ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 2)
         );
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+        Checklist checklist = Checklist.createFrom(user, testProperty(10L), 1, templates);
         checklist.getItems().get(0).check(true);
 
         checklist.refreshStatus();
@@ -114,7 +130,7 @@ class ChecklistTest {
                 template(ChecklistCategory.DOCUMENTS, "등기부등본 확인", ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 1),
                 template(ChecklistCategory.INDOOR, "누수 확인", ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 2)
         );
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+        Checklist checklist = Checklist.createFrom(user, testProperty(10L), 1, templates);
 
         ChecklistResult result = checklist.computeResult();
 
@@ -135,7 +151,7 @@ class ChecklistTest {
                 template(ChecklistCategory.DOCUMENTS, "계약조건 재확인", ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 2),
                 template(ChecklistCategory.INDOOR, "누수 확인", ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 3)
         );
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+        Checklist checklist = Checklist.createFrom(user, testProperty(10L), 1, templates);
         checklist.getItems().get(0).check(true);
         checklist.getItems().get(2).markInsufficient("환기구 막힘");
         checklist.refreshStatus();
@@ -157,7 +173,7 @@ class ChecklistTest {
         List<ChecklistItemTemplate> templates = List.of(
                 template(ChecklistCategory.DOCUMENTS, "등기부등본 확인", ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 1)
         );
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, templates);
+        Checklist checklist = Checklist.createFrom(user, testProperty(10L), 1, templates);
         checklist.getItems().get(0).check(true);
         checklist.refreshStatus();
 

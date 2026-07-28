@@ -3,6 +3,7 @@ package com.algogyeyak.checklist.controller;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
+import com.algogyeyak.checklist.dto.ChecklistOverviewResponse;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.entity.ChecklistCategory;
 import com.algogyeyak.checklist.entity.ChecklistImportance;
@@ -12,6 +13,9 @@ import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.entity.ChecklistResult;
 import com.algogyeyak.checklist.entity.ChecklistStatus;
 import com.algogyeyak.checklist.service.ChecklistService;
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyType;
+import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.enums.Role;
@@ -69,7 +73,15 @@ class ChecklistControllerTest {
                 .displayOrder(1)
                 .active(true)
                 .build();
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, List.of(template));
+        Property property = Property.builder()
+                .userId(1L)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(10_000_000L)
+                .area(20.0)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 10L);
+        Checklist checklist = Checklist.createFrom(user, property, 1, List.of(template));
         when(checklistService.createOrGetChecklist(eq(1L), eq(10L))).thenReturn(checklist);
 
         mockMvc.perform(post("/properties/10/checklists")
@@ -186,7 +198,15 @@ class ChecklistControllerTest {
                 .displayOrder(1)
                 .active(true)
                 .build();
-        Checklist checklist = Checklist.createFrom(user, 10L, 1, List.of(template));
+        Property property = Property.builder()
+                .userId(1L)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(10_000_000L)
+                .area(20.0)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 10L);
+        Checklist checklist = Checklist.createFrom(user, property, 1, List.of(template));
         when(checklistService.getChecklist(eq(1L), eq(10L))).thenReturn(checklist);
 
         mockMvc.perform(get("/properties/10/checklists")
@@ -201,6 +221,38 @@ class ChecklistControllerTest {
     @DisplayName("인증 토큰 없이 체크리스트를 조회하면 401을 반환한다")
     void getChecklistRejectsRequestWithoutToken() throws Exception {
         mockMvc.perform(get("/properties/10/checklists"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("인증된 사용자가 내 체크리스트 목록을 조회하면 매물별 현황을 반환한다")
+    void listMyChecklistsReturnsOverviewForAuthenticatedUser() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        ChecklistOverviewResponse started = new ChecklistOverviewResponse(
+                10L, 100L, "서울특별시 강남구 테헤란로 123", null, "OFFICETEL", "JEONSE", ChecklistStatus.IN_PROGRESS
+        );
+        ChecklistOverviewResponse notStarted = new ChecklistOverviewResponse(
+                20L, null, "서울특별시 마포구 월드컵로 1", null, "MULTI_FAMILY", "MONTHLY_RENT", ChecklistStatus.NOT_STARTED
+        );
+        when(checklistService.listMyChecklists(1L)).thenReturn(List.of(started, notStarted));
+
+        mockMvc.perform(get("/checklists")
+                        .cookie(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data[0].propertyId").value(10))
+                .andExpect(jsonPath("$.data[0].checklistId").value(100))
+                .andExpect(jsonPath("$.data[0].status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.data[1].propertyId").value(20))
+                .andExpect(jsonPath("$.data[1].checklistId").doesNotExist())
+                .andExpect(jsonPath("$.data[1].status").value("NOT_STARTED"));
+    }
+
+    @Test
+    @DisplayName("인증 토큰 없이 내 체크리스트 목록을 조회하면 401을 반환한다")
+    void listMyChecklistsRejectsRequestWithoutToken() throws Exception {
+        mockMvc.perform(get("/checklists"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
     }
