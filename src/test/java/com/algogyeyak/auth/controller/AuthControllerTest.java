@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.controller;
 
+import com.algogyeyak.auth.dto.PasswordPolicy;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.token.RefreshTokenService;
@@ -58,6 +59,16 @@ class AuthControllerTest {
 
     @MockitoBean
     private PasswordEncoder passwordEncoder;
+
+    @Test
+    void passwordPolicyReturnsPatternWithoutSurroundingAnchorsAndMessage() throws Exception {
+        // 인증 토큰(쿠키/헤더) 없이 호출해도 통과해야 한다 — 로그인 전 회원가입 폼에서도 필요하다.
+        mockMvc.perform(get("/auth/password-policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.pattern").value(PasswordPolicy.HTML_INPUT_PATTERN))
+                .andExpect(jsonPath("$.data.message").value(PasswordPolicy.MESSAGE));
+    }
 
     @Test
     void signupCreatesUserAndIssuesAuthCookies() throws Exception {
@@ -345,7 +356,7 @@ class AuthControllerTest {
         mockMvc.perform(get("/auth/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_MISSING"));
     }
 
     @Test
@@ -393,6 +404,45 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.success").value(true));
 
         verify(refreshTokenService, never()).revoke(any());
+    }
+
+    @Test
+    void accessTokenIsRejectedAfterLogout() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createOAuthUser(
+                "test@example.com", "테스트유저", "https://example.com/avatar.png", AuthProvider.KAKAO, "123");
+        when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
+
+        mockMvc.perform(post("/auth/logout")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isOk());
+
+        // 로그아웃 전에는 유효했던 바로 그 access token이, 만료 전인데도 더 이상 통과하지 않아야 한다 —
+        // 로그아웃해도 access token이 자연 만료 전까지 계속 유효했던 원래 버그의 회귀 테스트.
+        mockMvc.perform(get("/auth/me")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+    }
+
+    @Test
+    void accessTokenIsRejectedAfterLogoutViaBearerHeader() throws Exception {
+        // Swagger/Postman처럼 쿠키 없이 Authorization: Bearer 헤더만으로 인증하는 클라이언트의
+        // 회귀 테스트 — logout()이 access_token 쿠키만 보고 있던 예전 버전에서는 이 access token이
+        // 블랙리스트에 오르지 않아, 로그아웃 후에도 만료 전까지 계속 유효했다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createOAuthUser(
+                "test@example.com", "테스트유저", "https://example.com/avatar.png", AuthProvider.KAKAO, "123");
+        when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
+
+        mockMvc.perform(post("/auth/logout")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/auth/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
 
     @Test
