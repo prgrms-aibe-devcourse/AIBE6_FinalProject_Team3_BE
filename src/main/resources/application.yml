@@ -57,3 +57,7 @@ clova:
   ocr:
     invoke-url: ${CLOVA_OCR_INVOKE_URL:https://dummy-clova-ocr-invoke-url.apigw.ntruss.com/custom/v1/dummy/general}
     secret-key: ${CLOVA_OCR_SECRET_KEY:dummy-secret-key-for-local}
+
+gemini:
+  api-key: ${GEMINI_API_KEY:dummy-gemini-api-key-for-local}
+  model: gemini-3.5-flash
