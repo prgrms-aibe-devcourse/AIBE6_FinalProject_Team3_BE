@@ -62,7 +62,8 @@ public class SecurityConfig {
                                 "/swagger-ui/**", "/v3/api-docs/**",
                                 "/actuator/health", "/h2-console/**",
                                 "/auth/logout", "/auth/refresh",
-                                "/auth/signup", "/auth/login", "/auth/dev-login"
+                                "/auth/signup", "/auth/login", "/auth/dev-login",
+                                "/auth/password-policy"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

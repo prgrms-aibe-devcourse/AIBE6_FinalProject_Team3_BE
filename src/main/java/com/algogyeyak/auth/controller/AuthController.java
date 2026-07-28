@@ -1,6 +1,7 @@
 package com.algogyeyak.auth.controller;
 
 import com.algogyeyak.auth.dto.LoginRequest;
+import com.algogyeyak.auth.dto.PasswordPolicy;
 import com.algogyeyak.auth.dto.PasswordUpdateRequest;
 import com.algogyeyak.auth.dto.SignupRequest;
 import com.algogyeyak.auth.util.EmailNormalizer;
@@ -81,6 +82,24 @@ public class AuthController {
             @Schema(description = "닉네임", example = "algo") String nickname,
             @Schema(description = "프로필 이미지 URL") String profileImageUrl,
             @Schema(description = "권한", example = "USER") String role) {
+    }
+
+    public record PasswordPolicyResponse(
+            @Schema(description = "HTML <input pattern=\"...\"> 속성에 그대로 쓸 수 있는 정규식(앞뒤 ^/$ 없음)",
+                    example = "(?=.*[A-Za-z])(?=.*\\d)[\\x21-\\x7E]{8,72}") String pattern,
+            @Schema(description = "형식 위반 시 보여줄 안내 문구") String message) {
+    }
+
+    // 비밀번호 정책(정규식/안내 문구)이 frontend에 하드코딩돼 있으면 두 곳이 어긋날 때 "프론트는
+    // 통과, 서버는 거부"하는 이중 실패가 생긴다. PasswordPolicy(SignupRequest/PasswordUpdateRequest가
+    // 실제 검증에 쓰는 바로 그 상수)를 여기서 그대로 내려줘서, frontend는 값을 복사해두지 않고 이
+    // 엔드포인트를 유일한 소스로 삼는다. 로그인 전(회원가입 폼)에도 필요해 인증 없이 열어둔다.
+    @Operation(summary = "비밀번호 정책 조회", description = "회원가입/비밀번호 변경 폼에서 클라이언트 측 선제 검증에 쓸 비밀번호 정책(정규식, 안내 문구)을 반환한다. 최종 판단은 signup/password 엔드포인트가 서버에서 다시 수행한다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공")
+    @GetMapping("/password-policy")
+    public ResponseEntity<ApiResponse<PasswordPolicyResponse>> passwordPolicy() {
+        return ResponseEntity.ok(ApiResponse.success(
+                new PasswordPolicyResponse(PasswordPolicy.HTML_INPUT_PATTERN, PasswordPolicy.MESSAGE)));
     }
 
     // 소셜 로그인(OAuth2AuthenticationSuccessHandler)과 달리 리다이렉트가 아니라 REST 응답이므로,
