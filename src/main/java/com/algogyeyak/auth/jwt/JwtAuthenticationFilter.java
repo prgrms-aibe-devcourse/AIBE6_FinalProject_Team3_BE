@@ -55,7 +55,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private String resolveToken(HttpServletRequest request) {
+    // public static: AuthController.logout()도 정확히 이 규칙(헤더 우선, 쿠키 폴백)으로 access
+    // token을 찾아야 한다 — 그래야 로그인 때 쓴 것과 같은 방식으로 인증한 요청이 로그아웃 때도
+    // 같은 토큰을 무효화 대상으로 찾는다. 로직이 두 곳에 따로 있으면 한쪽만 고치고 다른 쪽을
+    // 놓치는 사고(실제로 났었음 — logout이 쿠키만 보고 Authorization 헤더를 놓쳐 Bearer
+    // 클라이언트는 로그아웃해도 access token이 무효화되지 않던 버그)가 재발하기 쉽다.
+    public static String resolveToken(HttpServletRequest request) {
         String bearer = request.getHeader("Authorization");
         if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
             return bearer.substring(7);

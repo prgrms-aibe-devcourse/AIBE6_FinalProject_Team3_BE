@@ -31,6 +31,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -163,15 +164,21 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
     }
 
-    @Operation(summary = "로그아웃", description = "refresh_token 쿠키가 있으면 서버에서 즉시 무효화(revoke)하고, access_token 쿠키가 있으면 그 jti를 만료 시각까지 블랙리스트에 등록해 남은 유효기간 동안에도 즉시 무효화한다. 이후 access/refresh 쿠키를 삭제한다. 두 쿠키 모두 없어도(이미 만료/삭제된 경우 등) 항상 200으로 성공 처리되므로 필수 인증 요구사항으로 문서화하지 않는다.")
+    @Operation(summary = "로그아웃", description = "refresh_token 쿠키가 있으면 서버에서 즉시 무효화(revoke)하고, access token(access_token 쿠키 또는 Authorization: Bearer 헤더)이 있으면 그 jti를 만료 시각까지 블랙리스트에 등록해 남은 유효기간 동안에도 즉시 무효화한다. 이후 access/refresh 쿠키를 삭제한다. 아무것도 없어도(이미 만료/삭제된 경우 등) 항상 200으로 성공 처리되므로 필수 인증 요구사항으로 문서화하지 않는다.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "로그아웃 성공")
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest request, HttpServletResponse response) {
         CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
                 .ifPresent(cookie -> refreshTokenService.revoke(cookie.getValue()));
 
-        CookieUtils.getCookie(request, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME)
-                .ifPresent(cookie -> revokeAccessToken(cookie.getValue()));
+        // 쿠키만 보면 안 된다 — /auth/me 등 다른 엔드포인트와 동일하게 JwtAuthenticationFilter.resolveToken로
+        // 찾아야, Authorization: Bearer 헤더로 인증한 클라이언트(Swagger/Postman 등)도 로그아웃 시
+        // access token이 실제로 무효화된다. 쿠키만 확인하던 이전 버전은 이 경로를 놓쳐 Bearer
+        // 클라이언트의 access token이 로그아웃 후에도 자연 만료 전까지 계속 유효한 채로 남아 있었다.
+        String accessToken = JwtAuthenticationFilter.resolveToken(request);
+        if (StringUtils.hasText(accessToken)) {
+            revokeAccessToken(accessToken);
+        }
 
         cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
         cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
