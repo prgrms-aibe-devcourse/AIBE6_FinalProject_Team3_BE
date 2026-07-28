@@ -84,7 +84,7 @@
 - 구조적으로 중요한 지점: 이 필터는 인증에 실패해도 예외를 던지지 않고 `SecurityContext`를 비운 채 다음 필터로 그냥 넘긴다. 그래서 "왜" 실패했는지를 이후 단계(Spring Security의 `authenticationEntryPoint`, 실제 401 응답을 만드는 지점)까지 전달할 방법이 없었다 — 이번에 필터가 실패 사유를 `request.setAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE, errorCode)`로 남기고, `SecurityConfig`의 `authenticationEntryPoint`가 이 값을 읽어 응답 코드를 정하도록 연결했다(속성이 없으면 기본값 `UNAUTHORIZED`).
 - 로그아웃으로 jti가 블랙리스트에 오른(revoke된) 토큰도 `AUTH_TOKEN_INVALID`로 분류한다 — "더 이상 쓸 수 없는 토큰"이라는 점에서 형식 오류/서명 위조와 같은 취급.
 - **"비활성 사용자"(탈퇴 등)는 구분하지 않고 보류함.** 이유: 필터는 무상태 검증 원칙상 매 요청마다 DB를 조회하지 않는다(`com.algogyeyak.user` 조회는 `/auth/me`만 예외적으로 함). 비활성 사용자를 필터 레벨에서 구분하려면 모든 요청에 DB 조회를 추가해야 하는데, 이는 "Access Token 검증 시 외부 API/DB 미호출"이라는 비기능 요구사항과 충돌한다. 실제로 이 기능(계정 비활성화)이 아직 구현되어 있지 않기도 해서, 필요해지면 그때 다시 설계하기로 함. 지금은 `/auth/me`가 이미 하던 대로 컨트롤러 레벨에서 DB 재조회 후 `ErrorCode.UNAUTHORIZED`(코드 구분 없음, 메시지만 "존재하지 않거나 탈퇴한 사용자입니다")로 응답한다.
-- 프론트엔드는 현재 `error.code === 'UNAUTHORIZED'` 단일 체크만 하고 있어(세션 만료 리다이렉트 용도), 새 코드 3종을 프론트가 활용하려면 별도 작업이 필요함 — 지금은 백엔드만 구분 가능해진 상태.
+- **(2026-07-28 갱신)** 프론트엔드가 `isSessionInvalidErrorCode()`(`app/lib/api/http.ts`)로 이 세 코드(+`UNAUTHORIZED`)를 전부 인식하도록 갱신함(`fix/auth-modify_according_docs` 브랜치, frontend `dev` 머지 대기 중) — 갱신 전에는 `PasswordUpdateFormClient`가 `UNAUTHORIZED` 하나만 체크하고 있어서, 이 코드 세분화가 먼저 머지되면 만료/무효 케이스에서 재로그인 유도가 실제로 깨지는 상태였음(리뷰로 발견). 다만 화면에 보여줄 문구 자체는 여전히 하나로 통합 — "재로그인 필요 여부" 판단에만 네 코드를 씀.
 
 ## 토큰 재발급 — 요구사항 대비
 
