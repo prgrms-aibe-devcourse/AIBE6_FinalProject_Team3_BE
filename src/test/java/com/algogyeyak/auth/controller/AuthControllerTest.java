@@ -345,7 +345,7 @@ class AuthControllerTest {
         mockMvc.perform(get("/auth/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_MISSING"));
     }
 
     @Test
@@ -411,7 +411,7 @@ class AuthControllerTest {
         mockMvc.perform(get("/auth/me")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
 
     @Test
@@ -431,7 +431,7 @@ class AuthControllerTest {
         mockMvc.perform(get("/auth/me")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
 
     @Test

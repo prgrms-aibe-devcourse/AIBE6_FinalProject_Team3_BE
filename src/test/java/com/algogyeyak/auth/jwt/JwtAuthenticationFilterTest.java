@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.jwt;
 
+import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.user.enums.Role;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
@@ -88,6 +89,7 @@ class JwtAuthenticationFilterTest {
         filter.doFilter(request, response, filterChain);
 
         assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(ErrorCode.AUTH_TOKEN_MISSING, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
         verify(filterChain).doFilter(request, response);
     }
 
@@ -100,6 +102,23 @@ class JwtAuthenticationFilterTest {
         filter.doFilter(request, response, mock(FilterChain.class));
 
         assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(ErrorCode.AUTH_TOKEN_INVALID, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
+    }
+
+    @Test
+    void doesNotSetAuthenticationWhenTokenExpired() throws Exception {
+        JwtProvider shortLivedProvider = new JwtProvider("test-secret-key-must-be-at-least-32-bytes-long", 0);
+        String token = shortLivedProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        Thread.sleep(1100);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, mock(FilterChain.class));
+
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(ErrorCode.AUTH_TOKEN_EXPIRED, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
     }
 
     @Test
@@ -115,5 +134,6 @@ class JwtAuthenticationFilterTest {
         filter.doFilter(request, response, mock(FilterChain.class));
 
         assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(ErrorCode.AUTH_TOKEN_INVALID, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
     }
 }
