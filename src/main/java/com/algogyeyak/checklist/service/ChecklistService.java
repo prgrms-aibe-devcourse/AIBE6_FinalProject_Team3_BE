@@ -56,10 +56,13 @@ public class ChecklistService {
             throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
         }
 
-        List<ChecklistItemTemplate> templates = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc();
-        int templateVersion = templates.isEmpty() ? 0 : templates.get(0).getVersion();
+        List<ChecklistItemTemplate> activeTemplates = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc();
+        int templateVersion = activeTemplates.isEmpty() ? 0 : activeTemplates.get(0).getVersion();
+        List<ChecklistItemTemplate> applicableTemplates = activeTemplates.stream()
+                .filter(template -> template.isApplicableTo(property.getPropertyType()))
+                .toList();
 
-        Checklist checklist = Checklist.createFrom(user, property, templateVersion, templates);
+        Checklist checklist = Checklist.createFrom(user, property, templateVersion, applicableTemplates);
         return checklistRepository.save(checklist);
     }
 

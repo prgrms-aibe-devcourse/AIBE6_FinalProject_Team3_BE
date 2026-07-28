@@ -105,6 +105,37 @@ class ChecklistServiceTest {
     }
 
     @Test
+    @DisplayName("체크리스트 생성 시 매물유형에 맞지 않는 문항은 제외된다")
+    void createChecklistFiltersTemplatesByPropertyType() {
+        User user = user(1L);
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L))); // OFFICETEL
+        when(templateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of(
+                ChecklistItemTemplate.builder()
+                        .version(2).category(ChecklistCategory.SAFETY)
+                        .content("공동현관과 현관문 잠금장치가 모두 정상 작동하나요?")
+                        .importance(ChecklistImportance.GENERAL).itemType(ChecklistItemType.CHECK)
+                        .displayOrder(1).active(true)
+                        .applicablePropertyTypes("OFFICETEL,MULTI_FAMILY")
+                        .build(),
+                ChecklistItemTemplate.builder()
+                        .version(2).category(ChecklistCategory.SAFETY)
+                        .content("현관문 잠금장치가 정상 작동하나요?")
+                        .importance(ChecklistImportance.GENERAL).itemType(ChecklistItemType.CHECK)
+                        .displayOrder(1).active(true)
+                        .applicablePropertyTypes("DETACHED_HOUSE")
+                        .build()
+        ));
+        when(checklistRepository.save(any(Checklist.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Checklist result = checklistService.createOrGetChecklist(1L, 10L);
+
+        assertThat(result.getItems()).hasSize(1);
+        assertThat(result.getItems().get(0).getContent()).isEqualTo("공동현관과 현관문 잠금장치가 모두 정상 작동하나요?");
+    }
+
+    @Test
     @DisplayName("존재하지 않는 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
     void createChecklistThrowsWhenPropertyNotFound() {
         when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
