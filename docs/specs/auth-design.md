@@ -11,9 +11,19 @@
 | 요구사항 | 실제 구현 |
 |---|---|
 | `User`(id, email, passwordHash, nickname, status) | 동일 + `provider`, `providerId`, `role`, `profileImageUrl`, `createdAt`/`updatedAt` 추가 |
-| `OAuthAccount`(별도 엔티티: id, userId, provider, providerUserId) | **별도 엔티티로 존재하지 않음.** `provider`/`providerId`가 `User`에 직접 저장되고, `(provider, provider_id)` 유니크 제약으로 관리됨 |
+| `OAuthAccount`(별도 엔티티: id, userId, provider, providerUserId) | ✅ **(2026-07-28 구현 완료)** `UserSocialAccount`(`user_social_accounts`)로 구현. 아래 참고 |
 
-⚠️ **확인 필요**: 요구사항엔 `OAuthAccount`가 별도 엔티티로 명시되어 있었는데, 실제론 `User`가 provider당 1개(`provider`+`providerId` 한 쌍)만 갖는 구조예요. 즉 **한 유저가 구글+카카오를 동시에 연동할 수 없고**, 나중에 다른 provider로 로그인하면 기존 provider 정보가 덮어써집니다. 코드 주석에도 "진짜 다중 소셜 연동이 필요하면 `user_socials` 같은 별도 테이블이 필요하다"고 명시되어 있어, 이건 **의도적으로 축소된 MVP 범위**로 보입니다 — 실제로 이렇게 가기로 한 게 맞는지 확인 필요.
+**(2026-07-28) 다중 소셜 연동 구현** — 요구사항의 `OAuthAccount`를 `UserSocialAccount` 엔티티로 구현했다.
+
+- **역할 분리**: `User.provider`/`providerId`는 그대로 남겨뒀지만 의미가 바뀌었다 — 더 이상 "유일한 연동 정보"가 아니라 **"가장 최근에 로그인에 쓴 수단"만 가리키는 캐시**다. "이 유저가 실제로 연동해둔 모든 소셜 계정 목록"의 진짜 소스는 `UserSocialAccount`. LOCAL(이메일/비밀번호)은 이 테이블에 포함하지 않는다 — `User` 자체가 이미 email+passwordHash로 충분히 표현하고, 외부 provider_id 같은 게 애초에 없기 때문
+- **제약**: `(provider, provider_id)` 전역 유니크(같은 소셜 계정이 두 User에게 동시에 연결 불가), `(user_id, provider)` 유니크(한 User가 같은 provider를 두 개 연동 불가)
+- **`CustomOAuth2UserService.findOrCreateUser` 흐름 변경**:
+  1. `UserSocialAccount`에서 `(provider, providerId)`로 먼저 조회 → 있으면 그 User 반환(이미 연동된 provider로의 재로그인). 이때 `User.provider`가 지금 로그인에 쓴 provider와 다르면(다른 이미-연동된 수단으로 로그인) "최근 로그인 수단" 캐시만 갱신하고 새 연동은 만들지 않음
+  2. 없으면 기존과 동일하게 검증된 이메일로 기존 계정(로컬 또는 다른 소셜) 매칭 시도 → 매치되면 새 `UserSocialAccount`를 추가(기존 연동은 그대로 유지 — 한 계정에 구글+카카오가 동시에 남는다) + "최근 로그인 수단" 캐시를 이번 provider로 갱신
+  3. 둘 다 없으면 신규 User 생성 + 그 User의 첫 `UserSocialAccount` 생성(같은 REQUIRES_NEW 트랜잭션에서 함께 커밋 — 항상 짝으로 존재해야 함)
+- **동시성**: 신규 생성 시 유니크 제약 충돌 복구는 기존 패턴(REQUIRES_NEW 격리 + 재조회)을 그대로 따름. 기존 계정에 새 provider를 연동할 때의 레이스(같은 계정에 동시에 같은 provider 연동 시도, 극히 드묾)도 같은 패턴으로 방어
+- **마이그레이션**: 이 프로젝트는 Flyway/Liquibase 없이 Hibernate `ddl-auto`로 스키마를 관리하고 있어(다른 테이블들과 동일), 새 테이블은 별도 마이그레이션 스크립트 없이 자동 생성됨. 기존에 쌓인 실사용자 데이터가 없다는 전제(H2는 인메모리, 실 운영 배포 전 단계)라 과거 `users.provider`/`provider_id`를 `user_social_accounts`로 백필하는 마이그레이션은 별도로 작성하지 않음 — 만약 이미 운영 데이터가 있다면 배포 전에 백필 스크립트가 필요함
+- 테스트: `CustomOAuth2UserServiceTest`에 다중 연동 시나리오 2개 추가(이미 연동된 provider로 재로그인 시 재연동 안 함, 두 번째 provider 연동 후에도 첫 provider가 여전히 유효), `CustomOAuth2UserServiceConcurrentLoginIntegrationTest`도 `UserSocialAccount` 기준으로 갱신
 
 ## 이메일 회원가입 — 요구사항 대비
 
@@ -47,8 +57,8 @@
 |---|---|
 | 인증 코드 유효성 확인 | ✅ (Spring Security OAuth2 표준 흐름) |
 | 사용자 식별 정보 조회 | ✅ (구글: `sub`/`email`/`name`/`picture`, 카카오: `id`/`kakao_account.*`) |
-| `OAuthAccount` 기준 기존 가입 확인 | 실제론 `User.provider`+`providerId` 기준 (Entity가 다름, 위 참고) |
-| 신규 시 User+OAuthAccount 생성 | User만 생성 (OAuthAccount 없음) |
+| `OAuthAccount` 기준 기존 가입 확인 | ✅ **(2026-07-28)** `UserSocialAccount`의 `(provider, providerId)` 기준 (위 "주요 Entity" 섹션 참고) |
+| 신규 시 User+OAuthAccount 생성 | ✅ **(2026-07-28)** User + 그 첫 `UserSocialAccount`를 같은 트랜잭션에서 함께 생성 |
 | 동일 이메일 기존 계정 연동 | ✅ — 단, **"검증된 이메일"일 때만** 연동함 (구글 `email_verified`, 카카오 `is_email_verified`). 검증 안 된 이메일은 아예 저장 안 하고 `null`로 둠 (계정 탈취 방지 목적) |
 | 성공: 신규→온보딩, 기존→홈 | ✅ **(2026-07-28 확인 완료)** 백엔드는 신규/기존을 구분해 다른 곳으로 보내지 않지만, **프론트엔드가 "프로필 등록 여부"를 기준으로 사실상 동일한 결과를 만든다.** `frontend/app/oauth/callback/route.ts`가 로그인 성공 후 프로필을 조회해, 프로필이 없으면 `/mypage/profile`(온보딩)로, 있으면 `/home`으로 보낸다. 신규 가입자는 프로필이 없는 게 당연하니 자연스럽게 온보딩으로 가고, 기존 유저는 홈으로 간다 — "신규 계정 여부" 대신 "프로필 완료 여부"라는 대리 신호(proxy)를 쓰는 것뿐, 요구사항이 원하던 분기는 실질적으로 만족됨 |
 | 실패: 제공자 인증/사용자 정보 조회 실패 | ✅ — 단, 세부 사유 구분 없이 전부 `?error=oauth_login_failed` 하나로 통합 |
@@ -120,14 +130,16 @@
 ## 요구사항에 없던 추가 구현
 
 - `PATCH /auth/password` — 로그인 후 비밀번호 설정/변경 (소셜 전용 계정이 로컬 로그인 수단을 추가하는 용도 포함)
+- **(2026-07-28)** `GET /auth/password-policy` — frontend가 회원가입/비밀번호 변경 폼의 `<input pattern="...">`/안내 문구를 하드코딩하는 대신 이 엔드포인트로 런타임에 받아오도록 만든 것. `PasswordPolicy`(SignupRequest/PasswordUpdateRequest가 실제 검증에 쓰는 바로 그 상수)가 유일한 소스가 되어, 여기만 바꾸면 백엔드 검증과 프론트 폼 힌트가 항상 같이 바뀐다. 인증 불필요(로그인 전 회원가입 폼에서도 호출)
 - `POST /auth/dev-login` — 개발/데모용 관리자 로그인 백도어 (`app.dev-login.enabled`일 때만 동작, 평소엔 404). 관리자 계정은 앱 기동 시 자동 시딩/복구됨
 - 이메일 정규화(trim+lowercase)를 모든 저장/조회 지점에 일관 적용
 - 회원가입 INSERT를 별도 트랜잭션으로 분리해 Hibernate 세션 오염 방지 (동시 가입 레이스 대응)
 
 ## 남은 이슈 / 확인 필요 총정리
 
-1. `OAuthAccount` 별도 엔티티 없이 `User`가 provider 1개만 갖는 구조 — 다중 소셜 연동 필요 여부. **(2026-07-28) 보류 결정** — 지금 당장 고칠 항목은 아니고, 나중에 필요해지면 `user_socials` 같은 연동 테이블을 추가하는 방향으로 다시 논의하기로 함
-2. 카카오 email 스코프 미승인 상태 — 카카오 계정 연동이 사실상 항상 실패(신규 생성)하는 현재 동작이 알려진 상태인지. **(2026-07-28 조사 완료, 아래 소셜 로그인 섹션 참고)** "정식 출시 후에만 가능"은 부정확 — 개인 개발자는 본인인증+약관동의만으로 비즈 앱 전환 신청이 가능해 보임(단, email 동의항목 심사엔 동작하는 회원가입 페이지가 필요하며 저희는 이미 있음). 신청 여부/일정은 팀 결정 필요
+1. ~~`OAuthAccount` 별도 엔티티 없이 `User`가 provider 1개만 갖는 구조 — 다중 소셜 연동 필요 여부~~ — ✅ 2026-07-28 구현 완료. `UserSocialAccount` 연동 테이블 추가, 한 유저가 구글/카카오를 동시에 연동 가능(위 "주요 Entity"/"소셜 로그인" 섹션 참고). `User.provider`/`providerId`는 제거하지 않고 "가장 최근 로그인 수단" 캐시로 의미만 재정의함 — 기존 데이터/코드(AdminAccountSeeder 등)를 건드리지 않아 마이그레이션 스크립트가 필요 없었음
+2. 카카오 email 스코프 미승인 상태 — 카카오 계정 연동이 사실상 항상 실패(신규 생성)하는 현재 동작이 알려진 상태인지. **(2026-07-28 조사 완료, 아래 소셜 로그인 섹션 참고)** "정식 출시 후에만 가능"은 부정확 — 개인 개발자는 본인인증+약관동의만으로 비즈 앱 전환 신청이 가능해 보임(단, email 동의항목 심사엔 동작하는 회원가입 페이지가 필요하며 저희는 이미 있음).
+   **⚠️ 코드 작업이 아님 — 별도 도메인/트랙으로 분리.** 카카오 디벨로퍼스 콘솔에서 앱 소유자 본인인증 → 비즈 앱 전환 → 개인정보(email) 동의항목 심사 신청까지 전부 **카카오 개발자 콘솔 운영 업무**이지 백엔드/프론트 코드 변경이 아니다. `com.algogyeyak.auth`(코드) 관점에서 할 일은 승인이 완료된 뒤 `application.yml`의 `scope: profile_nickname` → `scope: profile_nickname, account_email`로 한 줄 바꾸는 것뿐. 그러니 "신청 자체"는 이 auth 코드 도메인이 아니라 팀의 운영/기획 쪽에서 별도로 트래킹해야 할 항목이고, 신청 완료 여부에 따라 이 코드 변경 시점이 결정되는 후속 작업으로 남겨둠
 3. ~~신규/기존 사용자 리다이렉트 분기가 백엔드가 아닌 프론트 담당으로 보이는데, 실제로 그렇게 구현되어 있는지~~ — ✅ 2026-07-28 확인 완료. `frontend/app/oauth/callback/route.ts`가 프로필 등록 여부로 분기 처리함(위 소셜 로그인 섹션 참고)
 4. "Refresh Token 별도 저장소 없음"(요구사항) vs 실제 DB 저장 — 원래 의도 확인. **(2026-07-28)** 왜 DB(혹은 그에 준하는 공유 저장소)가 필요한지는 설명을 남겨둠(위 토큰 재발급 섹션 참고) — 즉시 무효화/유저당 1세션/탈퇴 차단을 서명 검증만으로는 만들 수 없어 저장소 자체는 불가피했고, 이미 있는 DB에 테이블 하나 추가한 것뿐이라 "DB를 안 쓰는" 선택지는 실질적으로 없었음. 다만 "별도 저장소 없음"이라는 원문 문구가 정확히 뭘 의도했는지는 여전히 작성자 확인이 필요한 채로 남아있음 — 해결이 아니라 설명 보강
 5. ~~`/auth/logout`의 Swagger 설명(jti 블랙리스트)과 실제 코드 불일치~~ — ✅ 2026-07-28 해결. jti 블랙리스트 구현 완료(로그아웃 섹션 참고), `fix/auth-access_token&refresh_token` 브랜치, `dev` 머지 대기 중
