@@ -14,7 +14,7 @@
 | `property` | 부분 구현, 명세보다 크게 좁음 | 시세·위험신호·체크리스트 연동 전무, 검색/페이지네이션 없음 |
 | `contract-analysis` | 부분 구현(진행 중) | 핵심 단계인 AI 분석(`/analyze`) 자체가 없음 |
 | `market-data` | **미구현** | property에 응답 스키마 자리표시자만 존재 |
-| `risk-analysis` | **미구현** | 코드 자체가 전혀 없음, market-data에도 의존 |
+| `risk-analysis` | 부분 구현(스켈레톤) | 엔티티/enum/정책설정/오케스트레이션 서비스는 있으나 신호 탐지기 4종 전부 빈 스텁, 컨트롤러도 없어 API로 노출되는 기능 없음. market-data에도 의존 |
 
 ## 반복적으로 나타난 패턴
 
@@ -29,17 +29,18 @@
 
 ### 2. market-data / risk-analysis 미구현이 다른 도메인에 남긴 흔적
 
-두 도메인이 완전히 비어있다 보니, 이걸 미리 참조하려던 다른 도메인 코드에 자리표시자만 남아있습니다.
+`market-data`는 여전히 코드가 전혀 없고, `risk-analysis`는 골격(엔티티/enum/정책설정/오케스트레이션 서비스)까지는 생겼지만 신호 탐지 로직과 컨트롤러가 전부 빈 스텁이라 실질적으로 아무것도 동작하지 않는 건 마찬가지입니다. 이걸 미리 참조하려던 다른 도메인 코드엔 자리표시자만 남아있습니다.
 
 - `property`의 매물 등록/상세 응답엔 `marketComparison` 필드가 있지만 항상 `UNAVAILABLE` 고정값
 - `property`의 매물 상세 응답엔 위험 신호·안전성 정보를 담을 필드 자체가 없음
 - `checklist`의 소유권취득일 문항에 "risk-analysis 전세가율과 연계"라는 주석만 있고 실제 연동 코드는 없음
+- `risk-analysis` 내부에도 같은 패턴이 반복됩니다: `MarketDataClient`(market-data 실 구현체가 나오기 전까지의 인터페이스)에 진짜 구현체가 없어, 임시로 항상 `UNDETERMINABLE`만 반환하는 `TemporaryMarketDataClient`를 꽂아 컨텍스트 로딩만 살려둔 상태 — `property`의 "항상 UNAVAILABLE" 고정값과 본질적으로 같은 임시방편입니다.
 
-셋 다 사실상 같은 이슈(시세·위험도 데이터가 없어 연동할 게 없음)의 다른 얼굴이라, market-data부터 구현 순서를 잡는 게 자연스러워 보입니다.
+넷 다 사실상 같은 이슈(시세·위험도 데이터가 없어 연동할 게 없음)의 다른 얼굴이라, market-data부터 구현 순서를 잡는 게 자연스러워 보입니다.
 
 ### 3. "매물 수정 시 재계산/무효화" 훅이 어디에도 없음
 
-요구사항 명세서 3곳(`property`, `market-data`, `risk-analysis`)이 공통으로 "가격/거래유형이 바뀌면 기존 시세·위험신호 결과를 무효화하고 재계산한다"를 요구하는데, 실제로 `PropertyService.update()`엔 가격이 바뀌어도 아무 것도 트리거하지 않습니다. 세 도메인 문서 모두 이 이슈를 지적했지만 원인은 하나(`property` 수정 로직에 훅이 없음)라, 나중에 market-data/risk-analysis를 구현할 팀원이 `property` 코드도 함께 건드려야 합니다.
+요구사항 명세서 3곳(`property`, `market-data`, `risk-analysis`)이 공통으로 "가격/거래유형이 바뀌면 기존 시세·위험신호 결과를 무효화하고 재계산한다"를 요구하는데, 실제로 `PropertyService.update()`엔 가격이 바뀌어도 아무 것도 트리거하지 않습니다. `risk-analysis`엔 이를 위한 `RiskRecalculationService` 자리(빈 스텁)가 이미 마련되어 있지만 아직 아무 로직도, 호출 지점도 없습니다. 세 도메인 문서 모두 이 이슈를 지적했지만 원인은 하나(`property` 수정 로직에 훅이 없음)라, 나중에 market-data/risk-analysis를 구현할 팀원이 `property` 코드도 함께 건드려야 합니다.
 
 ### 4. 매물 삭제 이후 접근 차단이 도메인 진입점마다 다르게 적용됨
 
@@ -79,4 +80,4 @@
 | market-data | 4개 |
 | checklist | 7개 |
 | contract-analysis | 8개 |
-| risk-analysis | 7개 |
+| risk-analysis | 9개 |
