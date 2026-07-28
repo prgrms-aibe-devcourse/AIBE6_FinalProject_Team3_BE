@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.controller;
 
+import com.algogyeyak.auth.dto.PasswordPolicy;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.token.RefreshTokenService;
@@ -58,6 +59,16 @@ class AuthControllerTest {
 
     @MockitoBean
     private PasswordEncoder passwordEncoder;
+
+    @Test
+    void passwordPolicyReturnsPatternWithoutSurroundingAnchorsAndMessage() throws Exception {
+        // 인증 토큰(쿠키/헤더) 없이 호출해도 통과해야 한다 — 로그인 전 회원가입 폼에서도 필요하다.
+        mockMvc.perform(get("/auth/password-policy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.pattern").value(PasswordPolicy.HTML_INPUT_PATTERN))
+                .andExpect(jsonPath("$.data.message").value(PasswordPolicy.MESSAGE));
+    }
 
     @Test
     void signupCreatesUserAndIssuesAuthCookies() throws Exception {

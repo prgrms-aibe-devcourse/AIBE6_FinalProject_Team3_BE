@@ -2,11 +2,12 @@ package com.algogyeyak.auth.dto;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-// PasswordPolicy가 package-private이라 같은 패키지에 둔다. null 처리는 SignupRequest/
-// PasswordUpdateRequest의 @NotBlank가 담당하므로 여기서는 패턴 자체의 경계만 검증한다.
+// null 처리는 SignupRequest/PasswordUpdateRequest의 @NotBlank가 담당하므로 여기서는 패턴 자체의
+// 경계만 검증한다.
 class PasswordPolicyTest {
 
     private boolean matches(String candidate) {
@@ -65,5 +66,14 @@ class PasswordPolicyTest {
     @Test
     void acceptsAllowedSymbolCharacters() {
         assertTrue(matches("abcdef1!"));
+    }
+
+    // HTML5 <input pattern="...">는 브라우저가 이미 ^(?:...)$ 로 감싸므로, GET /auth/password-policy가
+    // 내려주는 값에는 PATTERN 앞뒤의 ^/$가 없어야 한다 — 있으면 이중 앵커링된다.
+    @Test
+    void htmlInputPatternStripsSurroundingAnchors() {
+        assertEquals("(?=.*[A-Za-z])(?=.*\\d)[\\x21-\\x7E]{8,72}", PasswordPolicy.HTML_INPUT_PATTERN);
+        assertFalse(PasswordPolicy.HTML_INPUT_PATTERN.startsWith("^"));
+        assertFalse(PasswordPolicy.HTML_INPUT_PATTERN.endsWith("$"));
     }
 }
