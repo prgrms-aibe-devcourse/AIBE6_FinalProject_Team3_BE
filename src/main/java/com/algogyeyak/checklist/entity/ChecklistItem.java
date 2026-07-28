@@ -167,9 +167,9 @@ public class ChecklistItem {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Y 또는 N 값만 입력할 수 있습니다.");
         }
 
-        // 신탁등기 있음(Y), 소유자-임대인 명의 불일치(N)는 자동으로 주의 항목(issueFound)으로 반영한다.
+        // 신탁등기 있음(Y), 소유자-임대인 명의 불일치(Y)는 자동으로 주의 항목(issueFound)으로 반영한다.
         boolean triggersIssue = (code == ChecklistItemCode.TRUST_REGISTRATION && "Y".equals(rawValue))
-                || (code == ChecklistItemCode.OWNERSHIP_MATCH && "N".equals(rawValue));
+                || (code == ChecklistItemCode.OWNERSHIP_MATCH && "Y".equals(rawValue));
         markAnswered(rawValue, triggersIssue);
     }
 

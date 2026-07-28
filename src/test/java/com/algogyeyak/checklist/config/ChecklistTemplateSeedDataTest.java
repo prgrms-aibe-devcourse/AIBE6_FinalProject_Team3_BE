@@ -3,6 +3,7 @@ package com.algogyeyak.checklist.config;
 import com.algogyeyak.checklist.entity.ChecklistCategory;
 import com.algogyeyak.checklist.entity.ChecklistItemCode;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
+import com.algogyeyak.property.entity.PropertyType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -18,9 +19,14 @@ class ChecklistTemplateSeedDataTest {
     private final List<ChecklistItemTemplate> templates = ChecklistTemplateSeedData.initialTemplates();
 
     @Test
-    @DisplayName("전체 문항 수는 20~24개다")
-    void hasBetween20And24Items() {
-        assertThat(templates.size()).isBetween(20, 24);
+    @DisplayName("매물유형별로 적용되는 문항 수는 20~24개다 (전체 템플릿 목록은 매물유형별 변형 문항 때문에 그보다 많을 수 있다)")
+    void eachPropertyTypeHasBetween20And24ApplicableItems() {
+        for (PropertyType propertyType : PropertyType.values()) {
+            long applicableCount = templates.stream()
+                    .filter(template -> template.isApplicableTo(propertyType))
+                    .count();
+            assertThat(applicableCount).as("propertyType=%s", propertyType).isBetween(20L, 24L);
+        }
     }
 
     @Test
@@ -54,10 +60,10 @@ class ChecklistTemplateSeedDataTest {
     }
 
     @Test
-    @DisplayName("모든 문항은 버전 1, active=true로 생성된다")
-    void allItemsAreVersionOneAndActive() {
+    @DisplayName("모든 문항은 버전 2, active=true로 생성된다")
+    void allItemsAreVersionTwoAndActive() {
         assertThat(templates).allSatisfy(template -> {
-            assertThat(template.getVersion()).isEqualTo(1);
+            assertThat(template.getVersion()).isEqualTo(2);
             assertThat(template.isActive()).isTrue();
         });
     }
