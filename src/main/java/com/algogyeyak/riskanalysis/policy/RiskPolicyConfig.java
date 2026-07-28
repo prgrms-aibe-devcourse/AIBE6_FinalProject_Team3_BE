@@ -1,9 +1,15 @@
 package com.algogyeyak.riskanalysis.policy;
 
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "risk-policy")
+@Getter
+@Setter
 public class RiskPolicyConfig {
     private String version;              // 예: "v1.0"
-    private int priceOutlierMinPercent;   // 10
-    private int priceOutlierMaxPercent;   // 20
+    private int priceAnomalyPercent;     // 10
     private int jeonseRatioWarnFrom;      // 100
     private int jeonseRatioWarnTo;        // 150
     private int jeonseRatioAlertOver;     // 150

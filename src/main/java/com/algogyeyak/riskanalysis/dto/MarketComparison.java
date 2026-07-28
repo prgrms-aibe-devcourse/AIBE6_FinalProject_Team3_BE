@@ -1,5 +1,6 @@
 package com.algogyeyak.riskanalysis.dto;
 
+import com.algogyeyak.riskanalysis.enums.MarketComparisonStatus;
 import com.algogyeyak.riskanalysis.enums.MarketUnavailableReason;
 
 import java.math.BigDecimal;

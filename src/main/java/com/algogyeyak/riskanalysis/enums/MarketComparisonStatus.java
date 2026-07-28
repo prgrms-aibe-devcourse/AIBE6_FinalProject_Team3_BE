@@ -1,4 +1,4 @@
-package com.algogyeyak.riskanalysis.dto;
+package com.algogyeyak.riskanalysis.enums;
 
 public enum MarketComparisonStatus {
     SUCCESS, UNDETERMINABLE, FAILED

@@ -52,3 +52,11 @@ clova:
   ocr:
     invoke-url: ${CLOVA_OCR_INVOKE_URL:https://dummy-clova-ocr-invoke-url.apigw.ntruss.com/custom/v1/dummy/general}
     secret-key: ${CLOVA_OCR_SECRET_KEY:dummy-secret-key-for-local}
+
+risk-policy:
+  version: v1.0
+  price-anomaly-percent: 10
+  jeonse-ratio-warn-from: 100
+  jeonse-ratio-warn-to: 150
+  jeonse-ratio-alert-over: 150
+  multi-account-detection-enabled: false

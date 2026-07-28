@@ -1,4 +1,4 @@
 package com.algogyeyak.riskanalysis.signal;
 
-public class SameAcountMultipleDetector {
+public class SameAccountMultipleDetector {
 }
