@@ -60,7 +60,7 @@ public final class ChecklistTemplateSeedData {
         order = add(templates, ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?",
                 "신탁등기가 있으면 실소유자가 별도로 있어 계약 권한이 다를 수 있어요.",
                 ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, ChecklistItemCode.TRUST_REGISTRATION, order);
-        order = add(templates, ChecklistCategory.DOCUMENTS, "등기부등본상 소유자와 임대인(계약 당사자)의 명의가 일치하나요?",
+        order = add(templates, ChecklistCategory.DOCUMENTS, "등기부등본상 소유자와 임대인(계약 당사자)의 명의가 다른가요?",
                 "명의가 다르면 위임장 등 대리 계약 권한을 별도로 확인해야 해요.",
                 ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, ChecklistItemCode.OWNERSHIP_MATCH, order);
         order = add(templates, ChecklistCategory.DOCUMENTS, "소유권 취득일을 확인했나요?",

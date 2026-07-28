@@ -361,7 +361,7 @@ class ChecklistServiceTest {
     void getChecklistReturnsChecklistWithItems() {
         User user = user(1L);
         Checklist checklist = checklistWithOneCheckItem(user);
-        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.of(checklist));
+        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
 
         Checklist result = checklistService.getChecklist(1L, 10L);
 
@@ -372,12 +372,26 @@ class ChecklistServiceTest {
     @Test
     @DisplayName("해당 매물에 체크리스트가 없으면 NOT_FOUND 예외가 발생한다")
     void getChecklistThrowsWhenNoneExists() {
-        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("본인 소유가 아닌 체크리스트를 조회하면 FORBIDDEN 예외가 발생한다")
+    void getChecklistThrowsWhenNotOwner() {
+        User owner = user(1L);
+        Checklist checklist = checklistWithOneCheckItem(owner);
+        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
+
+        assertThatThrownBy(() -> checklistService.getChecklist(999L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
                 );
     }
 
@@ -388,7 +402,7 @@ class ChecklistServiceTest {
         Property deletedProperty = property(10L, 1L);
         deletedProperty.delete();
         Checklist checklist = Checklist.createFrom(user, deletedProperty, 1, List.of());
-        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.of(checklist));
+        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
 
         assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
                 .isInstanceOf(BusinessException.class)
