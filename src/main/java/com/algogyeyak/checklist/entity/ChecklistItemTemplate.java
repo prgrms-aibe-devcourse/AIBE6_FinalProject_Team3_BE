@@ -1,5 +1,6 @@
 package com.algogyeyak.checklist.entity;
 
+import com.algogyeyak.property.entity.PropertyType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -12,6 +13,8 @@ import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+
+import java.util.Arrays;
 
 /**
  * 체크리스트 문항 템플릿. 실제 체크리스트(Checklist/ChecklistItem)는 여기서 내용을 스냅샷으로
@@ -61,6 +64,11 @@ public class ChecklistItemTemplate {
     @Column(nullable = false)
     private boolean active;
 
+    // 이 문항을 보여줄 매물유형을 콤마로 구분해 담는다(예: "OFFICETEL,MULTI_FAMILY"). null이면 전체 매물유형에 적용.
+    // 매물유형별로 템플릿 전체를 나누지 않고, 일부 문항만 얇게 필터링하기 위한 용도라 별도 컬렉션 테이블 없이 문자열로 둔다.
+    @Column(name = "applicable_property_types")
+    private String applicablePropertyTypes;
+
     @Builder
     private ChecklistItemTemplate(
             int version,
@@ -71,7 +79,8 @@ public class ChecklistItemTemplate {
             ChecklistImportance importance,
             ChecklistItemType itemType,
             int displayOrder,
-            boolean active
+            boolean active,
+            String applicablePropertyTypes
     ) {
         this.version = version;
         this.code = code;
@@ -82,5 +91,13 @@ public class ChecklistItemTemplate {
         this.itemType = itemType;
         this.displayOrder = displayOrder;
         this.active = active;
+        this.applicablePropertyTypes = applicablePropertyTypes;
+    }
+
+    public boolean isApplicableTo(PropertyType propertyType) {
+        if (applicablePropertyTypes == null) {
+            return true;
+        }
+        return Arrays.asList(applicablePropertyTypes.split(",")).contains(propertyType.name());
     }
 }

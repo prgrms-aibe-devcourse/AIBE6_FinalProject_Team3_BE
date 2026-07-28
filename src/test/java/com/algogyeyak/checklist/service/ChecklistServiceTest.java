@@ -105,6 +105,37 @@ class ChecklistServiceTest {
     }
 
     @Test
+    @DisplayName("체크리스트 생성 시 매물유형에 맞지 않는 문항은 제외된다")
+    void createChecklistFiltersTemplatesByPropertyType() {
+        User user = user(1L);
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L))); // OFFICETEL
+        when(templateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of(
+                ChecklistItemTemplate.builder()
+                        .version(2).category(ChecklistCategory.SAFETY)
+                        .content("공동현관과 현관문 잠금장치가 모두 정상 작동하나요?")
+                        .importance(ChecklistImportance.GENERAL).itemType(ChecklistItemType.CHECK)
+                        .displayOrder(1).active(true)
+                        .applicablePropertyTypes("OFFICETEL,MULTI_FAMILY")
+                        .build(),
+                ChecklistItemTemplate.builder()
+                        .version(2).category(ChecklistCategory.SAFETY)
+                        .content("현관문 잠금장치가 정상 작동하나요?")
+                        .importance(ChecklistImportance.GENERAL).itemType(ChecklistItemType.CHECK)
+                        .displayOrder(1).active(true)
+                        .applicablePropertyTypes("DETACHED_HOUSE")
+                        .build()
+        ));
+        when(checklistRepository.save(any(Checklist.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Checklist result = checklistService.createOrGetChecklist(1L, 10L);
+
+        assertThat(result.getItems()).hasSize(1);
+        assertThat(result.getItems().get(0).getContent()).isEqualTo("공동현관과 현관문 잠금장치가 모두 정상 작동하나요?");
+    }
+
+    @Test
     @DisplayName("존재하지 않는 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
     void createChecklistThrowsWhenPropertyNotFound() {
         when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
@@ -361,7 +392,7 @@ class ChecklistServiceTest {
     void getChecklistReturnsChecklistWithItems() {
         User user = user(1L);
         Checklist checklist = checklistWithOneCheckItem(user);
-        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.of(checklist));
+        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
 
         Checklist result = checklistService.getChecklist(1L, 10L);
 
@@ -372,9 +403,64 @@ class ChecklistServiceTest {
     @Test
     @DisplayName("해당 매물에 체크리스트가 없으면 NOT_FOUND 예외가 발생한다")
     void getChecklistThrowsWhenNoneExists() {
-        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.empty());
+        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("본인 소유가 아닌 체크리스트를 조회하면 FORBIDDEN 예외가 발생한다")
+    void getChecklistThrowsWhenNotOwner() {
+        User owner = user(1L);
+        Checklist checklist = checklistWithOneCheckItem(owner);
+        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
+
+        assertThatThrownBy(() -> checklistService.getChecklist(999L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
+                );
+    }
+
+    @Test
+    @DisplayName("매물이 삭제된 상태면 체크리스트가 있어도 NOT_FOUND 예외가 발생한다")
+    void getChecklistThrowsWhenPropertyDeleted() {
+        User user = user(1L);
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        Checklist checklist = Checklist.createFrom(user, deletedProperty, 1, List.of());
+        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
+
+        assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("매물이 삭제된 상태면 항목을 수정할 수 없고 NOT_FOUND 예외가 발생한다")
+    void updateChecklistItemThrowsWhenPropertyDeleted() {
+        User user = user(1L);
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        ChecklistItemTemplate template = ChecklistItemTemplate.builder()
+                .version(1).category(ChecklistCategory.INDOOR).content("누수 확인")
+                .importance(ChecklistImportance.GENERAL).itemType(ChecklistItemType.CHECK)
+                .displayOrder(1).active(true).build();
+        Checklist checklist = Checklist.createFrom(user, deletedProperty, 1, List.of(template));
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+        ChecklistItem item = checklist.getItems().get(0);
+        ReflectionTestUtils.setField(item, "id", 200L);
+        when(checklistRepository.findById(100L)).thenReturn(Optional.of(checklist));
+
+        assertThatThrownBy(() ->
+                checklistService.updateChecklistItem(1L, 100L, 200L, new ChecklistItemUpdateRequest(true, null, null))
+        )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)

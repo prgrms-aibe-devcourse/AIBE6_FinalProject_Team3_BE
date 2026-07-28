@@ -110,22 +110,22 @@ class ChecklistItemTest {
     }
 
     @Test
-    @DisplayName("소유자-임대인 명의가 불일치(N)하면 자동으로 주의 항목이 된다")
+    @DisplayName("소유자-임대인 명의가 다르면(Y) 자동으로 주의 항목이 된다")
     void ownershipMismatchMarksIssueFound() {
         ChecklistItem item = yesNoItem(ChecklistItemCode.OWNERSHIP_MATCH);
 
-        // "N" = 소유자와 임대인 명의가 일치하지 않음 (명의 불일치)
-        item.answer("N");
+        // "Y" = 소유자와 임대인 명의가 다름 (명의 불일치)
+        item.answer("Y");
 
         assertThat(item.isIssueFound()).isTrue();
     }
 
     @Test
-    @DisplayName("소유자-임대인 명의가 일치(Y)하면 주의 항목으로 반영되지 않는다")
+    @DisplayName("소유자-임대인 명의가 같으면(N) 주의 항목으로 반영되지 않는다")
     void ownershipMatchDoesNotMarkIssueFound() {
         ChecklistItem item = yesNoItem(ChecklistItemCode.OWNERSHIP_MATCH);
 
-        item.answer("Y");
+        item.answer("N");
 
         assertThat(item.isIssueFound()).isFalse();
     }

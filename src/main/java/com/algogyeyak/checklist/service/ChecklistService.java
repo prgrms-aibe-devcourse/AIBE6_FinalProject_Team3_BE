@@ -56,10 +56,13 @@ public class ChecklistService {
             throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
         }
 
-        List<ChecklistItemTemplate> templates = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc();
-        int templateVersion = templates.isEmpty() ? 0 : templates.get(0).getVersion();
+        List<ChecklistItemTemplate> activeTemplates = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc();
+        int templateVersion = activeTemplates.isEmpty() ? 0 : activeTemplates.get(0).getVersion();
+        List<ChecklistItemTemplate> applicableTemplates = activeTemplates.stream()
+                .filter(template -> template.isApplicableTo(property.getPropertyType()))
+                .toList();
 
-        Checklist checklist = Checklist.createFrom(user, property, templateVersion, templates);
+        Checklist checklist = Checklist.createFrom(user, property, templateVersion, applicableTemplates);
         return checklistRepository.save(checklist);
     }
 
@@ -74,6 +77,10 @@ public class ChecklistService {
 
         if (!checklist.getUser().getId().equals(userId)) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "본인의 체크리스트만 수정할 수 있습니다.");
+        }
+
+        if (checklist.getProperty().isDeleted()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다.");
         }
 
         ChecklistItem item = checklist.getItems().stream()
@@ -97,12 +104,24 @@ public class ChecklistService {
     }
 
     /**
-     * 유저-매물 조합의 체크리스트를 문항까지 포함해 조회한다. 없으면 생성하지 않고 NOT_FOUND를 던진다
-     * (생성은 createOrGetChecklist가 담당).
+     * 매물의 체크리스트를 문항까지 포함해 조회한다. 없으면 생성하지 않고 NOT_FOUND를 던진다
+     * (생성은 createOrGetChecklist가 담당). 매물당 체크리스트는(소유자만 만들 수 있어) 최대 1개뿐이라
+     * propertyId로만 조회한 뒤, "체크리스트 없음(404)"과 "본인 소유 아님(403)"을 명시적으로 구분한다
+     * (updateChecklistItem/getChecklistResult와 동일한 패턴).
      */
     public Checklist getChecklist(Long userId, Long propertyId) {
-        return checklistRepository.findByUserIdAndPropertyId(userId, propertyId)
+        Checklist checklist = checklistRepository.findByPropertyId(propertyId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다."));
+
+        if (!checklist.getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "본인의 체크리스트만 조회할 수 있습니다.");
+        }
+
+        if (checklist.getProperty().isDeleted()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다.");
+        }
+
+        return checklist;
     }
 
     /**

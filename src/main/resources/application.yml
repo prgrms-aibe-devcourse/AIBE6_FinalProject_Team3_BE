@@ -58,6 +58,10 @@ clova:
     invoke-url: ${CLOVA_OCR_INVOKE_URL:https://dummy-clova-ocr-invoke-url.apigw.ntruss.com/custom/v1/dummy/general}
     secret-key: ${CLOVA_OCR_SECRET_KEY:dummy-secret-key-for-local}
 
+gemini:
+  api-key: ${GEMINI_API_KEY:dummy-gemini-api-key-for-local}
+  model: gemini-3.5-flash
+
 # 국토교통부 실거래가 API(공공데이터포털). 반드시 "일반 인증키(Decoding)" 값을 사용할 것 -
 # Encoding 키를 넣으면 UriComponentsBuilder가 다시 인코딩해 이중 인코딩으로 인증에 실패한다.
 molit:
