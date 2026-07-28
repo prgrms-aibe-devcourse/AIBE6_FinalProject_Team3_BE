@@ -72,3 +72,11 @@ market-data:
     min-sample-count: 3
     area-error-rate: 0.2
     lookback-months: 6
+
+risk-policy:
+  version: v1.0
+  price-anomaly-percent: 10
+  jeonse-ratio-warn-from: 100
+  jeonse-ratio-warn-to: 150
+  jeonse-ratio-alert-over: 150
+  multi-account-detection-enabled: false
