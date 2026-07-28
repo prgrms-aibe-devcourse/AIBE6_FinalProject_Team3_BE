@@ -380,4 +380,45 @@ class ChecklistServiceTest {
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
                 );
     }
+
+    @Test
+    @DisplayName("매물이 삭제된 상태면 체크리스트가 있어도 NOT_FOUND 예외가 발생한다")
+    void getChecklistThrowsWhenPropertyDeleted() {
+        User user = user(1L);
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        Checklist checklist = Checklist.createFrom(user, deletedProperty, 1, List.of());
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L)).thenReturn(Optional.of(checklist));
+
+        assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("매물이 삭제된 상태면 항목을 수정할 수 없고 NOT_FOUND 예외가 발생한다")
+    void updateChecklistItemThrowsWhenPropertyDeleted() {
+        User user = user(1L);
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        ChecklistItemTemplate template = ChecklistItemTemplate.builder()
+                .version(1).category(ChecklistCategory.INDOOR).content("누수 확인")
+                .importance(ChecklistImportance.GENERAL).itemType(ChecklistItemType.CHECK)
+                .displayOrder(1).active(true).build();
+        Checklist checklist = Checklist.createFrom(user, deletedProperty, 1, List.of(template));
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+        ChecklistItem item = checklist.getItems().get(0);
+        ReflectionTestUtils.setField(item, "id", 200L);
+        when(checklistRepository.findById(100L)).thenReturn(Optional.of(checklist));
+
+        assertThatThrownBy(() ->
+                checklistService.updateChecklistItem(1L, 100L, 200L, new ChecklistItemUpdateRequest(true, null, null))
+        )
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                );
+    }
 }

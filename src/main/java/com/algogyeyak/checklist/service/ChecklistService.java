@@ -76,6 +76,10 @@ public class ChecklistService {
             throw new BusinessException(ErrorCode.FORBIDDEN, "본인의 체크리스트만 수정할 수 있습니다.");
         }
 
+        if (checklist.getProperty().isDeleted()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다.");
+        }
+
         ChecklistItem item = checklist.getItems().stream()
                 .filter(candidate -> candidate.getId().equals(itemId))
                 .findFirst()
@@ -101,8 +105,14 @@ public class ChecklistService {
      * (생성은 createOrGetChecklist가 담당).
      */
     public Checklist getChecklist(Long userId, Long propertyId) {
-        return checklistRepository.findByUserIdAndPropertyId(userId, propertyId)
+        Checklist checklist = checklistRepository.findByUserIdAndPropertyId(userId, propertyId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다."));
+
+        if (checklist.getProperty().isDeleted()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다.");
+        }
+
+        return checklist;
     }
 
     /**
