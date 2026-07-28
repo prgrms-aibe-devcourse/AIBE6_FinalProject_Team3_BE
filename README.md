@@ -39,7 +39,7 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 
 ## Config profiles
 
-`application.yml` + `application-{dev,prod,test}.yml` 4개 파일이 있으며, 현재는 전부 `spring.application.name`만 설정되어 있습니다. 데이터소스, OAuth2 client secret 등 프로필별 값은 아직 채워지지 않았습니다.
+`application.yml` + `application-{dev,prod,test}.yml` 4개 파일이 있습니다. 공통 설정(OAuth2 client id/secret, JWT, CORS, 쿠키, dev-login 등)은 `application.yml`(기본 프로필)에 이미 채워져 있고, `application-prod.yml`은 운영 전용 오버라이드(H2 콘솔/Swagger 비활성화, dummy 기본값 제거로 fail-fast, `DEV_LOGIN_ENABLED`를 환경변수와 무관하게 고정 false 등)를 담고 있습니다. `application-dev.yml`/`application-test.yml`은 아직 `spring.application.name`만 설정된 상태입니다.
 
 ## 알아둘 점
 

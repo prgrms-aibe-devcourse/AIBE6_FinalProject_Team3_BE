@@ -43,7 +43,7 @@ public class GlobalExceptionHandler {
                 .map(fieldError -> new ApiError.FieldError(fieldError.getField(), fieldError.getDefaultMessage()))
                 .toList();
 
-        return buildErrorResponse(ErrorCode.INVALID_INPUT, ErrorCode.INVALID_INPUT.getMessage(), fieldErrors);
+        return buildErrorResponse(ErrorCode.BAD_REQUEST, ErrorCode.BAD_REQUEST.getMessage(), fieldErrors);
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
@@ -56,7 +56,7 @@ public class GlobalExceptionHandler {
                 ))
                 .toList();
 
-        return buildErrorResponse(ErrorCode.INVALID_INPUT, ErrorCode.INVALID_INPUT.getMessage(), fieldErrors);
+        return buildErrorResponse(ErrorCode.BAD_REQUEST, ErrorCode.BAD_REQUEST.getMessage(), fieldErrors);
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
@@ -64,7 +64,7 @@ public class GlobalExceptionHandler {
             MissingServletRequestParameterException exception
     ) {
         String message = exception.getParameterName() + " 파라미터는 필수입니다.";
-        return buildErrorResponse(ErrorCode.INVALID_INPUT, message);
+        return buildErrorResponse(ErrorCode.BAD_REQUEST, message);
     }
 
     @ExceptionHandler(MissingServletRequestPartException.class)
@@ -72,14 +72,14 @@ public class GlobalExceptionHandler {
             MissingServletRequestPartException exception
     ) {
         String message = exception.getRequestPartName() + " 파트는 필수입니다.";
-        return buildErrorResponse(ErrorCode.INVALID_INPUT, message);
+        return buildErrorResponse(ErrorCode.BAD_REQUEST, message);
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleHttpMessageNotReadableException(
             HttpMessageNotReadableException exception
     ) {
-        return buildErrorResponse(ErrorCode.INVALID_INPUT, "요청 본문을 읽을 수 없습니다.");
+        return buildErrorResponse(ErrorCode.BAD_REQUEST, "요청 본문을 읽을 수 없습니다.");
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -87,7 +87,7 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException exception
     ) {
         String message = exception.getName() + " 파라미터의 값이 올바르지 않습니다.";
-        return buildErrorResponse(ErrorCode.INVALID_INPUT, message);
+        return buildErrorResponse(ErrorCode.BAD_REQUEST, message);
     }
 
     @ExceptionHandler(PropertyReferenceException.class)
