@@ -2,6 +2,7 @@ package com.algogyeyak.marketdata.service;
 
 import com.algogyeyak.marketdata.client.MolitRentClient;
 import com.algogyeyak.marketdata.client.RentTransactionSample;
+import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.util.GeoDistanceCalculator;
 import com.algogyeyak.property.client.AddressResolutionResult;
@@ -44,15 +45,10 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class MarketComparisonService {
 
-    private static final int RADIUS_NEAR_METERS = 300;
-    private static final int RADIUS_FAR_METERS = 600;
-    private static final int MIN_SAMPLE_COUNT = 3;
-    private static final double AREA_ERROR_RATE = 0.2;
-    private static final int LOOKBACK_MONTHS = 6;
-
     private final KakaoRegionCodeClient kakaoRegionCodeClient;
     private final KakaoAddressClient kakaoAddressClient;
     private final MolitRentClient molitRentClient;
+    private final MarketComparisonProperties properties;
 
     // 지번주소 -> 지오코딩 결과 캐시. 같은 건물에서 여러 건 거래된 경우가 많아 캐시 효과가 크다.
     private final Map<String, AddressResolutionResult> geocodeCache = new ConcurrentHashMap<>();
@@ -90,10 +86,12 @@ public class MarketComparisonService {
 
         List<GeocodedSample> geocoded = geocodeAll(areaFiltered, sggPrefix);
 
-        List<GeocodedSample> used = filterByRadius(geocoded, address, RADIUS_NEAR_METERS);
-        if (used.size() < MIN_SAMPLE_COUNT) {
-            List<GeocodedSample> withinFar = filterByRadius(geocoded, address, RADIUS_FAR_METERS);
-            if (withinFar.size() >= MIN_SAMPLE_COUNT) {
+        int radiusUsed = properties.radiusNearMeters();
+        List<GeocodedSample> used = filterByRadius(geocoded, address, properties.radiusNearMeters());
+        if (used.size() < properties.minSampleCount()) {
+            radiusUsed = properties.radiusFarMeters();
+            List<GeocodedSample> withinFar = filterByRadius(geocoded, address, properties.radiusFarMeters());
+            if (withinFar.size() >= properties.minSampleCount()) {
                 used = withinFar;
             } else {
                 return MarketComparisonResponse.unavailable("인근 실거래 데이터가 부족해 시세 비교가 어려워요.");
@@ -115,14 +113,15 @@ public class MarketComparisonService {
                 referencePrice,
                 differenceRate,
                 used.size(),
-                latestDealDate != null ? latestDealDate.toString() : null
+                latestDealDate != null ? latestDealDate.toString() : null,
+                radiusUsed
         );
     }
 
     private List<RentTransactionSample> fetchRecentTransactions(PropertyType propertyType, String lawdCd) {
         List<RentTransactionSample> result = new ArrayList<>();
         YearMonth current = YearMonth.now();
-        for (int i = 0; i < LOOKBACK_MONTHS; i++) {
+        for (int i = 0; i < properties.lookbackMonths(); i++) {
             result.addAll(molitRentClient.fetch(propertyType, lawdCd, current.minusMonths(i)));
         }
         return result;
@@ -133,7 +132,7 @@ public class MarketComparisonService {
             return false;
         }
         double errorRate = Math.abs(sampleArea - propertyArea) / propertyArea;
-        return errorRate <= AREA_ERROR_RATE;
+        return errorRate <= properties.areaErrorRate();
     }
 
     private List<GeocodedSample> geocodeAll(List<RentTransactionSample> samples, String sggPrefix) {

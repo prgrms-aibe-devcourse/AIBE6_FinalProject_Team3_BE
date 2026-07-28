@@ -62,3 +62,13 @@ clova:
 # Encoding 키를 넣으면 UriComponentsBuilder가 다시 인코딩해 이중 인코딩으로 인증에 실패한다.
 molit:
   service-key: ${MOLIT_SERVICE_KEY:dummy-key-for-local}
+
+# 실거래가 비교(market-data) 정책값. M1 기간 국토부 API 실측 데이터로 재검증 예정이라고
+# 명시된 값들이라 하드코딩 대신 설정값으로 뺐다 - 재배포 없이 튜닝 가능.
+market-data:
+  comparison:
+    radius-near-meters: 300
+    radius-far-meters: 600
+    min-sample-count: 3
+    area-error-rate: 0.2
+    lookback-months: 6

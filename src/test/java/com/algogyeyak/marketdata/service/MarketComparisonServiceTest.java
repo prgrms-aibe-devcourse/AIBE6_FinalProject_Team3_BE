@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.algogyeyak.marketdata.client.MolitRentClient;
 import com.algogyeyak.marketdata.client.RentTransactionSample;
+import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
@@ -46,8 +47,12 @@ class MarketComparisonServiceTest {
     private static final double PROPERTY_LNG = 126.9780;
     private static final String LAWD_CD = "11110";
 
+    // application.yml의 market-data.comparison.* 기본값과 동일하게 맞춰둔다.
+    private static final MarketComparisonProperties PROPERTIES =
+            new MarketComparisonProperties(300, 600, 3, 0.2, 6);
+
     private void init() {
-        service = new MarketComparisonService(kakaoRegionCodeClient, kakaoAddressClient, molitRentClient);
+        service = new MarketComparisonService(kakaoRegionCodeClient, kakaoAddressClient, molitRentClient, PROPERTIES);
     }
 
     private Property jeonseOfficetel(long deposit, double area) {
@@ -205,6 +210,7 @@ class MarketComparisonServiceTest {
         assertThat(response.sampleCount()).isEqualTo(3);
         assertThat(response.referencePrice()).isEqualTo(200_000_000L);
         assertThat(response.differenceRate()).isEqualTo(0.0);
+        assertThat(response.radiusMeters()).isEqualTo(300);
     }
 
     @Test
@@ -231,6 +237,7 @@ class MarketComparisonServiceTest {
         assertThat(response.status()).isEqualTo("AVAILABLE");
         assertThat(response.sampleCount()).isEqualTo(3);
         assertThat(response.referencePrice()).isEqualTo(200_000_000L);
+        assertThat(response.radiusMeters()).isEqualTo(600);
     }
 
     @Test
