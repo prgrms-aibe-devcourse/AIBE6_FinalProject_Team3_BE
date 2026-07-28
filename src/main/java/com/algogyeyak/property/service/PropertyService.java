@@ -2,6 +2,8 @@ package com.algogyeyak.property.service;
 
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
+import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
@@ -28,6 +30,7 @@ public class PropertyService {
 
     private final PropertyRepository propertyRepository;
     private final KakaoAddressClient kakaoAddressClient;
+    private final MarketComparisonService marketComparisonService;
 
     @Transactional
     public PropertyRegisterResponse register(Long userId, PropertyRegisterRequest request) {
@@ -73,8 +76,9 @@ public class PropertyService {
         Property saved = propertyRepository.save(property);
 
         String notice = buildNoticeIfNeeded(request.propertyType(), addressResult);
+        MarketComparisonResponse marketComparison = marketComparisonService.compare(saved);
 
-        return PropertyRegisterResponse.of(saved, notice);
+        return PropertyRegisterResponse.of(saved, notice, marketComparison);
     }
 
     /**
@@ -99,7 +103,7 @@ public class PropertyService {
             throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
         }
 
-        return PropertyDetailResponse.from(property);
+        return PropertyDetailResponse.from(property, marketComparisonService.compare(property));
     }
 
     /**
@@ -121,7 +125,7 @@ public class PropertyService {
         property.updateArea(request.area());
         property.updateDescription(request.description());
 
-        return PropertyDetailResponse.from(property);
+        return PropertyDetailResponse.from(property, marketComparisonService.compare(property));
     }
 
     private Property findActiveProperty(Long propertyId) {
