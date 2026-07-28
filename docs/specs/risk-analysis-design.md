@@ -10,14 +10,15 @@
 
 - **엔티티**
   - `PropertyRisk` — 매물 하나에 대해 탐지된 위험 신호 1건(`signalType`, `description`, `detectedAt`)을 기록. `riskCheckId`/`propertyId`를 FK 컬럼으로만 들고 JPA 연관관계는 맺지 않음.
-  - `PropertyRiskCheck` — 매물당 1행(`property_id` unique 제약)으로 최신 체크 상태를 관리. `RiskCheckStatus`(SUCCESS/UNDETERMINABLE/FAILED) + `RiskCheckReason`(판정불가/실패 사유)을 갖고, 재계산 시 새로 만들지 않고 `overwrite()`로 같은 행을 덮어씀.
+  - `PropertyRiskCheck` — **매물×신호타입 조합당 1행**(`(property_id, signal_type)` unique 제약)으로 최신 체크 상태를 관리. `RiskCheckStatus`(SUCCESS/UNDETERMINABLE/FAILED) + `RiskCheckReason`(판정불가/실패 사유)을 신호 4종마다 독립적으로 갖고, 재계산 시 새로 만들지 않고 `overwrite()`로 같은 행을 덮어씀. (이전 버전은 `property_id` 단독 unique라 매물 전체에 상태 하나뿐이었는데, 신호별로 분리됨 — 아래 오케스트레이션 서비스 참고)
   - `DepositSafetyCheck` — 빈 스텁(필드 없음). 전세가율/선순위보증금 검증용 엔티티는 아직 미구현.
 - **enum** — `RiskSignalType`(4종: 가격이상치/중복매물/동일계정다수등록/짧은주기재등록), `RiskCheckStatus`, `RiskCheckReason`, `MarketComparisonStatus`, `MarketUnavailableReason`(risk-analysis가 market-data 응답을 소비할 때 쓰는 자체 정의 — market-data 도메인의 실제 enum이 아님).
-- **DTO** — `DetectedSignal`(신호 타입+설명, 탐지기 반환용), `MarketComparison`(risk-analysis 전용 뷰 record, market-data의 엔티티가 아님을 주석으로 명시). `RiskSignalResponse`/`DepositSafetyCheckResponse`는 빈 스텁.
-- **repository** — `PropertyRiskRepository`(매물별 이력 조회, 재계산 시 전체 삭제용 `deleteByPropertyId`), `PropertyRiskCheckRepository`(매물별 단건 조회).
+- **DTO** — `DetectedSignal`(신호 타입+설명, 탐지기 반환용), `MarketComparison`(risk-analysis 전용 뷰 record, market-data의 엔티티가 아님을 주석으로 명시), `SignalCheckResult`(status/reason/detectedSignals — 탐지기 하나가 자신의 SUCCESS/UNDETERMINABLE/FAILED를 독립적으로 표현하기 위해 신설). `RiskSignalResponse`/`DepositSafetyCheckResponse`는 빈 스텁.
+- **repository** — `PropertyRiskRepository`(매물별 이력 조회, 재계산 시 **해당 신호 타입만** 삭제하는 `deleteByPropertyIdAndSignalType`), `PropertyRiskCheckRepository`(`findByPropertyIdAndSignalType`로 신호별 단건 조회, `findAllByPropertyId`로 매물의 4개 신호 결과 전체 조회).
 - **정책 설정** — `RiskPolicyConfig`(`@ConfigurationProperties(prefix = "risk-policy")`). `application.yml`에 `risk-policy:` 블록(`version: v1.0`, `price-anomaly-percent: 10`, `jeonse-ratio-warn-from: 100`, `jeonse-ratio-warn-to: 150`, `jeonse-ratio-alert-over: 150`, `multi-account-detection-enabled: false`)이 추가되어 값 자체는 채워져 있음. 다만 이 값을 실제로 읽어 판정하는 로직(아래 탐지기들)이 없어 **현재는 설정값만 존재하고 아무 효과가 없음**.
   - 정책 버전 이력(과거 버전별 임계값을 DB에 남기는 것)은 Github의 `application.yml` 변경 이력을 확인하는 것으로 임시 설정.
-- **오케스트레이션 서비스** — `FakeListingSignalService.checkAndSave(Property)`가 구현되어 있음: `MarketDataClient`로 시세 비교를 가져와 `FAILED`/`UNDETERMINABLE`이면 탐지기를 돌리지 않고 상태만 기록하고, `SUCCESS`면 활성화된(`SignalDetector.isEnabled()`) 탐지기들을 전부 돌려 결과를 모아 `PropertyRisk`로 저장(재계산 시 기존 신호는 삭제 후 재삽입). 다만 **아직 어디서도 호출되지 않음** — 매물 등록/수정 이벤트나 컨트롤러에 연결되어 있지 않음.
+- **오케스트레이션 서비스** — `FakeListingSignalService.checkAndSave(Property)`가 구현되어 있음. **신호별 독립 판정 구조로 변경됨**: 이전 버전은 시세비교(`MarketComparison`)가 `FAILED`/`UNDETERMINABLE`이면 4개 탐지기를 아예 돌리지 않고 매물 전체를 판정불가/실패로 기록했는데(중복매물·동일계정·재등록처럼 시세비교와 무관한 신호까지 같이 막혀버리는 문제가 있었음), 지금은 시세비교를 한 번만 조회해서 활성화된(`SignalDetector.isEnabled()`) 탐지기 4개 모두에게 넘기고, 그 결과를 각 탐지기가 `SignalCheckResult`(SUCCESS/UNDETERMINABLE/FAILED + 사유 + 탐지된 신호 목록)로 독립적으로 반환하도록 바뀜. 신호 하나가 판정불가/실패여도 나머지 신호는 영향받지 않고, 결과는 `(propertyId, signalType)` 단위로 `PropertyRiskCheck`에 upsert되고, `PropertyRisk`도 해당 신호 타입 것만 삭제 후 재삽입(`deleteByPropertyIdAndSignalType`)됨 — 다른 신호가 이미 찾아둔 결과를 덮어쓰지 않음. 다만 **아직 어디서도 호출되지 않음** — 매물 등록/수정 이벤트나 컨트롤러에 연결되어 있지 않음.
+- **`SignalDetector`** — `detect()`의 반환 타입이 `List<DetectedSignal>` → `SignalCheckResult`로 변경됨. `comparison`은 여전히 4개 탐지기 모두에게 파라미터로 전달되지만, 실제로 이 값을 참고해야 하는 건 `PriceAnomalyDetector` 하나뿐이고 나머지 3개는 무시하도록 설계됨(인터페이스를 둘로 쪼개는 대신 단일 리스트로 오케스트레이션을 단순하게 유지하는 절충).
 - **`MarketDataClient`** — risk-analysis가 정의한 인터페이스. 실제 구현체가 없으면 `FakeListingSignalService`가 `@Service`로 컴포넌트 스캔되는 순간 스프링 컨텍스트가 뜨지 않으므로, 임시로 `TemporaryMarketDataClient`(`client` 패키지, 항상 `UNDETERMINABLE` 반환)를 꽂아 둠. market-data 도메인이 이제 실제로 구현됐지만(아래 참고) 형태가 달라 바로 연결할 수 없어 이 임시 구현체는 여전히 필요함 — "market-data 완료 시 삭제"라는 TODO 주석의 전제 자체를 다시 봐야 함.
 
 ### 여전히 비어 있는 것
@@ -37,6 +38,7 @@
 - **"판정불가"와 "실패"가 원천 데이터에서부터 구분되지 않음** — `MolitRentClientImpl.fetch()`는 국토부 API 호출 실패(`RestClientException`/`IOException`) 시 예외를 던지지 않고 빈 리스트를 반환함(`Collections.emptyList()`). `MarketComparisonService` 입장에서는 "표본이 원래 없는 경우"와 "API 장애로 못 가져온 경우"가 똑같이 "인근 실거래 데이터가 부족해요" UNAVAILABLE로 보임 — risk-analysis가 요구하는 `FAILED`(외부 API 장애) vs `UNDETERMINABLE`(표본 부족) 구분은 아무리 잘 만든 어댑터로도 복원 불가능하고, market-data 쪽에서 먼저 실패와 판정불가를 구분해 노출해야 함.
 - **필드 타입도 다름** — `referencePrice`(Long vs BigDecimal), `differenceRate`(Double vs BigDecimal), `referenceDate`(String "yyyy-MM-dd" vs LocalDate) 등 매핑 시 변환 필요. `askingPrice`는 market-data 응답에 없지만 `Property.getDeposit()`으로 어댑터에서 쉽게 채울 수 있어 이건 사소한 문제.
 - 참고로 market-data는 매물 조회/수정 때마다 캐싱 없이 즉시 재계산하므로(`marketComparisonService.compare(property)`), market-data 자신에게는 "재계산 트리거" 문제가 없음 — 이건 risk-analysis처럼 결과를 DB에 스냅샷으로 저장하는 쪽에만 해당되는 문제.
+- (신규) 신호별 독립 판정 구조로 바뀌면서, 이 연동 격차의 영향 범위도 줄어들었음 — 시세비교 데이터가 실제로 필요한 신호는 `PriceAnomalyDetector` 하나뿐이고, 나머지 3개(중복매물/동일계정/재등록)는 `MarketDataClient`·어댑터 문제와 무관하게 독자적으로 구현·동작 가능함. 즉 market-data 연동이 안 끝나도 이 3개 탐지기는 먼저 구현해서 값을 낼 수 있음.
 
 ## 다른 도메인에 남아있는 연계 흔적
 
@@ -56,7 +58,7 @@
 | 전세가율 계산(기본/선순위보증금 반영/근저당 채권최고액 반영)       | ❌ 미구현 — `DepositSafetyCheck` 엔티티가 빈 스텁                                                                                                                              |
 | 선순위보증금 검증(100~150% 강조 안내, 150% 초과 경고)    | ❌ 미구현 — 다만 `RiskPolicyConfig`에 `jeonseRatioWarnFrom/To`, `jeonseRatioAlertOver` 값은 이미 채워짐                                                                           |
 | "최근 소유권 변경 + 높은 전세가율" 보조 신호              | ❌ 미구현 — `checklist` 쪽 연계 의도 주석만 있음(위 참고)                                                                                                                            |
-| 성공/판정불가/실패 3단계 응답 구조                     | ⚠️ 모델 수준만 구현 — `PropertyRiskCheck.status`(`RiskCheckStatus`)로 내부적으로는 3단계를 구분하지만, 이를 클라이언트에 내려주는 `RiskAnalysisController`/`RiskSignalResponse`가 빈 스텁이라 API로는 노출되지 않음 |
+| 성공/판정불가/실패 3단계 응답 구조                     | ⚠️ 모델 수준 구현이 신호별로 더 정교해짐 — `PropertyRiskCheck.status`(`RiskCheckStatus`)를 이제 신호 4종마다 독립적으로 관리(`(property_id, signal_type)` unique)해서, 신호 하나가 판정불가/실패여도 나머지 신호 결과에 영향 없음. 다만 이를 클라이언트에 내려주는 `RiskAnalysisController`/`RiskSignalResponse`가 여전히 빈 스텁이라 API로는 노출되지 않음 |
 | 정책 버전 기록                                 | ⚠️ 부분 구현 — `PropertyRiskCheck.policyVersion`에 체크 시점의 `RiskPolicyConfig.version` 문자열을 스냅샷으로 남기지만, 버전별 임계값 이력을 DB에 남기는 기능은 없음                                         |
 | 위험 신호 재계산(매물 수정 시 트리거)                   | ❌ 미구현 — `RiskRecalculationService` 빈 스텁, `property` 수정(`PATCH /properties/{id}`)에도 트리거 지점 없음. 다만 market-data는 캐싱 없이 매번 즉시 재계산하므로 이 문제가 없어졌고(위 참고), risk-analysis는 결과를 DB에 스냅샷으로 저장하는 구조라 여전히 별도 트리거가 필요함           |
 
@@ -66,16 +68,16 @@
 |---|---|
 | 동일 입력·동일 정책 버전이면 동일 결과 보장 | ❌ 탐지 로직 자체가 빈 스텁이라 검증 불가 |
 | 위험도 계산 실패가 매물 상세 조회 전체 실패로 이어지지 않음 | ⚠️ `FakeListingSignalService`는 market-data 실패/판정불가를 예외 없이 상태값으로 흡수하지만, `PropertyService.getProperty()` 쪽에 이 결과를 읽어오는 연동 지점 자체가 없어 실제 조회 흐름에서 검증 불가 |
-| 실거래가 조회 실패와 위험도 계산 실패 구분 | ⚠️ 모델 수준에서는 `RiskCheckReason.DATA_FETCH_FAILURE`(FAILED)와 `NO_COMPARABLE_TRANSACTION`(UNDETERMINABLE)로 구분되지만, 실제 market-data 구현(`MolitRentClientImpl`)이 외부 API 실패를 예외로 던지지 않고 빈 리스트로 삼켜버려 "실패"와 "판정불가"가 원천 데이터부터 구분되지 않음 — 어댑터만으로는 해결 불가, market-data 쪽 선행 작업 필요(위 'market-data 연동 격차' 참고) |
+| 실거래가 조회 실패와 위험도 계산 실패 구분 | ⚠️ 모델 수준에서는 `RiskCheckReason.DATA_FETCH_FAILURE`(FAILED)와 `NO_COMPARABLE_TRANSACTION`(UNDETERMINABLE)로 구분되지만, 실제 market-data 구현(`MolitRentClientImpl`)이 외부 API 실패를 예외로 던지지 않고 빈 리스트로 삼켜버려 "실패"와 "판정불가"가 원천 데이터부터 구분되지 않음 — 어댑터만으로는 해결 불가, market-data 쪽 선행 작업 필요(위 'market-data 연동 격차' 참고). 신호별 독립 판정으로 바뀌면서 이 문제의 영향 범위는 `PriceAnomalyDetector` 하나로 한정됨 — 나머지 3개 신호는 이 이슈와 무관하게 구현 가능 |
 | 매물 정보/시세 변경 시에만 재계산(불필요한 재계산 방지) | ❌ 미구현 — 재계산을 트리거할 지점(`property` 수정 API, `RiskRecalculationService`) 모두 없음 |
 | 동일계정 다수등록 탐지를 정책 플래그로 켜고 끌 수 있게 | ⚠️ 설정/골격(`RiskPolicyConfig.multiAccountDetectionEnabled`, `SignalDetector.isEnabled()`)은 준비되었으나 탐지 로직이 없어 실질적으로 검증 불가 |
 | 서비스 대상 범위(전세+월세)와 안전성 체크 적용 범위(전세만) 화면 안내 구분 | ❌ 미구현 — 응답 자체(`RiskAnalysisController`)가 없음 |
 
 ## 남은 이슈 / 확인 필요 총정리
 
-1. **신호 탐지 로직 4종(`PriceAnomalyDetector`, `DuplicateListingDetector`, `SameAccountMultipleDetector`, `ShortTermRelistingDetector`)이 전부 빈 스텁** — `SignalDetector`를 구현하지 않아 오케스트레이션 서비스에 주입되지도 않음. 우선순위와 구현 일정 확인 필요.
+1. **신호 탐지 로직 4종(`PriceAnomalyDetector`, `DuplicateListingDetector`, `SameAccountMultipleDetector`, `ShortTermRelistingDetector`)이 전부 빈 스텁** — `SignalDetector`를 구현하지 않아 오케스트레이션 서비스에 주입되지도 않음. 인터페이스(`detect()` → `SignalCheckResult` 반환)와 오케스트레이션(신호별 독립 실행)은 준비돼 있으니, 남은 건 각 탐지기의 실제 판정 로직뿐. `PriceAnomalyDetector`만 market-data 어댑터가 필요하고 나머지 3개는 독립적으로 먼저 구현 가능(아래 3번 참고). 우선순위와 구현 일정 확인 필요.
 2. **`RiskAnalysisController`가 비어 있어 API로 노출되는 기능이 없음** — 골격이 갖춰진 다른 부분(엔티티/서비스)도 컨트롤러 없이는 검증 불가.
-3. market-data 연동 — market-data 도메인이 실제로 구현되어 `property`에는 이미 연결되어 있지만, risk-analysis의 `MarketDataClient` 인터페이스와는 상태 모델(2단계 vs 3단계)·메서드 시그니처·필드 타입이 달라 그대로 쓸 수 없음. 특히 market-data가 "API 실패"와 "표본 부족"을 구분해서 넘겨주지 않아, 단순 어댑터로는 risk-analysis가 요구하는 FAILED/UNDETERMINABLE 구분을 만들 수 없음 — market-data 쪽에 실패 사유를 구분해 노출하는 선행 작업부터 필요. `TemporaryMarketDataClient`는 이 작업이 끝나기 전까지 계속 유지.
+3. market-data 연동 — market-data 도메인이 실제로 구현되어 `property`에는 이미 연결되어 있지만, risk-analysis의 `MarketDataClient` 인터페이스와는 상태 모델(2단계 vs 3단계)·메서드 시그니처·필드 타입이 달라 그대로 쓸 수 없음. 특히 market-data가 "API 실패"와 "표본 부족"을 구분해서 넘겨주지 않아, 단순 어댑터로는 risk-analysis가 요구하는 FAILED/UNDETERMINABLE 구분을 만들 수 없음 — market-data 쪽에 실패 사유를 구분해 노출하는 선행 작업부터 필요. `TemporaryMarketDataClient`는 이 작업이 끝나기 전까지 계속 유지. **(신규)** 다만 신호별 독립 판정 구조로 바뀌면서 이 문제는 더 이상 도메인 전체를 막지 않음 — `PriceAnomalyDetector`만 이 연동이 필요하고, `DuplicateListingDetector`/`SameAccountMultipleDetector`/`ShortTermRelistingDetector`는 market-data와 무관하게 먼저 구현·배포할 수 있음.
 4. `checklist` 도메인에 남아있는 "전세가율 연계" 주석 외에는 실제 연동 코드가 없음 — `DepositSafetyCheckService` 구현 시 checklist의 소유권 취득일 값을 어떻게 읽어올지(체크리스트 조회 API 호출? 직접 쿼리?) 설계 필요.
 5. `property`의 기존 중복 등록 검사(동일 사용자 한정)와 `DuplicateListingDetector`가 요구하는 신호(다른 사용자 포함 가능)는 서로 다른 메커니즘이라 재사용이 어려워 보임 — 별도 쿼리/로직 필요.
 6. "동일 계정 다수 등록 탐지"는 요구사항 문서 자체가 🔶 논의중이라고 표시한 항목 — 온/오프 골격(`multiAccountDetectionEnabled`)은 준비됐지만, Property 도메인이 "임대인이 아닌 일반 사용자가 검토용으로 등록"하는 구조라는 점 때문에 이 신호가 원래 의도(임대인/중개사 어뷰징 탐지)대로 작동하지 않을 수 있다는 점은 여전히 팀 결정 대기.
