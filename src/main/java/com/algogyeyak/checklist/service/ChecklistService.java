@@ -88,7 +88,7 @@ public class ChecklistService {
         } else if (request.userNote() != null) {
             item.markInsufficient(request.userNote());
         } else {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "변경할 값을 하나 이상 보내야 합니다.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "변경할 값을 하나 이상 보내야 합니다.");
         }
 
         checklist.refreshStatus();

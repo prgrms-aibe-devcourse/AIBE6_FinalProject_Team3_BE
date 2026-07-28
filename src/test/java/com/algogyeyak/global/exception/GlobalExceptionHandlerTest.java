@@ -21,7 +21,7 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().success()).isFalse();
         assertThat(response.getBody().data()).isNull();
-        assertThat(response.getBody().error().code()).isEqualTo("COMMON_404");
+        assertThat(response.getBody().error().code()).isEqualTo("NOT_FOUND");
         assertThat(response.getBody().error().message()).isEqualTo("매물을 찾을 수 없습니다.");
     }
 
@@ -32,7 +32,7 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().success()).isFalse();
-        assertThat(response.getBody().error().code()).isEqualTo("COMMON_500");
+        assertThat(response.getBody().error().code()).isEqualTo("INTERNAL_SERVER_ERROR");
         assertThat(response.getBody().error().message()).isEqualTo("서버 내부 오류가 발생했습니다.");
     }
 }

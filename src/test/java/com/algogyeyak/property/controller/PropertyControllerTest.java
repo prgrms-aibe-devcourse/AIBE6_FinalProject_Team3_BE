@@ -17,6 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
@@ -86,7 +87,7 @@ class PropertyControllerTest {
                         37.4995539438207,
                         127.031393491745
                 ),
-                PropertyRegisterResponse.MarketComparisonResponse.unavailable(),
+                MarketComparisonResponse.unavailable("stub"),
                 null
         );
 
@@ -168,7 +169,7 @@ class PropertyControllerTest {
                         127.031393491745
                 ),
                 List.of("https://cdn.algogyeyak.com/img/abc.jpg"),
-                PropertyDetailResponse.MarketComparisonResponse.unavailable(),
+                MarketComparisonResponse.unavailable("stub"),
                 "ACTIVE",
                 LocalDateTime.of(2026, 7, 23, 10, 0),
                 LocalDateTime.of(2026, 7, 23, 10, 0)
@@ -226,7 +227,7 @@ class PropertyControllerTest {
                         127.031393491745
                 ),
                 List.of(),
-                PropertyDetailResponse.MarketComparisonResponse.unavailable(),
+                MarketComparisonResponse.unavailable("stub"),
                 "ACTIVE",
                 LocalDateTime.of(2026, 7, 23, 10, 0),
                 LocalDateTime.of(2026, 7, 23, 11, 0)

@@ -33,14 +33,14 @@ class ChecklistItemTest {
     }
 
     @Test
-    @DisplayName("CHECK 타입 문항에 answer()를 호출하면 INVALID_INPUT 예외가 발생한다")
+    @DisplayName("CHECK 타입 문항에 answer()를 호출하면 BAD_REQUEST 예외가 발생한다")
     void answerRejectsCheckTypeItem() {
         ChecklistItem item = checkTypeItem();
 
         assertThatThrownBy(() -> item.answer("Y"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
 
@@ -67,14 +67,14 @@ class ChecklistItemTest {
     }
 
     @Test
-    @DisplayName("YES_NO 문항에 Y/N이 아닌 값을 답하면 INVALID_INPUT 예외가 발생한다")
+    @DisplayName("YES_NO 문항에 Y/N이 아닌 값을 답하면 BAD_REQUEST 예외가 발생한다")
     void answerYesNoRejectsValueOtherThanYOrN() {
         ChecklistItem item = yesNoItem(null);
 
         assertThatThrownBy(() -> item.answer("MAYBE"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
 
@@ -154,14 +154,14 @@ class ChecklistItemTest {
     }
 
     @Test
-    @DisplayName("DATE 문항에 yyyy-MM-dd 형식이 아닌 값을 답하면 INVALID_INPUT 예외가 발생한다")
+    @DisplayName("DATE 문항에 yyyy-MM-dd 형식이 아닌 값을 답하면 BAD_REQUEST 예외가 발생한다")
     void answerDateRejectsInvalidFormat() {
         ChecklistItem item = dateItem();
 
         assertThatThrownBy(() -> item.answer("2026/07/01"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
 
@@ -200,14 +200,14 @@ class ChecklistItemTest {
     }
 
     @Test
-    @DisplayName("DOCUMENT_REQUEST 문항에 PROVIDED/NOT_PROVIDED가 아닌 값을 답하면 INVALID_INPUT 예외가 발생한다")
+    @DisplayName("DOCUMENT_REQUEST 문항에 PROVIDED/NOT_PROVIDED가 아닌 값을 답하면 BAD_REQUEST 예외가 발생한다")
     void answerDocumentRequestRejectsInvalidValue() {
         ChecklistItem item = documentRequestItem(ChecklistItemCode.DATE_OF_CONFIRMATION_REQUEST);
 
         assertThatThrownBy(() -> item.answer("MAYBE"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
 
@@ -234,14 +234,14 @@ class ChecklistItemTest {
     }
 
     @Test
-    @DisplayName("CHECK가 아닌 항목에 markInsufficient()를 호출하면 INVALID_INPUT 예외가 발생한다")
+    @DisplayName("CHECK가 아닌 항목에 markInsufficient()를 호출하면 BAD_REQUEST 예외가 발생한다")
     void markInsufficientRejectsNonCheckType() {
         ChecklistItem item = yesNoItem(null);
 
         assertThatThrownBy(() -> item.markInsufficient("메모"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
 
@@ -270,26 +270,26 @@ class ChecklistItemTest {
     }
 
     @Test
-    @DisplayName("CHECK가 아닌 항목에 check()를 호출하면 INVALID_INPUT 예외가 발생한다")
+    @DisplayName("CHECK가 아닌 항목에 check()를 호출하면 BAD_REQUEST 예외가 발생한다")
     void checkRejectsNonCheckType() {
         ChecklistItem item = yesNoItem(null);
 
         assertThatThrownBy(() -> item.check(true))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
 
     @Test
-    @DisplayName("markInsufficient()에 null을 전달하면 INVALID_INPUT 예외가 발생한다")
+    @DisplayName("markInsufficient()에 null을 전달하면 BAD_REQUEST 예외가 발생한다")
     void markInsufficientRejectsNullNote() {
         ChecklistItem item = checkTypeItem();
 
         assertThatThrownBy(() -> item.markInsufficient(null))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
 }

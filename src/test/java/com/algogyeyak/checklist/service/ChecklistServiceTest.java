@@ -295,7 +295,7 @@ class ChecklistServiceTest {
     }
 
     @Test
-    @DisplayName("checked/value/userNote가 전부 비어있으면 INVALID_INPUT 예외가 발생한다")
+    @DisplayName("checked/value/userNote가 전부 비어있으면 BAD_REQUEST 예외가 발생한다")
     void updateChecklistItemThrowsWhenNoFieldProvided() {
         User user = user(1L);
         Checklist checklist = checklistWithOneCheckItem(user);
@@ -309,7 +309,7 @@ class ChecklistServiceTest {
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
 

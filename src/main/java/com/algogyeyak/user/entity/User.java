@@ -135,7 +135,7 @@ public class User {
      */
     public void withdraw() {
         if (isWithdrawn()) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "이미 탈퇴한 사용자입니다.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "이미 탈퇴한 사용자입니다.");
         }
 
         this.status = UserStatus.WITHDRAWN;

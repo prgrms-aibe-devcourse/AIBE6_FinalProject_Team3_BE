@@ -27,7 +27,7 @@ public final class PageableUtils {
     public static void validateMaxSize(Pageable pageable) {
         if (pageable.getPageSize() > MAX_PAGE_SIZE) {
             throw new BusinessException(
-                    ErrorCode.INVALID_INPUT,
+                    ErrorCode.BAD_REQUEST,
                     "페이지 크기는 최대 " + MAX_PAGE_SIZE + "까지 허용됩니다."
             );
         }
