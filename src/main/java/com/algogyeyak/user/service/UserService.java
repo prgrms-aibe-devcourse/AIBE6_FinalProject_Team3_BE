@@ -100,7 +100,7 @@ public class UserService {
     public void withdraw(Long userId) {
         User user = getActiveUserOrThrow(userId);
         user.withdraw();
-        // TODO: user_socials(OAuth 연동 정보) 처리 정책 적용 필요 — 확인 필요
+        // TODO: user_social_accounts(OAuth 연동 정보, UserSocialAccount 엔티티) 처리 정책 적용 필요 — 확인 필요
         // TODO: 탈퇴한 사용자의 Property/ContractAnalysis 등 연관 데이터 처리 방식 적용 필요 — 확인 필요
     }
 

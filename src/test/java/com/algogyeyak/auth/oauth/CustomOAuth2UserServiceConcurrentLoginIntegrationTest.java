@@ -1,8 +1,10 @@
 package com.algogyeyak.auth.oauth;
 
 import com.algogyeyak.user.entity.User;
+import com.algogyeyak.user.entity.UserSocialAccount;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.repository.UserRepository;
+import com.algogyeyak.user.repository.UserSocialAccountRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +46,9 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private UserSocialAccountRepository userSocialAccountRepository;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     private static OAuth2User kakaoOAuth2User(long id, String nickname, String profileImageUrl, String email) {
@@ -80,9 +85,9 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         // 스레드 A: createUser()와 정확히 같은 구조(바깥 트랜잭션 조회 → 대기 → REQUIRES_NEW로 격리된
-        // INSERT 시도 → 실패하면 바깥 트랜잭션의 세션으로 재조회)를 재현한다.
+        // User+UserSocialAccount INSERT 시도 → 실패하면 바깥 트랜잭션의 세션으로 재조회)를 재현한다.
         Future<User> aResult = executor.submit(() -> transactionTemplate.execute(status -> {
-            userRepository.findByProviderAndProviderId(AuthProvider.KAKAO, providerId); // 아직 아무도 없다.
+            userSocialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, providerId); // 아직 아무도 없다.
             aHasReadEmpty.countDown();
 
             awaitOrFail(bHasCommitted, "B가 커밋을 완료하지 않았습니다.");
@@ -90,10 +95,14 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
             User newUser = User.createOAuthUser(
                     "concurrent-login@example.com", "동시로그인유저", "http://img", AuthProvider.KAKAO, providerId);
             try {
-                requiresNewTransactionTemplate.executeWithoutResult(innerStatus -> userRepository.saveAndFlush(newUser));
+                requiresNewTransactionTemplate.executeWithoutResult(innerStatus -> {
+                    userRepository.saveAndFlush(newUser);
+                    userSocialAccountRepository.saveAndFlush(UserSocialAccount.of(newUser, AuthProvider.KAKAO, providerId));
+                });
                 return newUser;
             } catch (DataIntegrityViolationException e) {
-                return userRepository.findByProviderAndProviderId(AuthProvider.KAKAO, providerId)
+                return userSocialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, providerId)
+                        .map(UserSocialAccount::getUser)
                         .orElseThrow(() -> e);
             }
         }));
@@ -116,10 +125,17 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
         assertEquals(bUser.getId(), aUser.getId());
 
         transactionTemplate.executeWithoutResult(status -> {
-            long count = userRepository.findAll().stream()
+            long userCount = userRepository.findAll().stream()
                     .filter(u -> AuthProvider.KAKAO.equals(u.getProvider()) && providerId.equals(u.getProviderId()))
                     .count();
-            assertEquals(1, count);
+            assertEquals(1, userCount);
+
+            // User뿐 아니라 그 첫 UserSocialAccount도 중복 없이 정확히 한 행만 있어야 한다 —
+            // 둘은 항상 같은 트랜잭션에서 함께 커밋되므로 여기서도 짝이 맞는지 같이 확인한다.
+            long socialAccountCount = userSocialAccountRepository.findAll().stream()
+                    .filter(a -> AuthProvider.KAKAO.equals(a.getProvider()) && providerId.equals(a.getProviderId()))
+                    .count();
+            assertEquals(1, socialAccountCount);
         });
     }
 

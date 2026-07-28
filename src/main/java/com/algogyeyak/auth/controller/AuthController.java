@@ -1,9 +1,11 @@
 package com.algogyeyak.auth.controller;
 
 import com.algogyeyak.auth.dto.LoginRequest;
+import com.algogyeyak.auth.dto.PasswordPolicy;
 import com.algogyeyak.auth.dto.PasswordUpdateRequest;
 import com.algogyeyak.auth.dto.SignupRequest;
 import com.algogyeyak.auth.util.EmailNormalizer;
+import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
@@ -20,6 +22,8 @@ import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -28,12 +32,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Tag(name = "Auth", description = "회원가입, 로그인(로컬/소셜), 토큰 재발급, 비밀번호 관리 API")
 @RestController
@@ -45,6 +53,7 @@ public class AuthController {
     private final JwtProvider jwtProvider;
     private final RefreshTokenService refreshTokenService;
     private final LocalAuthService localAuthService;
+    private final AccessTokenRevocationService accessTokenRevocationService;
 
     @Value("${app.dev-login.enabled}")
     private boolean devLoginEnabled;
@@ -57,12 +66,14 @@ public class AuthController {
             UserRepository userRepository,
             JwtProvider jwtProvider,
             RefreshTokenService refreshTokenService,
-            LocalAuthService localAuthService) {
+            LocalAuthService localAuthService,
+            AccessTokenRevocationService accessTokenRevocationService) {
         this.cookieUtils = cookieUtils;
         this.userRepository = userRepository;
         this.jwtProvider = jwtProvider;
         this.refreshTokenService = refreshTokenService;
         this.localAuthService = localAuthService;
+        this.accessTokenRevocationService = accessTokenRevocationService;
     }
 
     public record MeResponse(
@@ -71,6 +82,24 @@ public class AuthController {
             @Schema(description = "닉네임", example = "algo") String nickname,
             @Schema(description = "프로필 이미지 URL") String profileImageUrl,
             @Schema(description = "권한", example = "USER") String role) {
+    }
+
+    public record PasswordPolicyResponse(
+            @Schema(description = "HTML <input pattern=\"...\"> 속성에 그대로 쓸 수 있는 정규식(앞뒤 ^/$ 없음)",
+                    example = "(?=.*[A-Za-z])(?=.*\\d)[\\x21-\\x7E]{8,72}") String pattern,
+            @Schema(description = "형식 위반 시 보여줄 안내 문구") String message) {
+    }
+
+    // 비밀번호 정책(정규식/안내 문구)이 frontend에 하드코딩돼 있으면 두 곳이 어긋날 때 "프론트는
+    // 통과, 서버는 거부"하는 이중 실패가 생긴다. PasswordPolicy(SignupRequest/PasswordUpdateRequest가
+    // 실제 검증에 쓰는 바로 그 상수)를 여기서 그대로 내려줘서, frontend는 값을 복사해두지 않고 이
+    // 엔드포인트를 유일한 소스로 삼는다. 로그인 전(회원가입 폼)에도 필요해 인증 없이 열어둔다.
+    @Operation(summary = "비밀번호 정책 조회", description = "회원가입/비밀번호 변경 폼에서 클라이언트 측 선제 검증에 쓸 비밀번호 정책(정규식, 안내 문구)을 반환한다. 최종 판단은 signup/password 엔드포인트가 서버에서 다시 수행한다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공")
+    @GetMapping("/password-policy")
+    public ResponseEntity<ApiResponse<PasswordPolicyResponse>> passwordPolicy() {
+        return ResponseEntity.ok(ApiResponse.success(
+                new PasswordPolicyResponse(PasswordPolicy.HTML_INPUT_PATTERN, PasswordPolicy.MESSAGE)));
     }
 
     // 소셜 로그인(OAuth2AuthenticationSuccessHandler)과 달리 리다이렉트가 아니라 REST 응답이므로,
@@ -154,16 +183,39 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
     }
 
-    @Operation(summary = "로그아웃", description = "refresh_token 쿠키가 있으면 서버에서 즉시 무효화(revoke)하고, access_token 쿠키가 있으면 그 jti를 만료 시각까지 블랙리스트에 등록해 남은 유효기간 동안에도 즉시 무효화한다. 이후 access/refresh 쿠키를 삭제한다. 두 쿠키 모두 없어도(이미 만료/삭제된 경우 등) 항상 200으로 성공 처리되므로 필수 인증 요구사항으로 문서화하지 않는다.")
+    @Operation(summary = "로그아웃", description = "refresh_token 쿠키가 있으면 서버에서 즉시 무효화(revoke)하고, access token(access_token 쿠키 또는 Authorization: Bearer 헤더)이 있으면 그 jti를 만료 시각까지 블랙리스트에 등록해 남은 유효기간 동안에도 즉시 무효화한다. 이후 access/refresh 쿠키를 삭제한다. 아무것도 없어도(이미 만료/삭제된 경우 등) 항상 200으로 성공 처리되므로 필수 인증 요구사항으로 문서화하지 않는다.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "로그아웃 성공")
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest request, HttpServletResponse response) {
         CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
                 .ifPresent(cookie -> refreshTokenService.revoke(cookie.getValue()));
 
+        // 쿠키만 보면 안 된다 — /auth/me 등 다른 엔드포인트와 동일하게 JwtAuthenticationFilter.resolveToken로
+        // 찾아야, Authorization: Bearer 헤더로 인증한 클라이언트(Swagger/Postman 등)도 로그아웃 시
+        // access token이 실제로 무효화된다. 쿠키만 확인하던 이전 버전은 이 경로를 놓쳐 Bearer
+        // 클라이언트의 access token이 로그아웃 후에도 자연 만료 전까지 계속 유효한 채로 남아 있었다.
+        String accessToken = JwtAuthenticationFilter.resolveToken(request);
+        if (StringUtils.hasText(accessToken)) {
+            revokeAccessToken(accessToken);
+        }
+
         cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
         cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
         return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    // 이미 만료되었거나 서명이 잘못된 access token은 애초에 인증에 쓰일 수 없으므로 블랙리스트에
+    // 등록할 필요가 없다 — parseClaims가 던지는 JwtException은 그대로 무시하고 로그아웃을 계속 진행한다.
+    private void revokeAccessToken(String accessToken) {
+        try {
+            Claims claims = jwtProvider.parseClaims(accessToken);
+            LocalDateTime expiresAt = claims.getExpiration().toInstant()
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDateTime();
+            accessTokenRevocationService.revoke(claims.getId(), expiresAt);
+        } catch (JwtException | IllegalArgumentException e) {
+            // 무시: 이미 무효한 토큰이라 블랙리스트에 올릴 대상이 없다.
+        }
     }
 
     // Access Token이 만료된 상태에서 호출되는 것이 전제이므로 인증 없이 접근 가능해야 한다 (SecurityConfig permitAll).
