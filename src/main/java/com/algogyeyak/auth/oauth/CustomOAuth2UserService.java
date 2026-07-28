@@ -3,7 +3,9 @@ package com.algogyeyak.auth.oauth;
 import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.entity.User;
+import com.algogyeyak.user.entity.UserSocialAccount;
 import com.algogyeyak.user.repository.UserRepository;
+import com.algogyeyak.user.repository.UserSocialAccountRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
@@ -22,10 +24,15 @@ import java.util.Optional;
 public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
     private final UserRepository userRepository;
+    private final UserSocialAccountRepository userSocialAccountRepository;
     private final TransactionTemplate requiresNewTransactionTemplate;
 
-    public CustomOAuth2UserService(UserRepository userRepository, PlatformTransactionManager transactionManager) {
+    public CustomOAuth2UserService(
+            UserRepository userRepository,
+            UserSocialAccountRepository userSocialAccountRepository,
+            PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
+        this.userSocialAccountRepository = userSocialAccountRepository;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -63,10 +70,21 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
     // 재로그인 시 기존 회원의 닉네임/프로필 사진은 OAuth 제공자 값으로 덮어쓰지 않는다.
     // 최초 가입 이후에는 프로필 등록/수정 화면에서 관리하는 값이 우선하므로 그대로 재사용한다.
+    //
+    // UserSocialAccount가 "이 유저가 실제로 연동해둔 모든 소셜 계정"의 진짜 소스다 — User.provider/
+    // providerId는 그중 가장 최근에 로그인에 쓴 수단만 가리키는 캐시로, 프로필 화면 등에서
+    // "지금 어떤 계정으로 로그인했는지" 보여줄 때만 참고하면 된다.
     private FindOrCreateResult findOrCreateUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
-        Optional<User> byProvider = userRepository.findByProviderAndProviderId(provider, userInfo.getProviderId());
-        if (byProvider.isPresent()) {
-            return new FindOrCreateResult(byProvider.get(), false);
+        Optional<UserSocialAccount> bySocialAccount =
+                userSocialAccountRepository.findByProviderAndProviderId(provider, userInfo.getProviderId());
+        if (bySocialAccount.isPresent()) {
+            User user = bySocialAccount.get().getUser();
+            // 이미 연동해둔 다른 provider로 다시 로그인한 경우, "가장 최근 로그인 수단" 캐시만
+            // 갱신한다 — 이미 존재하는 연동이라 새 UserSocialAccount는 만들 필요가 없다.
+            if (user.getProvider() != provider) {
+                user.linkProvider(provider, userInfo.getProviderId());
+            }
+            return new FindOrCreateResult(user, false);
         }
 
         Optional<User> linked = linkToExistingAccountByEmail(provider, userInfo);
@@ -88,8 +106,24 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     private Optional<User> linkToExistingAccountByEmail(AuthProvider provider, OAuth2UserInfo userInfo) {
         return findVerifiedEmailMatch(userInfo).map(user -> {
             user.linkProvider(provider, userInfo.getProviderId());
+            linkNewSocialAccount(user, provider, userInfo.getProviderId());
             return user;
         });
+    }
+
+    // createUser()와 동일한 이유(같은 세션에서 유니크 제약 위반 후 그 세션으로 쿼리를 이어가면
+    // Hibernate가 AssertionFailure를 던짐)로 INSERT를 REQUIRES_NEW로 분리한다. 동시에 같은 계정을
+    // 같은 provider로 연동하려는 요청이 겹치는 극히 드문 레이스만 대비하는 것이라, 이미 연동이
+    // 끝나 있으면(경쟁에서 진 쪽) 그냥 그 결과를 받아들이고 넘어간다.
+    private void linkNewSocialAccount(User user, AuthProvider provider, String providerId) {
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status ->
+                    userSocialAccountRepository.saveAndFlush(UserSocialAccount.of(user, provider, providerId)));
+        } catch (DataIntegrityViolationException e) {
+            if (userSocialAccountRepository.findByProviderAndProviderId(provider, providerId).isEmpty()) {
+                throw e;
+            }
+        }
     }
 
     /**
@@ -124,7 +158,12 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             // "세션이 예외 이후 flush됨(AssertionFailure)"을 던진다 — RefreshTokenService.issue()에서
             // 실제 H2로 재현 확인한 것과 동일한 문제라 같은 방식으로 격리한다. 실패해도 폐기되는
             // 세션이 이 임시 트랜잭션뿐이도록 분리해, 바깥(loadUser()) 트랜잭션의 세션은 정상 상태로 남는다.
-            requiresNewTransactionTemplate.executeWithoutResult(status -> userRepository.saveAndFlush(newUser));
+            // User와 그 첫 UserSocialAccount는 항상 함께 존재해야 하므로 같은 REQUIRES_NEW 트랜잭션
+            // 안에서 같이 커밋/롤백되게 한다.
+            requiresNewTransactionTemplate.executeWithoutResult(status -> {
+                userRepository.saveAndFlush(newUser);
+                userSocialAccountRepository.saveAndFlush(UserSocialAccount.of(newUser, provider, userInfo.getProviderId()));
+            });
             return newUser;
         } catch (DataIntegrityViolationException e) {
             // 같은 provider+providerId로 동시에 첫 로그인이 들어와 유니크 제약에 걸린 경우, 또는
@@ -134,7 +173,8 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             // 감싼다 — 그래야 OAuth2LoginAuthenticationFilter가 이를 잡아
             // OAuth2AuthenticationFailureHandler로 정상적으로 프론트에 에러 리다이렉트를 보내고,
             // 서블릿까지 예외가 올라가 500으로 크래시하는 것을 막는다.
-            return userRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
+            return userSocialAccountRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
+                    .map(UserSocialAccount::getUser)
                     .or(() -> findVerifiedEmailMatch(userInfo))
                     .orElseThrow(() -> new OAuth2AuthenticationException(
                             new OAuth2Error("email_conflict", "이미 사용 중인 이메일입니다.", null), e));
