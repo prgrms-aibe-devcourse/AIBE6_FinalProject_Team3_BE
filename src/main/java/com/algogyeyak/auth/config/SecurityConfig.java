@@ -2,6 +2,7 @@ package com.algogyeyak.auth.config;
 
 import com.algogyeyak.auth.handler.OAuth2AuthenticationFailureHandler;
 import com.algogyeyak.auth.handler.OAuth2AuthenticationSuccessHandler;
+import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
@@ -41,6 +42,7 @@ public class SecurityConfig {
     private final OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
     private final CookieAuthorizationRequestRepository cookieAuthorizationRequestRepository;
     private final JwtProvider jwtProvider;
+    private final AccessTokenRevocationService accessTokenRevocationService;
 
     // 이 클래스 내부에서만 쓰는 단순 직렬화 용도라 Boot이 자동 구성하는 ObjectMapper 빈에 의존하지 않는다.
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -87,7 +89,7 @@ public class SecurityConfig {
                                     objectMapper.writeValueAsBytes(ApiResponse.failure(error)));
                         })
                 )
-                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

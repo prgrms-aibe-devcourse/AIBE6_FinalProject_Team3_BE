@@ -4,6 +4,7 @@ import com.algogyeyak.auth.dto.LoginRequest;
 import com.algogyeyak.auth.dto.PasswordUpdateRequest;
 import com.algogyeyak.auth.dto.SignupRequest;
 import com.algogyeyak.auth.util.EmailNormalizer;
+import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
@@ -20,6 +21,8 @@ import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -35,6 +38,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+
 @Tag(name = "Auth", description = "회원가입, 로그인(로컬/소셜), 토큰 재발급, 비밀번호 관리 API")
 @RestController
 @RequestMapping("/auth")
@@ -45,6 +51,7 @@ public class AuthController {
     private final JwtProvider jwtProvider;
     private final RefreshTokenService refreshTokenService;
     private final LocalAuthService localAuthService;
+    private final AccessTokenRevocationService accessTokenRevocationService;
 
     @Value("${app.dev-login.enabled}")
     private boolean devLoginEnabled;
@@ -57,12 +64,14 @@ public class AuthController {
             UserRepository userRepository,
             JwtProvider jwtProvider,
             RefreshTokenService refreshTokenService,
-            LocalAuthService localAuthService) {
+            LocalAuthService localAuthService,
+            AccessTokenRevocationService accessTokenRevocationService) {
         this.cookieUtils = cookieUtils;
         this.userRepository = userRepository;
         this.jwtProvider = jwtProvider;
         this.refreshTokenService = refreshTokenService;
         this.localAuthService = localAuthService;
+        this.accessTokenRevocationService = accessTokenRevocationService;
     }
 
     public record MeResponse(
@@ -161,9 +170,26 @@ public class AuthController {
         CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
                 .ifPresent(cookie -> refreshTokenService.revoke(cookie.getValue()));
 
+        CookieUtils.getCookie(request, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME)
+                .ifPresent(cookie -> revokeAccessToken(cookie.getValue()));
+
         cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
         cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
         return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    // 이미 만료되었거나 서명이 잘못된 access token은 애초에 인증에 쓰일 수 없으므로 블랙리스트에
+    // 등록할 필요가 없다 — parseClaims가 던지는 JwtException은 그대로 무시하고 로그아웃을 계속 진행한다.
+    private void revokeAccessToken(String accessToken) {
+        try {
+            Claims claims = jwtProvider.parseClaims(accessToken);
+            LocalDateTime expiresAt = claims.getExpiration().toInstant()
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDateTime();
+            accessTokenRevocationService.revoke(claims.getId(), expiresAt);
+        } catch (JwtException | IllegalArgumentException e) {
+            // 무시: 이미 무효한 토큰이라 블랙리스트에 올릴 대상이 없다.
+        }
     }
 
     // Access Token이 만료된 상태에서 호출되는 것이 전제이므로 인증 없이 접근 가능해야 한다 (SecurityConfig permitAll).

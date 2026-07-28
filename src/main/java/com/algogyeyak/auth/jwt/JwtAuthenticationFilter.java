@@ -23,9 +23,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     public static final String REFRESH_TOKEN_COOKIE_NAME = "refresh_token";
 
     private final JwtProvider jwtProvider;
+    private final AccessTokenRevocationService accessTokenRevocationService;
 
-    public JwtAuthenticationFilter(JwtProvider jwtProvider) {
+    public JwtAuthenticationFilter(JwtProvider jwtProvider, AccessTokenRevocationService accessTokenRevocationService) {
         this.jwtProvider = jwtProvider;
+        this.accessTokenRevocationService = accessTokenRevocationService;
     }
 
     @Override
@@ -35,14 +37,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         if (StringUtils.hasText(token) && jwtProvider.validateToken(token)) {
             Claims claims = jwtProvider.parseClaims(token);
-            Long userId = Long.valueOf(claims.getSubject());
-            String email = claims.get("email", String.class);
-            Role role = Role.valueOf(claims.get("role", String.class));
-            JwtUserPrincipal principal = new JwtUserPrincipal(userId, email, role);
 
-            List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
-            var authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+            // 로그아웃으로 jti가 블랙리스트에 오른 access token은 서명/만료가 아직 유효해도
+            // 인증 처리하지 않는다 — 로그아웃 즉시 무효화되어야 하는 이유는 팀 결정 사항 참고.
+            if (!accessTokenRevocationService.isRevoked(claims.getId())) {
+                Long userId = Long.valueOf(claims.getSubject());
+                String email = claims.get("email", String.class);
+                Role role = Role.valueOf(claims.get("role", String.class));
+                JwtUserPrincipal principal = new JwtUserPrincipal(userId, email, role);
+
+                List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
+                var authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
         }
 
         filterChain.doFilter(request, response);

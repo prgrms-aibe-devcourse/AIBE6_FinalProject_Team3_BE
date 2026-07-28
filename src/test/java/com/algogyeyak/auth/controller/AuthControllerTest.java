@@ -396,6 +396,25 @@ class AuthControllerTest {
     }
 
     @Test
+    void accessTokenIsRejectedAfterLogout() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createOAuthUser(
+                "test@example.com", "테스트유저", "https://example.com/avatar.png", AuthProvider.KAKAO, "123");
+        when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
+
+        mockMvc.perform(post("/auth/logout")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isOk());
+
+        // 로그아웃 전에는 유효했던 바로 그 access token이, 만료 전인데도 더 이상 통과하지 않아야 한다 —
+        // 로그아웃해도 access token이 자연 만료 전까지 계속 유효했던 원래 버그의 회귀 테스트.
+        mockMvc.perform(get("/auth/me")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
     void logoutRevokesRefreshTokenWhenCookiePresent() throws Exception {
         mockMvc.perform(post("/auth/logout")
                         .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "raw-refresh-token")))
