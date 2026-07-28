@@ -31,7 +31,7 @@ public class UserService {
 
     public NicknameCheckResponse checkNicknameAvailable(Long userId, String nickname) {
         if (!StringUtils.hasText(nickname)) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "닉네임을 입력해 주세요.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "닉네임을 입력해 주세요.");
         }
 
         boolean available = !userRepository.existsByNicknameAndIdNot(nickname, userId);
@@ -43,8 +43,8 @@ public class UserService {
         User user = getActiveUserOrThrow(userId);
 
         if (userPreferenceRepository.existsByUserId(userId)) {
-            // 409 Conflict에 대응하는 ErrorCode가 없어 우선 INVALID_INPUT으로 처리 — 확인 필요
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "이미 프로필이 등록되어 있습니다.");
+            // 409 Conflict에 대응하는 ErrorCode가 없어 우선 BAD_REQUEST로 처리 — 확인 필요
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "이미 프로필이 등록되어 있습니다.");
         }
 
         if (StringUtils.hasText(request.getNickname())
@@ -112,8 +112,8 @@ public class UserService {
 
     private void validateNicknameNotDuplicated(Long userId, String nickname) {
         if (userRepository.existsByNicknameAndIdNot(nickname, userId)) {
-            // 마찬가지로 409에 대응하는 코드가 없어 INVALID_INPUT으로 처리 — 확인 필요
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "이미 사용 중인 닉네임입니다.");
+            // 마찬가지로 409에 대응하는 코드가 없어 BAD_REQUEST로 처리 — 확인 필요
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "이미 사용 중인 닉네임입니다.");
         }
     }
 

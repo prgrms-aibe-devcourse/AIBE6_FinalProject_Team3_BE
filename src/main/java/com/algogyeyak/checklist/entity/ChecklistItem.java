@@ -109,7 +109,7 @@ public class ChecklistItem {
      */
     public void check(boolean checked) {
         if (itemType != ChecklistItemType.CHECK) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "이 항목은 확인 방식이 아닙니다.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "이 항목은 확인 방식이 아닙니다.");
         }
         this.checked = checked;
         this.userNote = null;
@@ -121,10 +121,10 @@ public class ChecklistItem {
      */
     public void markInsufficient(String note) {
         if (itemType != ChecklistItemType.CHECK) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "이 항목은 메모를 남길 수 있는 방식이 아닙니다.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "이 항목은 메모를 남길 수 있는 방식이 아닙니다.");
         }
         if (note == null) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "메모는 null일 수 없습니다 (빈 문자열은 허용).");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "메모는 null일 수 없습니다 (빈 문자열은 허용).");
         }
         this.checked = true;
         this.userNote = note;
@@ -132,20 +132,20 @@ public class ChecklistItem {
 
     /**
      * 값 입력이 필요한 문항(YES_NO/DATE/DOCUMENT_REQUEST)의 응답을 저장한다.
-     * itemType에 맞지 않는 값이면 BusinessException(INVALID_INPUT)을 던진다.
+     * itemType에 맞지 않는 값이면 BusinessException(BAD_REQUEST)을 던진다.
      */
     public void answer(String rawValue) {
         switch (itemType) {
             case YES_NO -> answerYesNo(rawValue);
             case DATE -> answerDate(rawValue);
             case DOCUMENT_REQUEST -> answerDocumentRequest(rawValue);
-            case CHECK -> throw new BusinessException(ErrorCode.INVALID_INPUT, "이 항목은 값 입력 방식이 아닙니다.");
+            case CHECK -> throw new BusinessException(ErrorCode.BAD_REQUEST, "이 항목은 값 입력 방식이 아닙니다.");
         }
     }
 
     private void answerDocumentRequest(String rawValue) {
         if (!"PROVIDED".equals(rawValue) && !"NOT_PROVIDED".equals(rawValue)) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "PROVIDED 또는 NOT_PROVIDED 값만 입력할 수 있습니다.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "PROVIDED 또는 NOT_PROVIDED 값만 입력할 수 있습니다.");
         }
 
         // 임대인에게 요청한 서류(확정일자 부여현황/전입세대열람원)를 제공받지 못했으면 자동으로 주의 항목이 된다.
@@ -156,7 +156,7 @@ public class ChecklistItem {
         try {
             LocalDate.parse(rawValue); // ISO-8601 (yyyy-MM-dd) 형식만 허용
         } catch (DateTimeParseException e) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "날짜 형식(yyyy-MM-dd)이 올바르지 않습니다.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "날짜 형식(yyyy-MM-dd)이 올바르지 않습니다.");
         }
 
         markAnswered(rawValue, false);
@@ -164,7 +164,7 @@ public class ChecklistItem {
 
     private void answerYesNo(String rawValue) {
         if (!"Y".equals(rawValue) && !"N".equals(rawValue)) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "Y 또는 N 값만 입력할 수 있습니다.");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "Y 또는 N 값만 입력할 수 있습니다.");
         }
 
         // 신탁등기 있음(Y), 소유자-임대인 명의 불일치(N)는 자동으로 주의 항목(issueFound)으로 반영한다.
