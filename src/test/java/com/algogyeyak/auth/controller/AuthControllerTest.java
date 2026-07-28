@@ -415,6 +415,26 @@ class AuthControllerTest {
     }
 
     @Test
+    void accessTokenIsRejectedAfterLogoutViaBearerHeader() throws Exception {
+        // Swagger/Postman처럼 쿠키 없이 Authorization: Bearer 헤더만으로 인증하는 클라이언트의
+        // 회귀 테스트 — logout()이 access_token 쿠키만 보고 있던 예전 버전에서는 이 access token이
+        // 블랙리스트에 오르지 않아, 로그아웃 후에도 만료 전까지 계속 유효했다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createOAuthUser(
+                "test@example.com", "테스트유저", "https://example.com/avatar.png", AuthProvider.KAKAO, "123");
+        when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
+
+        mockMvc.perform(post("/auth/logout")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/auth/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
     void logoutRevokesRefreshTokenWhenCookiePresent() throws Exception {
         mockMvc.perform(post("/auth/logout")
                         .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "raw-refresh-token")))
