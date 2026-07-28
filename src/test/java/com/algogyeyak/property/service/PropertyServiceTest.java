@@ -8,6 +8,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
+import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
@@ -38,13 +40,16 @@ class PropertyServiceTest {
     @Mock
     private KakaoAddressClient kakaoAddressClient;
 
+    @Mock
+    private MarketComparisonService marketComparisonService;
+
     private PropertyService propertyService;
 
     private static final Long USER_ID = 1L;
 
     @BeforeEach
     void setUp() {
-        propertyService = new PropertyService(propertyRepository, kakaoAddressClient);
+        propertyService = new PropertyService(propertyRepository, kakaoAddressClient, marketComparisonService);
     }
 
     private AddressResolutionResult resolvedAddress() {
@@ -75,6 +80,7 @@ class PropertyServiceTest {
                 eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
         )).thenReturn(false);
         when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
 
         PropertyRegisterResponse response = propertyService.register(USER_ID, request);
 
@@ -204,6 +210,7 @@ class PropertyServiceTest {
         property.assignAddress(resolvedPropertyAddress());
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
 
         PropertyDetailResponse response = propertyService.getProperty(USER_ID, 1L);
 
@@ -254,6 +261,7 @@ class PropertyServiceTest {
         property.assignAddress(resolvedPropertyAddress());
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
 
         PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, "수정된 설명");
 

@@ -1,5 +1,6 @@
 package com.algogyeyak.property.dto;
 
+import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyImage;
@@ -25,7 +26,7 @@ public record PropertyDetailResponse(
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
-    public static PropertyDetailResponse from(Property property) {
+    public static PropertyDetailResponse from(Property property, MarketComparisonResponse marketComparison) {
         return new PropertyDetailResponse(
                 property.getId(),
                 property.getPropertyType().name(),
@@ -36,7 +37,7 @@ public record PropertyDetailResponse(
                 property.getDescription(),
                 AddressResponse.from(property.getAddress()),
                 property.getImages().stream().map(PropertyImage::getImageUrl).toList(),
-                MarketComparisonResponse.unavailable(),
+                marketComparison,
                 property.getStatus().name(),
                 property.getCreatedAt(),
                 property.getUpdatedAt()
@@ -59,21 +60,6 @@ public record PropertyDetailResponse(
                     address.getLatitude(),
                     address.getLongitude()
             );
-        }
-    }
-
-    /**
-     * 국토부 실거래가 연동 전까지는 등록 응답과 동일하게 항상 UNAVAILABLE.
-     */
-    public record MarketComparisonResponse(
-            String status,
-            Long referencePrice,
-            Double differenceRate,
-            Integer sampleCount,
-            String referenceDate
-    ) {
-        public static MarketComparisonResponse unavailable() {
-            return new MarketComparisonResponse("UNAVAILABLE", null, null, null, null);
         }
     }
 }
