@@ -27,10 +27,12 @@ public class ContractAnalysisMaskingService {
     private static final String ACCOUNT_MASK = "[계좌번호]";
 
     // 일반 한글 이름은 라벨 없이는 다른 고유명사와 구분이 불가능해 임대인/임차인 라벨에 의존한다.
-    // 라벨-이름 사이 필러는 lazy(0,10)?로 두어야 한다: greedy면 필러가 이름 앞부분까지 욕심껏 집어삼킨 뒤
-    // 마지막 그룹의 최소 길이(2자)만 남기고 백트래킹을 멈춰, 3~4자 이름의 앞글자가 마스킹 없이 그대로 노출된다.
+    // 라벨 뒤에 자유 필러(예: [^\d\n]{0,10}?)를 허용하면 "임차인은 계약..."처럼 라벨에 조사가 바로 붙는
+    // 문장에서 필러가 조사까지 집어삼키고 뒤따르는 일반 명사("계약")를 이름으로 오탐한다.
+    // 그래서 라벨 바로 뒤에는 (1) 콜론/괄호 구분자 또는 (2) 공백만 오도록 좁혀, 구분자 없이
+    // 조사가 곧바로 붙는 경우(라벨이 문장의 주어로 쓰인 경우)는 애초에 매칭되지 않게 한다.
     private static final Pattern NAME_PATTERN = Pattern.compile(
-            "(임대인|임차인)\\s*[:(]?[^\\d\\n]{0,10}?[:)]?\\s*([가-힣]{2,4})"
+            "(임대인|임차인)(?:\\s*[:(]\\s*|\\s+)([가-힣]{2,4})"
     );
     private static final int NAME_GROUP = 2;
     private static final String NAME_MASK = "[성명]";
