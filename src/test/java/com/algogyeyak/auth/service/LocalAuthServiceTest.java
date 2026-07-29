@@ -172,6 +172,24 @@ class LocalAuthServiceTest {
     }
 
     @Test
+    void setPasswordThrowsWhenAccountHasNoEmail() {
+        // 카카오는 현재 profile_nickname 스코프만 요청해 이메일 동의항목이 없다(application.yml
+        // 참고) — 검증된 이메일이 없으면 CustomOAuth2UserService가 email=null로 계정을 만든다.
+        // login()은 email+passwordHash 조합으로만 계정을 찾으므로, 이런 계정에 비밀번호를 설정해도
+        // 그걸로 로그인할 방법이 없다 — 프론트가 "같은 이메일로 로그인할 수도 있어요"라고 안내해놓고
+        // 실제로는 불가능한 상황을 막기 위해 여기서 거부해야 한다.
+        User user = User.createOAuthUser(null, "소셜유저", null, AuthProvider.KAKAO, "999");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.setPassword(1L, null, "newPassword1"));
+
+        assertEquals(ErrorCode.AUTH_EMAIL_REQUIRED_FOR_PASSWORD, exception.getErrorCode());
+        assertEquals(null, user.getPasswordHash());
+    }
+
+    @Test
     void setPasswordRequiresCurrentPasswordWhenAlreadySet() {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
         ReflectionTestUtils.setField(user, "id", 1L);

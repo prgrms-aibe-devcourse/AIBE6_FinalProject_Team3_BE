@@ -91,6 +91,15 @@ public class LocalAuthService {
                 .filter(found -> !found.isWithdrawn())
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
 
+        // {@link #login}은 email+passwordHash 조합으로만 계정을 찾으므로, email이 없는 계정(카카오는
+        // 현재 profile_nickname 스코프만 요청해 이메일 동의항목 자체가 없음 — application.yml 참고)에
+        // 비밀번호를 설정해봐야 그 비밀번호로 로그인할 방법이 아예 없다. 프론트가 "같은 이메일로
+        // 로그인할 수도 있어요"라고 안내해놓고 실제로는 로그인이 불가능한 상황을 막기 위해 여기서
+        // 막는다 — 카카오 email 스코프 승인 후 이메일이 채워지면 그때부터 정상적으로 설정 가능해진다.
+        if (user.getEmail() == null) {
+            throw new BusinessException(ErrorCode.AUTH_EMAIL_REQUIRED_FOR_PASSWORD);
+        }
+
         // 개발용 dev-login 관리자 계정(AdminAccountSeeder)은 passwordHash가 항상 null이어야
         // dev-login 스위치가 꺼졌을 때 이 계정으로 들어올 방법이 완전히 사라진다. 여기서 비밀번호
         // 설정을 허용하면 dev-login 세션 하나로 이 계정에 영구적인 로컬 로그인 수단을 만들어버려
