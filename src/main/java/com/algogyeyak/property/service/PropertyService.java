@@ -1,7 +1,10 @@
 package com.algogyeyak.property.service;
 
+import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.global.pagination.PageableUtils;
+import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
@@ -17,9 +20,13 @@ import com.algogyeyak.property.entity.PropertyImage;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import java.util.List;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,20 +38,28 @@ public class PropertyService {
     private final PropertyRepository propertyRepository;
     private final KakaoAddressClient kakaoAddressClient;
     private final MarketComparisonService marketComparisonService;
+    private final ChecklistRepository checklistRepository;
+    private final PropertyReportRepository propertyReportRepository;
+
+    // 목록 조회 정렬 허용 필드 - PageableUtils.validateSort가 이 밖의 필드는 INVALID_SORT_FIELD로 막는다.
+    private static final Set<String> SORTABLE_PROPERTIES = Set.of("createdAt", "deposit", "area");
+
+    // 이미지 URL 검증 - 확장자 화이트리스트 + 개수 상한. 실제 업로드 인프라(S3 등)가 아직 없어
+    // URL을 그대로 받는 구조라 바이트 단위 파일 크기 검증은 여기서 할 수 없다 - 확장자/개수만 막는다.
+    private static final Set<String> ALLOWED_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp", "gif");
+    private static final int MAX_IMAGE_COUNT = 10;
 
     @Transactional
     public PropertyRegisterResponse register(Long userId, PropertyRegisterRequest request) {
         validatePriceCombination(request.transactionType(), request.deposit(), request.monthlyRent());
+        validateImageUrls(request.imageUrls());
 
         AddressResolutionResult addressResult = kakaoAddressClient.resolve(request.address());
         if (!addressResult.isResolved()) {
             throw new BusinessException(ErrorCode.PROPERTY_ADDRESS_RESOLUTION_FAILED);
         }
 
-        if (addressResult.getRoadAddress() != null && propertyRepository
-                .existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
-                        userId, request.transactionType(), PropertyStatus.ACTIVE, addressResult.getRoadAddress()
-                )) {
+        if (isDuplicate(userId, request.transactionType(), addressResult)) {
             throw new BusinessException(ErrorCode.PROPERTY_DUPLICATE);
         }
 
@@ -83,13 +98,18 @@ public class PropertyService {
 
     /**
      * 본인이 등록한 매물 목록 조회. 개인 분석 도구 성격상 마켓플레이스식 전체조회가 아니라
-     * 요청자 본인 소유 + ACTIVE 상태 매물만 최신순으로 반환한다.
+     * 요청자 본인 소유 + ACTIVE 상태 매물만 페이지네이션해서 반환한다 (기본 정렬: 최신순).
+     * page/size는 Controller의 @PageableDefault가 기본값을 채워주므로 항상 값이 있다고 가정한다.
      */
-    public List<PropertyListResponse> getMyProperties(Long userId) {
-        return propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(userId, PropertyStatus.ACTIVE)
-                .stream()
-                .map(PropertyListResponse::from)
-                .toList();
+    public PageResponse<PropertyListResponse> getMyProperties(Long userId, Pageable pageable) {
+        if (pageable.getPageSize() <= 0) {
+            throw new BusinessException(ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION, "size는 1 이상이어야 합니다.");
+        }
+        PageableUtils.validateSort(pageable, SORTABLE_PROPERTIES);
+        PageableUtils.validateMaxSize(pageable);
+
+        Page<Property> properties = propertyRepository.findAllByUserIdAndStatus(userId, PropertyStatus.ACTIVE, pageable);
+        return PageResponse.from(properties, PropertyListResponse::from);
     }
 
     /**
@@ -103,7 +123,12 @@ public class PropertyService {
             throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
         }
 
-        return PropertyDetailResponse.from(property, marketComparisonService.compare(property));
+        return PropertyDetailResponse.from(
+                property,
+                marketComparisonService.compare(property),
+                checklistRepository.findByPropertyId(propertyId).isPresent(),
+                propertyReportRepository.existsByPropertyIdAndReporterId(propertyId, userId)
+        );
     }
 
     /**
@@ -125,7 +150,12 @@ public class PropertyService {
         property.updateArea(request.area());
         property.updateDescription(request.description());
 
-        return PropertyDetailResponse.from(property, marketComparisonService.compare(property));
+        return PropertyDetailResponse.from(
+                property,
+                marketComparisonService.compare(property),
+                checklistRepository.findByPropertyId(propertyId).isPresent(),
+                propertyReportRepository.existsByPropertyIdAndReporterId(propertyId, userId)
+        );
     }
 
     private Property findActiveProperty(Long propertyId) {
@@ -176,10 +206,70 @@ public class PropertyService {
         }
     }
 
+    /**
+     * 이미지 URL 검증. http(s) 프로토콜 + 허용된 확장자(jpg/jpeg/png/webp/gif)인지, 개수가
+     * MAX_IMAGE_COUNT(10)를 넘지 않는지만 확인한다. 실제 업로드 인프라(S3 등)가 아직 없어
+     * 클라이언트가 이미지 URL을 직접 넘기는 구조이므로 바이트 단위 파일 크기 검증은
+     * 이 단계에서 불가능 - 업로드 인프라가 붙으면 그쪽에서 크기 제한을 걸어야 한다.
+     */
+    private void validateImageUrls(List<String> imageUrls) {
+        if (imageUrls == null || imageUrls.isEmpty()) {
+            return;
+        }
+        if (imageUrls.size() > MAX_IMAGE_COUNT) {
+            throw new BusinessException(
+                    ErrorCode.PROPERTY_IMAGE_INVALID, "이미지는 최대 " + MAX_IMAGE_COUNT + "장까지 등록할 수 있습니다."
+            );
+        }
+        for (String imageUrl : imageUrls) {
+            if (imageUrl == null || !hasValidImageExtension(imageUrl) || !hasHttpProtocol(imageUrl)) {
+                throw new BusinessException(
+                        ErrorCode.PROPERTY_IMAGE_INVALID, "지원하지 않는 이미지 형식입니다: " + imageUrl
+                );
+            }
+        }
+    }
+
+    private boolean hasHttpProtocol(String imageUrl) {
+        String lower = imageUrl.toLowerCase();
+        return lower.startsWith("http://") || lower.startsWith("https://");
+    }
+
+    private boolean hasValidImageExtension(String imageUrl) {
+        String withoutQuery = imageUrl.split("[?#]", 2)[0];
+        int dotIndex = withoutQuery.lastIndexOf('.');
+        if (dotIndex < 0 || dotIndex == withoutQuery.length() - 1) {
+            return false;
+        }
+        String extension = withoutQuery.substring(dotIndex + 1).toLowerCase();
+        return ALLOWED_IMAGE_EXTENSIONS.contains(extension);
+    }
+
     private String buildNoticeIfNeeded(PropertyType propertyType, AddressResolutionResult addressResult) {
-        if (propertyType == PropertyType.DETACHED_HOUSE && addressResult.getRoadAddress() == null) {
-            return "단독/다가구는 지번 일부 비공개로 매칭 정확도가 낮을 수 있습니다.";
+        boolean noticeApplicableType = propertyType == PropertyType.DETACHED_HOUSE
+                || propertyType == PropertyType.MULTI_FAMILY;
+        if (noticeApplicableType && addressResult.getRoadAddress() == null) {
+            return "단독/다가구, 연립다세대는 지번 일부 비공개로 매칭 정확도가 낮을 수 있습니다.";
         }
         return null;
+    }
+
+    /**
+     * 동일 사용자·동일 거래유형의 중복 등록 여부. 도로명주소가 있으면 그걸 기준으로,
+     * 없으면(단독/다가구 등) 지번주소로 폴백해서 체크한다 - 이전에는 도로명주소가 없으면
+     * 중복 체크 자체가 완전히 스킵됐다.
+     */
+    private boolean isDuplicate(Long userId, TransactionType transactionType, AddressResolutionResult addressResult) {
+        if (addressResult.getRoadAddress() != null) {
+            return propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
+                    userId, transactionType, PropertyStatus.ACTIVE, addressResult.getRoadAddress()
+            );
+        }
+        if (addressResult.getJibunAddress() != null) {
+            return propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_JibunAddress(
+                    userId, transactionType, PropertyStatus.ACTIVE, addressResult.getJibunAddress()
+            );
+        }
+        return false;
     }
 }

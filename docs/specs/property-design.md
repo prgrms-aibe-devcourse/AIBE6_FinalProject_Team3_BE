@@ -24,28 +24,28 @@
 | 필수 입력값 확인 | ✅ (`@NotBlank`/`@NotNull`/`@Positive`) |
 | 거래 유형에 맞는 가격 정보 확인 | ✅ `validatePriceCombination` — JEONSE는 monthlyRent 입력 시 거부, MONTHLY_RENT는 monthlyRent 필수 |
 | 주소 정규화 + 좌표 변환(Kakao Map API) | ✅ `KakaoAddressClient` |
-| 동일 사용자 동일 조건 매물 중복 등록 확인 | **부분 구현** — "동일 사용자 + 동일 도로명주소 + 동일 거래유형"만 체크. 가격/면적은 조건에 포함 안 됨. **도로명주소가 없는 경우(단독/다가구는 지번만 있을 수 있음) 중복 체크 자체가 완전히 스킵됨** |
+| 동일 사용자 동일 조건 매물 중복 등록 확인 | **부분 구현** — "동일 사용자 + 동일 거래유형 + (도로명주소 있으면 도로명주소, 없으면 지번주소)"로 체크. 가격/면적은 조건에 포함 안 됨. ~~도로명주소가 없는 경우 중복 체크 자체가 완전히 스킵됨~~ → 지번주소 폴백으로 해소됨(`isDuplicate`) |
 | 매물 정보 저장 | ✅ |
-| 실거래가 조회 요청 | ❌ **국토부 실거래가 연동 자체가 구현되어 있지 않습니다.** 응답의 시세 비교 필드는 항상 `UNAVAILABLE` 고정값 |
-| 단독/다가구 지번 비공개 안내 문구 | **부분 구현** — 안내 문구가 `DETACHED_HOUSE`(단독)일 때만 나가고, **`MULTI_FAMILY`(다가구)는 조건에서 빠져 있음** |
+| 실거래가 조회 요청 | ✅ `market-data` 도메인(`MarketComparisonService`)이 등록 직후 국토부 실거래가와 실제로 비교해 `marketComparison`에 반영. 오피스텔/연립다세대만 실비교, 단독/다가구·월세는 항상 `UNAVAILABLE`(사유는 `message`) |
+| 단독/다가구 지번 비공개 안내 문구 | ✅ `DETACHED_HOUSE`(단독)와 `MULTI_FAMILY`(연립다세대) 둘 다 대상 |
 | 실패: 필수 입력값 누락 | ✅ 400 |
 | 실패: 잘못된 가격 정보 | ✅ 400 (`PROPERTY_INVALID_PRICE`) |
 | 실패: 주소 식별 실패 | ✅ 422 (`PROPERTY_ADDRESS_RESOLUTION_FAILED`) |
 | 실패: 지원하지 않는 주택 유형 | ⚠️ 전용 코드(`PROPERTY_TYPE_NOT_SUPPORTED`)는 정의돼 있지만 **실제로는 어디서도 쓰이지 않는 죽은 코드**입니다. `propertyType`이 enum이라 잘못된 값을 보내면 이 코드가 아니라 Jackson 파싱 단계에서 일반 400이 남 |
 | 실패: 동일 매물 중복 등록 | ✅ 409 (`PROPERTY_DUPLICATE`) — 단, 위에서 언급한 좁은 판단 기준 내에서만 |
-| 실패: 이미지 형식 또는 크기 오류 | ❌ **구현 없음.** 전용 코드(`PROPERTY_IMAGE_INVALID`)는 정의돼 있지만 실제 검증 로직이 전혀 없어 어떤 문자열이든 이미지 URL로 그대로 저장됨 |
+| 실패: 이미지 형식 또는 크기 오류 | **부분 구현** — 확장자 화이트리스트(jpg/jpeg/png/webp/gif) + http(s) 프로토콜 + 최대 10장 검증이 `PROPERTY_IMAGE_INVALID`(400)로 추가됨. **바이트 단위 파일 크기 검증은 여전히 불가능** — 실제 업로드 인프라(S3 등)가 없어 URL을 그대로 받는 구조라서 크기 자체를 알 수 없음 |
 
 ## 매물 목록 조회 (`GET /properties`) — 요구사항 대비
 
 | 요구사항 | 실제 구현 |
 |---|---|
 | 인증된 사용자가 등록한 매물만 조회 | ✅ |
-| 지역/면적/거래유형/주택유형/가격범위 검색 | ❌ **전혀 구현 안 됨.** 쿼리 파라미터 자체가 없고, 본인 소유 ACTIVE 매물 전체를 최신순으로 반환할 뿐 |
+| 지역/면적/거래유형/주택유형/가격범위 검색 | ❌ **여전히 구현 안 됨.** 검색 필터 쿼리 파라미터는 없고, 본인 소유 ACTIVE 매물 전체를 페이지네이션해서 반환할 뿐 |
 | 삭제된 매물 제외 | ✅ (`status = ACTIVE` 조건) |
-| 페이지네이션 | ❌ **구현 없음** — 전체 목록을 한 번에 반환 |
+| 페이지네이션 | ✅ `page`/`size`/`sort` 쿼리 파라미터(Spring Data `Pageable`) 지원, 기본값 `size=20`·`createdAt desc`. 응답이 `List<PropertyListResponse>`에서 `PageResponse<PropertyListResponse>`(`content`/`page`/`size`/`totalElements`/`totalPages`/`hasNext`)로 바뀐 **breaking change** — FE는 `$.data[...]`가 아니라 `$.data.content[...]`를 읽어야 함. 정렬은 `createdAt`/`deposit`/`area`만 허용(`PageableUtils.validateSort`), 최대 페이지 크기 100(`PageableUtils.validateMaxSize`) |
 | 지도 마커 정보 제공 | ✅ 각 항목에 좌표(`roadAddress`/`jibunAddress`, 위경도는 상세조회에만 포함 — 목록엔 주소 문자열만) — ⚠️ 목록 응답엔 위경도(latitude/longitude)가 없어 "지도 마커"로 바로 쓰기엔 부족할 수 있음, 확인 필요 |
 | 실패: 인증 실패 | ✅ 401 |
-| 실패: 잘못된 검색 조건 | ⚠️ 전용 코드(`PROPERTY_INVALID_SEARCH_CONDITION`)는 정의돼 있지만 검색 기능 자체가 없어 **도달 불가능한 죽은 코드** |
+| 실패: 잘못된 검색 조건 | ⚠️ 허용되지 않은 정렬 필드는 이제 `INVALID_SORT_FIELD`(400)로, 페이지 크기 초과(100장 초과)는 `BAD_REQUEST`(400)로 실제로 막힘. 다만 `PROPERTY_INVALID_SEARCH_CONDITION`(size≤0 가드)은 `@PageableDefault`를 쓰는 현재 컨트롤러 흐름상 실질적으로 도달 불가능한 방어 코드로 남아있음 |
 
 ## 매물 상세 조회 (`GET /properties/{propertyId}`) — 요구사항 대비
 
@@ -54,10 +54,10 @@
 | 매물 존재 확인 | ✅ 404(`PROPERTY_NOT_FOUND`, 삭제된 매물 포함) |
 | 접근 권한 확인 | ✅ 403(`PROPERTY_ACCESS_DENIED`) |
 | 매물 기본 정보 + 주소 정보 조회 | ✅ |
-| 실거래가 비교 결과 조회 | ❌ 항상 `UNAVAILABLE` 고정값 (등록 때와 동일) |
-| 위험 신호와 안전성 정보 조회 | ❌ **risk-analysis 도메인 자체가 아직 코드베이스에 없습니다** (`com.algogyeyak.risk...` 패키지 없음) — 응답에 관련 필드 자체가 없음 |
-| 임장 체크리스트 생성 여부 확인 | ❌ **매물 상세 응답에 포함 안 됨.** 체크리스트 자체는 `checklist` 도메인으로 별도 존재하지만(`GET /checklists`가 매물별 체크리스트 상태를 따로 제공), 매물 상세조회 API와는 연동되어 있지 않음 |
-| 누적 신고 여부(존재 유무) 조회 | ❌ **구현 없음.** `PropertyReport`가 있어도 상세 응답에 반영되지 않음 |
+| 실거래가 비교 결과 조회 | ✅ 등록 때와 동일하게 `MarketComparisonService.compare()`를 조회 시점마다 다시 계산해 반환(결과를 저장해두지 않고 매번 실시간 재계산 — `market-data-design.md` 참고) |
+| 위험 신호와 안전성 정보 조회 | ❌ **risk-analysis 도메인 자체는 별도로 존재하지만(`com.algogyeyak.riskanalysis.*`), 매물 상세 응답과는 아직 연동되어 있지 않습니다** — `PropertyDetailResponse`에 관련 필드 자체가 없음 |
+| 임장 체크리스트 생성 여부 확인 | ✅ `PropertyDetailResponse.checklistCreated`(boolean) 추가 — `ChecklistRepository.findByPropertyId(propertyId).isPresent()`로 조회 시점마다 판단 |
+| 누적 신고 여부(존재 유무) 조회 | ✅ `PropertyDetailResponse.reported`(boolean) 추가 — `PropertyReportRepository.existsByPropertyIdAndReporterId(propertyId, userId)`로 판단(본인이 신고했는지 기준 — 아래 "자가 플래그 구조" 참고) |
 | 실패: 존재하지 않는 매물 | ✅ 404 |
 | 실패: 삭제된 매물 | ✅ 404 (존재하지 않는 매물과 동일 코드로 처리) |
 | 실패: 접근 권한 없음 | ✅ 403 |
@@ -96,14 +96,14 @@
 |---|---|
 | 매물 존재/신고 가능 상태 확인 | ✅ 404 (존재하지 않거나 삭제된 매물) |
 | 동일 사용자 동일 매물 중복 신고 확인 | ✅ 409 (`REPORT_DUPLICATE`) |
-| "기타" 사유 직접 입력 텍스트 길이 검증 | ❌ **길이 검증이 없습니다.** 빈 문자열/공백 여부만 확인(`REPORT_DETAIL_REQUIRED`) — "기타 사유 입력값 길이 초과" 실패 케이스는 실제로 발생하지 않음 |
+| "기타" 사유 직접 입력 텍스트 길이 검증 | ✅ `ETC` 사유일 때 500자 초과 시 `REPORT_DETAIL_TOO_LONG`(400) — `detail` 컬럼 `@Column(length = 500)`과 동일한 상한. `ETC`가 아닌 사유는 엔티티 생성자에서 `detail`이 어차피 `null`로 버려지므로 검증 대상에서 제외 |
 | 신고를 접수 상태로 저장 | ✅ `PropertyReportStatus.RECEIVED` |
 | 중복 등록 신고 ≠ risk-analysis 자동 탐지 (역할 분리) | ✅ 코드 주석에 명시적으로 설계 의도가 남아있고, 실제로 `PropertyReport`는 risk-analysis와 완전히 분리된 별도 테이블/서비스 |
 | 실패: 존재하지 않는 매물 | ✅ 404 |
 | 실패: 삭제된 매물 | ✅ 404 |
 | 실패: 동일 사용자의 중복 신고 | ✅ 409 |
 | 실패: 신고 사유 누락 | ✅ 400 (`REPORT_REASON_REQUIRED`) |
-| 실패: 기타 사유 입력값 길이 초과 | ❌ 위 참고 — 발생 불가 |
+| 실패: 기타 사유 입력값 길이 초과 | ✅ 400 (`REPORT_DETAIL_TOO_LONG`) |
 
 ⚠️ **확인 필요**: 실제 구현은 **"본인이 등록한 매물을 본인이 신고"하는 자가 플래그 구조**입니다(신고 시 소유권 검증(`PROPERTY_ACCESS_DENIED`)이 걸려있어, 타인의 매물은 애초에 신고 대상으로 지정할 수 없음). 이 앱이 애초에 "본인 소유 매물만 조회 가능한 개인 분석 도구" 구조라 자연스러운 설계일 수 있지만, 요구사항 문서의 "누적 신고 여부"·"신고자 정보 비노출" 문구는 여러 사용자가 같은 매물을 볼 수 있는 마켓플레이스 형태를 전제로 한 것처럼 읽혀서, 원래 의도가 무엇이었는지 확인이 필요합니다.
 
@@ -113,7 +113,7 @@
 |---|---|---|
 | 본인만 조회/수정/삭제 | O | ✅ |
 | 권한 없는 사용자에게 상세정보/존재여부 미노출 | O | ⚠️ 존재여부는 403/404 구분으로 간접 노출됨(위 참고) |
-| 이미지 형식/크기 검증 | O | ❌ 미구현 |
+| 이미지 형식/크기 검증 | O | ⚠️ 부분 구현 — 형식(확장자/프로토콜)·개수는 검증하지만, 실제 업로드 인프라 부재로 크기(바이트) 검증은 불가능 |
 | 신고자 식별정보 비노출 | O | ✅ `PropertyReportResponse`에 `reporterId` 없음 (다만 애초에 신고 열람 API 자체가 없어 검증 대상이 사실상 없음) |
 | 보증금/월세/가격/면적 0 이상 | O(0 이상) | ⚠️ 실제는 `@Positive`(0 초과) — "0"을 허용하는지 여부가 요구사항과 다름 |
 | 거래유형별 필수 가격정보 다르게 검증 | O | ✅ |
@@ -122,33 +122,35 @@
 | 동일 사용자·동일 매물 중복 신고 방지 | O | ✅ |
 | 주소 검색 기능 제공 | O | ✅ Kakao 연동 |
 | 거래유형별 필요 입력 항목만 표시 | O | 프론트 책임 영역으로 추정 — 확인 필요 |
-| 시세조회 실패가 등록 실패로 오인되지 않게 안내 | O | 시세조회 자체가 상시 `UNAVAILABLE`이라 이 요구사항이 현재는 의미가 없음 |
+| 시세조회 실패가 등록 실패로 오인되지 않게 안내 | O | ✅ `market-data` 쪽 국토부/카카오 API 호출 실패는 내부에서 흡수해 `UNAVAILABLE`로 degrade — 등록 자체는 항상 성공(`MolitRentClientImpl`/`KakaoRegionCodeClientImpl`이 예외를 삼킴) |
 | 신고 사유 중복탐지 문구 구분 안내 | O | risk-analysis 자체가 없어 해당 없음 |
-| 동일 매물 반복 등록 요청 시 중복 저장 방지 | O | ⚠️ 부분 구현(도로명주소 있을 때만 동작, 위 참고) |
+| 동일 매물 반복 등록 요청 시 중복 저장 방지 | O | ✅ 도로명주소 없으면 지번주소로 폴백해서 체크(위 참고) |
 | 수정 성공 + 위험신호 재계산 실패 구분 | O | 해당 기능 자체가 없어 N/A |
-| 목록 조회에 페이지네이션 | O | ❌ 미구현 |
+| 목록 조회에 페이지네이션 | O | ✅ `page`/`size`/`sort` 지원(위 참고) |
 | 목록 조회 시 불필요한 데이터 미포함 | O | ✅ `PropertyListResponse`가 최소 필드만 포함 |
 
 ## 요구사항에 없던 추가 구현
 
-- `PropertyRegisterResponse`/`PropertyDetailResponse`에 `marketComparison` 필드가 항상 존재 — 실거래가 연동 완료 전까지 `UNAVAILABLE` 고정값을 미리 내려주는 자리로 마련해둠(향후 실거래가 연동 시 교체 예정으로 보임)
+- `PropertyRegisterResponse`/`PropertyDetailResponse`의 `marketComparison`은 `market-data` 도메인이 실제로 계산한 결과다. `radiusMeters`(적용된 반경 단계)까지 포함해서 내려준다 — 자세한 판정 로직은 `market-data-design.md` 참고
+- 목록 조회 응답이 `PageResponse<PropertyListResponse>`로 감싸지면서 `totalElements`/`totalPages`/`hasNext` 등 요구사항 문서엔 없던 페이지 메타정보가 함께 내려감
 
 ## 남은 이슈 / 확인 필요 총정리
 
 1. 매매(SALE) 거래유형과 `askingPrice`가 아예 없음 — 전월세만 지원. 서비스 타겟에 맞춘 의도적 축소인지 확인
-2. 국토부 실거래가 연동 자체가 미구현 — 시세 비교는 항상 `UNAVAILABLE`
-3. risk-analysis(위험 신호·안전성 정보) 도메인이 아직 코드베이스에 없음
-4. 매물 상세 응답에 임장 체크리스트 생성 여부가 포함되지 않음 (체크리스트 도메인과 연동 안 됨)
-5. 매물 상세 응답에 누적 신고 여부가 포함되지 않음
+2. ~~국토부 실거래가 연동 자체가 미구현~~ → `market-data` 도메인으로 해소됨(`market-data-design.md` 참고). 남은 건 매물 조회마다 실시간 재계산하는 구조라 트래픽 늘면 캐싱/저장 전환이 필요할 수 있다는 점
+3. risk-analysis(위험 신호·안전성 정보) 도메인 자체는 별도로 존재하지만, 매물 상세 응답과는 아직 연동되어 있지 않음
+4. ~~매물 상세 응답에 임장 체크리스트 생성 여부가 포함되지 않음~~ → `checklistCreated` 필드 추가로 해소됨
+5. ~~매물 상세 응답에 누적 신고 여부가 포함되지 않음~~ → `reported` 필드 추가로 해소됨(단, 아래 6번의 자가 플래그 구조라 "본인이 신고했는지" 기준)
 6. 매물 신고가 "본인 매물을 본인이 신고"하는 자가 플래그 구조 — 원래 의도(마켓플레이스식 신고였는지)를 확인 필요
-7. 매물 목록 조회에 지역/면적/거래유형/주택유형/가격범위 검색과 페이지네이션이 전혀 없음
+7. 매물 목록 조회에 지역/면적/거래유형/주택유형/가격범위 **검색**이 전혀 없음(페이지네이션은 아래 7-1로 분리 해소)
+   - 7-1. ~~페이지네이션이 전혀 없음~~ → `page`/`size`/`sort` 지원으로 해소됨. 단, 응답이 `List`에서 `PageResponse`로 바뀐 breaking change라 FE 연동 확인 필요
 8. `PropertyType`에 아파트(APARTMENT)가 없음 — 의도된 범위인지 확인
 9. 매물 수정 시 주소/매물유형/거래유형 변경이 애초에 불가능한 구조 — 요구사항의 "주소 변경 시 재정규화" 시나리오 자체가 발생할 수 없음
-10. 이미지 형식/크기 검증 미구현 — `PROPERTY_IMAGE_INVALID` 코드는 정의만 되어 있고 실제로 쓰이지 않음
+10. ~~이미지 형식/크기 검증 미구현~~ → 형식(확장자 화이트리스트/프로토콜)·개수(최대 10장) 검증은 추가됨. **바이트 크기 검증은 여전히 불가능** — 실제 업로드 인프라(S3 등)가 아직 확정되지 않아서, 담당자가 정해지고 인프라가 붙은 이후에나 처리 가능
 11. 등록 이후 이미지 추가/변경/삭제가 불가능함
-12. 매물 중복 등록 판단이 도로명주소가 있을 때만 동작 — 지번주소만 있는 단독/다가구는 중복 체크가 스킵됨
-13. 매물 신고 "기타" 사유의 입력값 길이 제한 검증이 없음 — 관련 실패 케이스가 실제로 발생하지 않음
-14. `PROPERTY_TYPE_NOT_SUPPORTED`/`PROPERTY_INVALID_SEARCH_CONDITION` 에러코드가 정의만 되어 있고 실제 로직에서 전혀 쓰이지 않는 죽은 코드 상태
-15. 단독/다가구 매칭정확도 안내 문구가 `DETACHED_HOUSE`에만 나가고 `MULTI_FAMILY`(다가구)는 빠져 있음
+12. ~~매물 중복 등록 판단이 도로명주소가 있을 때만 동작~~ → 지번주소 폴백으로 해소됨
+13. ~~매물 신고 "기타" 사유의 입력값 길이 제한 검증이 없음~~ → 500자 제한(`REPORT_DETAIL_TOO_LONG`)으로 해소됨
+14. `PROPERTY_TYPE_NOT_SUPPORTED`는 여전히 죽은 코드. `PROPERTY_INVALID_SEARCH_CONDITION`은 서비스 코드상 size≤0 가드로 연결은 됐지만 `@PageableDefault`를 쓰는 현재 컨트롤러 흐름상 실질적으로 도달하기 어려움
+15. ~~단독/다가구 매칭정확도 안내 문구가 `DETACHED_HOUSE`에만 나가고 `MULTI_FAMILY`는 빠져 있음~~ → 둘 다 대상으로 해소됨
 16. "권한 없는 사용자에게 존재 여부를 노출하지 않는다"는 요구사항과 달리, 실제로는 404(존재하지 않음)와 403(권한 없음)을 구분해서 응답함
-17. 보증금/면적 검증이 "0 이상"이 아니라 "0 초과"(`@Positive`)로 구현되어 있음
+17. 보증금/면적 검증이 "0 이상"이 아니라 "0 초과"(`@Positive`)로 구현되어 있음 — `PropertyRegisterRequest` Javadoc에 의도적 결정으로 문서화되어 있으나, 요구사항 문서와의 차이 자체는 남아있어 확인 필요
