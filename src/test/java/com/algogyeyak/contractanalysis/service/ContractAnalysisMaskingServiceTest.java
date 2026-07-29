@@ -198,6 +198,17 @@ class ContractAnalysisMaskingServiceTest {
         assertEquals(0, response.maskedCount());
     }
 
+    @Test
+    void doesNotMaskWhenLabelIsFollowedByParticleWithoutDelimiter() {
+        // "임차인은"/"임대인의"처럼 라벨에 조사가 바로 붙는 경우, 구분자(콜론/괄호)나
+        // 공백 없이 이어지므로 뒤따르는 일반 명사("계약", "동의")를 이름으로 오인해서는 안 된다.
+        ContractAnalysisMaskingResponse response =
+                mask("제3조 임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다.");
+
+        assertEquals("제3조 임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다.", response.maskedText());
+        assertEquals(0, response.maskedCount());
+    }
+
     // ---------- 처리 순서 / 충돌 방지 ----------
 
     @Test
