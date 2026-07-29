@@ -7,6 +7,7 @@ import com.algogyeyak.contractanalysis.dto.ContractAnalysisMaskingRequest;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisMaskingResponse;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 class ContractAnalysisMaskingServiceTest {
@@ -206,6 +207,21 @@ class ContractAnalysisMaskingServiceTest {
                 mask("제3조 임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다.");
 
         assertEquals("제3조 임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다.", response.maskedText());
+        assertEquals(0, response.maskedCount());
+    }
+
+    @Test
+    @Disabled(
+            "Known limitation: 라벨(임대인/임차인)에 조사 없이 공백만으로 뒤따르는 경우"
+                    + "(예: \"임차인 계약 기간 중\")는 콜론/괄호 없이 공백만으로 실제 이름이 붙는 정상 케이스"
+                    + "(예: \"임대인 홍길동\")와 구조가 동일해 정규식만으로 일반 명사와 이름을 구분할 수 없다."
+                    + " 마스킹 완료 후 사용자 확인(userConfirmed) 단계에서 사람이 최종 검수하므로,"
+                    + " 이 케이스는 정규식 레벨에서 해결하지 않고 known limitation으로 남겨둔다."
+    )
+    void doesNotMaskWhenLabelIsFollowedBySpaceOnlyThenCommonNoun() {
+        ContractAnalysisMaskingResponse response = mask("임차인 계약 기간 중 해지할 수 없다.");
+
+        assertEquals("임차인 계약 기간 중 해지할 수 없다.", response.maskedText());
         assertEquals(0, response.maskedCount());
     }
 
