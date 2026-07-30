@@ -129,14 +129,14 @@ public class ChecklistService {
      */
     public ChecklistResult getChecklistResult(Long userId, Long checklistId) {
         Checklist checklist = checklistRepository.findById(checklistId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHECKLIST_NOT_FOUND));
 
         if (!checklist.getUser().getId().equals(userId)) {
-            throw new BusinessException(ErrorCode.FORBIDDEN, "본인의 체크리스트만 조회할 수 있습니다.");
+            throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED, "본인의 체크리스트만 조회할 수 있습니다.");
         }
 
         if (checklist.getProperty().isDeleted()) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다.");
+            throw new BusinessException(ErrorCode.CHECKLIST_NOT_FOUND);
         }
 
         return checklist.computeResult();

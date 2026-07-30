@@ -361,19 +361,19 @@ class ChecklistServiceTest {
     }
 
     @Test
-    @DisplayName("존재하지 않는 체크리스트의 결과를 조회하면 NOT_FOUND 예외가 발생한다")
+    @DisplayName("존재하지 않는 체크리스트의 결과를 조회하면 CHECKLIST_NOT_FOUND 예외가 발생한다")
     void getChecklistResultThrowsWhenChecklistNotFound() {
         when(checklistRepository.findById(999L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> checklistService.getChecklistResult(1L, 999L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 
     @Test
-    @DisplayName("본인 소유가 아닌 체크리스트의 결과를 조회하면 FORBIDDEN 예외가 발생한다")
+    @DisplayName("본인 소유가 아닌 체크리스트의 결과를 조회하면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
     void getChecklistResultThrowsWhenNotOwner() {
         User owner = user(1L);
         Checklist checklist = checklistWithOneCheckItem(owner);
@@ -383,12 +383,12 @@ class ChecklistServiceTest {
         assertThatThrownBy(() -> checklistService.getChecklistResult(999L, 100L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
                 );
     }
 
     @Test
-    @DisplayName("매물이 삭제된 상태면 결과 조회 시 NOT_FOUND 예외가 발생한다")
+    @DisplayName("매물이 삭제된 상태면 결과 조회 시 CHECKLIST_NOT_FOUND 예외가 발생한다")
     void getChecklistResultThrowsWhenPropertyDeleted() {
         User user = user(1L);
         Property deletedProperty = property(10L, 1L);
@@ -400,7 +400,7 @@ class ChecklistServiceTest {
         assertThatThrownBy(() -> checklistService.getChecklistResult(1L, 100L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 
