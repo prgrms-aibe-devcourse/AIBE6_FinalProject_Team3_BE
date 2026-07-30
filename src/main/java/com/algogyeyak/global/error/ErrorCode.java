@@ -19,6 +19,7 @@ public enum ErrorCode {
     AUTH_TOKEN_MISSING(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_MISSING", "인증 토큰이 없습니다."),
     AUTH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "유효하지 않은 토큰입니다."),
     AUTH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_EXPIRED", "토큰이 만료되었습니다."),
+    AUTH_EMAIL_REQUIRED_FOR_PASSWORD(HttpStatus.BAD_REQUEST, "AUTH_EMAIL_REQUIRED_FOR_PASSWORD", "이메일이 연동되지 않은 계정은 비밀번호를 설정할 수 없습니다."),
 
     // Property 도메인
     PROPERTY_NOT_FOUND(HttpStatus.NOT_FOUND, "PROPERTY_NOT_FOUND", "존재하지 않는 매물입니다."),
