@@ -10,20 +10,22 @@
 
 | 요구사항 | 실제 구현 |
 |---|---|
-| `User`(id, email, passwordHash, nickname, status) | 동일 + `provider`, `providerId`, `role`, `profileImageUrl`, `createdAt`/`updatedAt` 추가 |
+| `User`(id, email, passwordHash, nickname, status) | 동일 + `role`, `profileImageUrl`, `createdAt`/`updatedAt` 추가 (`provider`/`providerId`는 2026-07-30 제거 — 아래 참고) |
 | `OAuthAccount`(별도 엔티티: id, userId, provider, providerUserId) | ✅ **(2026-07-28 구현 완료)** `UserSocialAccount`(`user_social_accounts`)로 구현. 아래 참고 |
 
 **(2026-07-28) 다중 소셜 연동 구현** — 요구사항의 `OAuthAccount`를 `UserSocialAccount` 엔티티로 구현했다.
 
-- **역할 분리**: `User.provider`/`providerId`는 그대로 남겨뒀지만 의미가 바뀌었다 — 더 이상 "유일한 연동 정보"가 아니라 **"가장 최근에 로그인에 쓴 수단"만 가리키는 캐시**다. "이 유저가 실제로 연동해둔 모든 소셜 계정 목록"의 진짜 소스는 `UserSocialAccount`. LOCAL(이메일/비밀번호)은 이 테이블에 포함하지 않는다 — `User` 자체가 이미 email+passwordHash로 충분히 표현하고, 외부 provider_id 같은 게 애초에 없기 때문
+- **역할 분리**: "이 유저가 실제로 연동해둔 모든 소셜 계정 목록"의 유일한 소스는 `UserSocialAccount`다. LOCAL(이메일/비밀번호)은 이 테이블에 포함하지 않는다 — `User` 자체가 이미 email+passwordHash로 충분히 표현하고, 외부 provider_id 같은 게 애초에 없기 때문
 - **제약**: `(provider, provider_id)` 전역 유니크(같은 소셜 계정이 두 User에게 동시에 연결 불가), `(user_id, provider)` 유니크(한 User가 같은 provider를 두 개 연동 불가)
-- **`CustomOAuth2UserService.findOrCreateUser` 흐름 변경**:
-  1. `UserSocialAccount`에서 `(provider, providerId)`로 먼저 조회 → 있으면 그 User 반환(이미 연동된 provider로의 재로그인). 이때 `User.provider`가 지금 로그인에 쓴 provider와 다르면(다른 이미-연동된 수단으로 로그인) "최근 로그인 수단" 캐시만 갱신하고 새 연동은 만들지 않음
-  2. 없으면 기존과 동일하게 검증된 이메일로 기존 계정(로컬 또는 다른 소셜) 매칭 시도 → 매치되면 새 `UserSocialAccount`를 추가(기존 연동은 그대로 유지 — 한 계정에 구글+카카오가 동시에 남는다) + "최근 로그인 수단" 캐시를 이번 provider로 갱신
+- **`CustomOAuth2UserService.findOrCreateUser` 흐름**:
+  1. `UserSocialAccount`에서 `(provider, providerId)`로 먼저 조회 → 있으면 그 User 반환(이미 연동된 provider로의 재로그인)
+  2. 없으면 기존과 동일하게 검증된 이메일로 기존 계정(로컬 또는 다른 소셜) 매칭 시도 → 매치되면 새 `UserSocialAccount`를 추가(기존 연동은 그대로 유지 — 한 계정에 구글+카카오가 동시에 남는다)
   3. 둘 다 없으면 신규 User 생성 + 그 User의 첫 `UserSocialAccount` 생성(같은 REQUIRES_NEW 트랜잭션에서 함께 커밋 — 항상 짝으로 존재해야 함)
 - **동시성**: 신규 생성 시 유니크 제약 충돌 복구는 기존 패턴(REQUIRES_NEW 격리 + 재조회)을 그대로 따름. 기존 계정에 새 provider를 연동할 때의 레이스(같은 계정에 동시에 같은 provider 연동 시도, 극히 드묾)도 같은 패턴으로 방어
 - **마이그레이션**: 이 프로젝트는 Flyway/Liquibase 없이 Hibernate `ddl-auto`로 스키마를 관리하고 있어(다른 테이블들과 동일), 새 테이블은 별도 마이그레이션 스크립트 없이 자동 생성됨. 기존에 쌓인 실사용자 데이터가 없다는 전제(H2는 인메모리, 실 운영 배포 전 단계)라 과거 `users.provider`/`provider_id`를 `user_social_accounts`로 백필하는 마이그레이션은 별도로 작성하지 않음 — 만약 이미 운영 데이터가 있다면 배포 전에 백필 스크립트가 필요함
 - 테스트: `CustomOAuth2UserServiceTest`에 다중 연동 시나리오 2개 추가(이미 연동된 provider로 재로그인 시 재연동 안 함, 두 번째 provider 연동 후에도 첫 provider가 여전히 유효), `CustomOAuth2UserServiceConcurrentLoginIntegrationTest`도 `UserSocialAccount` 기준으로 갱신
+
+**(2026-07-30) `User.provider`/`providerId` 컬럼 제거** — 다중 소셜 연동 도입 이후 "가장 최근에 로그인에 쓴 수단"만 가리키는 캐시로 남겨뒀었지만, 실제 조회/판단 로직 어디에서도 읽지 않는 죽은 필드였다(연동 판단은 전부 `UserSocialAccount` 기준). `User` 엔티티와 `uk_user_provider_provider_id` 유니크 제약을 제거했고, `AdminAccountSeeder`의 "실제 소셜 사용자 이메일과 겹침" 가드도 `user.getProvider() != LOCAL` 대신 `userSocialAccountRepository.existsByUserId(user.getId())`(소셜 계정이 하나라도 연동돼 있으면 건드리지 않음)로 대체했다. 이 프로젝트엔 아직 Flyway/Liquibase가 없어 운영 DB 스키마는 수동 관리 대상이다 — 이미 배포된 환경이 있다면 `ALTER TABLE users DROP COLUMN provider, DROP COLUMN provider_id`(+ 유니크 제약 드롭)를 별도로 실행해야 한다.
 
 ## 이메일 회원가입 — 요구사항 대비
 

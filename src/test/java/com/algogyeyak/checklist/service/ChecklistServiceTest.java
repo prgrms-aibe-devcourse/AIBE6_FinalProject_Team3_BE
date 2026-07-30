@@ -20,7 +20,6 @@ import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,7 +47,7 @@ class ChecklistServiceTest {
             new ChecklistService(checklistRepository, templateRepository, userRepository, propertyRepository);
 
     private User user(Long id) {
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         ReflectionTestUtils.setField(user, "id", id);
         return user;
     }
