@@ -2,6 +2,7 @@ package com.algogyeyak.property.controller;
 
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.response.ApiResponse;
+import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
@@ -9,8 +10,10 @@ import com.algogyeyak.property.dto.PropertyRegisterResponse;
 import com.algogyeyak.property.dto.PropertyUpdateRequest;
 import com.algogyeyak.property.service.PropertyService;
 import jakarta.validation.Valid;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -41,12 +44,14 @@ public class PropertyController {
 
     /**
      * 본인이 등록한 매물 목록 조회. (개인 분석 도구 성격상 전체 공개 매물 검색이 아니라 본인 소유 매물만 반환)
+     * 기본 정렬은 등록일 최신순, 기본 페이지 크기는 20 (최대 100 - PageableUtils.validateMaxSize).
      */
     @GetMapping
-    public ResponseEntity<ApiResponse<List<PropertyListResponse>>> list(
-            @AuthenticationPrincipal JwtUserPrincipal principal
+    public ResponseEntity<ApiResponse<PageResponse<PropertyListResponse>>> list(
+            @AuthenticationPrincipal JwtUserPrincipal principal,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
-        List<PropertyListResponse> response = propertyService.getMyProperties(principal.userId());
+        PageResponse<PropertyListResponse> response = propertyService.getMyProperties(principal.userId(), pageable);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

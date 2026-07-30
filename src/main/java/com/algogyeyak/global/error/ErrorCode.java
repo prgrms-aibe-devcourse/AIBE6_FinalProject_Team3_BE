@@ -26,6 +26,9 @@ public enum ErrorCode {
     PROPERTY_ACCESS_DENIED(HttpStatus.FORBIDDEN, "PROPERTY_ACCESS_DENIED", "본인이 등록한 매물만 접근할 수 있습니다."),
     PROPERTY_REQUIRED_FIELD_MISSING(HttpStatus.BAD_REQUEST, "PROPERTY_REQUIRED_FIELD_MISSING", "필수 입력값이 누락되었습니다."),
     PROPERTY_INVALID_PRICE(HttpStatus.BAD_REQUEST, "PROPERTY_INVALID_PRICE", "거래 유형에 맞지 않는 가격 정보입니다."),
+    // propertyType이 enum 타입이라 잘못된 값은 Jackson 파싱 단계(HttpMessageNotReadableException)에서
+    // 걸러져 이 코드까지 도달하지 않는다 - 의도적으로 유지한다. String으로 바꿔 직접 검증하는 것보다
+    // enum 타입 안전성을 유지하는 게 낫다고 판단했다(2026-07-28 property-domain-gaps-cleanup 검토).
     PROPERTY_TYPE_NOT_SUPPORTED(HttpStatus.BAD_REQUEST, "PROPERTY_TYPE_NOT_SUPPORTED", "지원하지 않는 매물 유형입니다."),
     PROPERTY_ADDRESS_RESOLUTION_FAILED(HttpStatus.UNPROCESSABLE_CONTENT, "PROPERTY_ADDRESS_RESOLUTION_FAILED", "입력한 주소를 확인할 수 없습니다."),
     PROPERTY_DUPLICATE(HttpStatus.CONFLICT, "PROPERTY_DUPLICATE", "이미 동일한 조건으로 등록된 매물이 있습니다."),
@@ -36,7 +39,12 @@ public enum ErrorCode {
     // Property 신고(Report) 하위 기능
     REPORT_REASON_REQUIRED(HttpStatus.BAD_REQUEST, "REPORT_REASON_REQUIRED", "신고 사유를 선택해주세요."),
     REPORT_DETAIL_REQUIRED(HttpStatus.BAD_REQUEST, "REPORT_DETAIL_REQUIRED", "기타 사유 선택 시 상세 내용을 입력해주세요."),
+    REPORT_DETAIL_TOO_LONG(HttpStatus.BAD_REQUEST, "REPORT_DETAIL_TOO_LONG", "상세 내용은 500자를 넘을 수 없습니다."),
     REPORT_DUPLICATE(HttpStatus.CONFLICT, "REPORT_DUPLICATE", "이미 신고한 매물입니다."),
+
+    // Checklist 도메인
+    CHECKLIST_NOT_FOUND(HttpStatus.NOT_FOUND, "CHECKLIST_NOT_FOUND", "체크리스트를 찾을 수 없습니다."),
+    CHECKLIST_ITEM_NOT_FOUND(HttpStatus.NOT_FOUND, "CHECKLIST_ITEM_NOT_FOUND", "체크리스트 항목을 찾을 수 없습니다."),
 
     // Contract-Analysis 도메인
     CONTRACT_ANALYSIS_INVALID_INPUT(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_INVALID_INPUT", "입력(이미지 또는 텍스트)이 없습니다."),

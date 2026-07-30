@@ -2,6 +2,7 @@ package com.algogyeyak.riskanalysis.entity;
 
 import com.algogyeyak.riskanalysis.enums.RiskCheckReason;
 import com.algogyeyak.riskanalysis.enums.RiskCheckStatus;
+import com.algogyeyak.riskanalysis.enums.RiskSignalType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -12,7 +13,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "property_risk_checks", uniqueConstraints = {
-        @UniqueConstraint(columnNames = "property_id")
+        @UniqueConstraint(columnNames = {"property_id", "signal_type"})
 })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -24,6 +25,10 @@ public class PropertyRiskCheck {
 
     @Column(name = "property_id", nullable = false)
     private Long propertyId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "signal_type", nullable = false)
+    private RiskSignalType signalType;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -39,19 +44,21 @@ public class PropertyRiskCheck {
     private LocalDateTime checkedAt;
 
     @Builder
-    private PropertyRiskCheck(Long propertyId, RiskCheckStatus status,
+    private PropertyRiskCheck(Long propertyId, RiskSignalType signalType, RiskCheckStatus status,
                               RiskCheckReason reason, String policyVersion,
                               LocalDateTime checkedAt) {
         this.propertyId = propertyId;
+        this.signalType = signalType;
         this.status = status;
         this.reason = reason;
         this.policyVersion = policyVersion;
         this.checkedAt = checkedAt;
     }
 
-    public static PropertyRiskCheck success(Long propertyId, String policyVersion) {
+    public static PropertyRiskCheck success(Long propertyId, RiskSignalType signalType, String policyVersion) {
         return PropertyRiskCheck.builder()
                 .propertyId(propertyId)
+                .signalType(signalType)
                 .status(RiskCheckStatus.SUCCESS)
                 .reason(null)
                 .policyVersion(policyVersion)
@@ -59,9 +66,10 @@ public class PropertyRiskCheck {
                 .build();
     }
 
-    public static PropertyRiskCheck undeterminable(Long propertyId, RiskCheckReason reason, String policyVersion) {
+    public static PropertyRiskCheck undeterminable(Long propertyId, RiskSignalType signalType, RiskCheckReason reason, String policyVersion) {
         return PropertyRiskCheck.builder()
                 .propertyId(propertyId)
+                .signalType(signalType)
                 .status(RiskCheckStatus.UNDETERMINABLE)
                 .reason(reason)
                 .policyVersion(policyVersion)
@@ -69,9 +77,10 @@ public class PropertyRiskCheck {
                 .build();
     }
 
-    public static PropertyRiskCheck failed(Long propertyId, RiskCheckReason reason, String policyVersion) {
+    public static PropertyRiskCheck failed(Long propertyId, RiskSignalType signalType, RiskCheckReason reason, String policyVersion) {
         return PropertyRiskCheck.builder()
                 .propertyId(propertyId)
+                .signalType(signalType)
                 .status(RiskCheckStatus.FAILED)
                 .reason(reason)
                 .policyVersion(policyVersion)

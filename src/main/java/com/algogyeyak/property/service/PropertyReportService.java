@@ -24,6 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class PropertyReportService {
 
+    // "기타" 사유 등 자유 입력 상세 내용의 최대 길이. 요구사항의 "기타 사유 입력값 길이 초과" 실패
+    // 케이스가 실제로는 발생하지 않는 죽은 케이스였어서, 실제로 검증하도록 추가했다.
+    private static final int MAX_DETAIL_LENGTH = 500;
+
     private final PropertyRepository propertyRepository;
     private final PropertyReportRepository propertyReportRepository;
 
@@ -47,6 +51,12 @@ public class PropertyReportService {
         if (request.reason() == PropertyReportReason.ETC
                 && (request.detail() == null || request.detail().isBlank())) {
             throw new BusinessException(ErrorCode.REPORT_DETAIL_REQUIRED);
+        }
+
+        // detail은 ETC가 아닌 사유면 엔티티 생성자에서 어차피 null로 버려지므로, 그 경우까지
+        // 길이 초과로 막을 필요는 없다 - 실제로 저장/사용되는 ETC 케이스만 검증한다.
+        if (request.reason() == PropertyReportReason.ETC && request.detail().length() > MAX_DETAIL_LENGTH) {
+            throw new BusinessException(ErrorCode.REPORT_DETAIL_TOO_LONG);
         }
 
         if (propertyReportRepository.existsByPropertyIdAndReporterId(propertyId, userId)) {

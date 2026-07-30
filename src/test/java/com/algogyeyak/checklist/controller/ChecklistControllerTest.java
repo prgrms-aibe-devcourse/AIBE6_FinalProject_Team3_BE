@@ -157,7 +157,8 @@ class ChecklistControllerTest {
                 .andExpect(jsonPath("$.data.totalCount").value(2))
                 .andExpect(jsonPath("$.data.requiredMissingCount").value(1))
                 .andExpect(jsonPath("$.data.issueCount").value(0))
-                .andExpect(jsonPath("$.data.message").doesNotExist());
+                .andExpect(jsonPath("$.data.message").doesNotExist())
+                .andExpect(jsonPath("$.data.disclaimer").value("이 결과는 매물의 안전을 보장하지 않습니다."));
     }
 
     @Test
@@ -171,7 +172,8 @@ class ChecklistControllerTest {
                         .cookie(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("NOT_STARTED"))
-                .andExpect(jsonPath("$.data.message").value("체크리스트를 시작해보세요"));
+                .andExpect(jsonPath("$.data.message").value("체크리스트를 시작해보세요"))
+                .andExpect(jsonPath("$.data.disclaimer").value("이 결과는 매물의 안전을 보장하지 않습니다."));
     }
 
     @Test

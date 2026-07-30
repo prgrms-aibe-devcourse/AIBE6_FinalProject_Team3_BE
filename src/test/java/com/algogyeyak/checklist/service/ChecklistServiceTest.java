@@ -277,7 +277,7 @@ class ChecklistServiceTest {
     }
 
     @Test
-    @DisplayName("존재하지 않는 체크리스트면 NOT_FOUND 예외가 발생한다")
+    @DisplayName("존재하지 않는 체크리스트면 CHECKLIST_NOT_FOUND 예외가 발생한다")
     void updateChecklistItemThrowsWhenChecklistNotFound() {
         when(checklistRepository.findById(999L)).thenReturn(Optional.empty());
 
@@ -286,12 +286,12 @@ class ChecklistServiceTest {
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 
     @Test
-    @DisplayName("본인 소유가 아닌 체크리스트면 FORBIDDEN 예외가 발생한다")
+    @DisplayName("본인 소유가 아닌 체크리스트면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
     void updateChecklistItemThrowsWhenNotOwner() {
         User owner = user(1L);
         Checklist checklist = checklistWithOneCheckItem(owner);
@@ -303,12 +303,12 @@ class ChecklistServiceTest {
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
                 );
     }
 
     @Test
-    @DisplayName("존재하지 않는 항목이면 NOT_FOUND 예외가 발생한다")
+    @DisplayName("존재하지 않는 항목이면 CHECKLIST_ITEM_NOT_FOUND 예외가 발생한다")
     void updateChecklistItemThrowsWhenItemNotFound() {
         User user = user(1L);
         Checklist checklist = checklistWithOneCheckItem(user);
@@ -321,7 +321,7 @@ class ChecklistServiceTest {
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_ITEM_NOT_FOUND)
                 );
     }
 
@@ -361,19 +361,19 @@ class ChecklistServiceTest {
     }
 
     @Test
-    @DisplayName("존재하지 않는 체크리스트의 결과를 조회하면 NOT_FOUND 예외가 발생한다")
+    @DisplayName("존재하지 않는 체크리스트의 결과를 조회하면 CHECKLIST_NOT_FOUND 예외가 발생한다")
     void getChecklistResultThrowsWhenChecklistNotFound() {
         when(checklistRepository.findById(999L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> checklistService.getChecklistResult(1L, 999L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 
     @Test
-    @DisplayName("본인 소유가 아닌 체크리스트의 결과를 조회하면 FORBIDDEN 예외가 발생한다")
+    @DisplayName("본인 소유가 아닌 체크리스트의 결과를 조회하면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
     void getChecklistResultThrowsWhenNotOwner() {
         User owner = user(1L);
         Checklist checklist = checklistWithOneCheckItem(owner);
@@ -383,7 +383,24 @@ class ChecklistServiceTest {
         assertThatThrownBy(() -> checklistService.getChecklistResult(999L, 100L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
+                );
+    }
+
+    @Test
+    @DisplayName("매물이 삭제된 상태면 결과 조회 시 CHECKLIST_NOT_FOUND 예외가 발생한다")
+    void getChecklistResultThrowsWhenPropertyDeleted() {
+        User user = user(1L);
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        Checklist checklist = Checklist.createFrom(user, deletedProperty, 1, List.of());
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+        when(checklistRepository.findById(100L)).thenReturn(Optional.of(checklist));
+
+        assertThatThrownBy(() -> checklistService.getChecklistResult(1L, 100L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 
@@ -392,6 +409,7 @@ class ChecklistServiceTest {
     void getChecklistReturnsChecklistWithItems() {
         User user = user(1L);
         Checklist checklist = checklistWithOneCheckItem(user);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
         when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
 
         Checklist result = checklistService.getChecklist(1L, 10L);
@@ -401,49 +419,58 @@ class ChecklistServiceTest {
     }
 
     @Test
-    @DisplayName("해당 매물에 체크리스트가 없으면 NOT_FOUND 예외가 발생한다")
+    @DisplayName("존재하지 않는 매물을 조회하면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void getChecklistThrowsWhenPropertyNotFound() {
+        when(propertyRepository.findById(10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("매물은 있지만 체크리스트가 없으면 CHECKLIST_NOT_FOUND 예외가 발생한다")
     void getChecklistThrowsWhenNoneExists() {
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
         when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 
     @Test
-    @DisplayName("본인 소유가 아닌 체크리스트를 조회하면 FORBIDDEN 예외가 발생한다")
+    @DisplayName("본인 소유가 아닌 매물을 조회하면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
     void getChecklistThrowsWhenNotOwner() {
-        User owner = user(1L);
-        Checklist checklist = checklistWithOneCheckItem(owner);
-        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
-
-        assertThatThrownBy(() -> checklistService.getChecklist(999L, 10L))
-                .isInstanceOf(BusinessException.class)
-                .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
-                );
-    }
-
-    @Test
-    @DisplayName("매물이 삭제된 상태면 체크리스트가 있어도 NOT_FOUND 예외가 발생한다")
-    void getChecklistThrowsWhenPropertyDeleted() {
-        User user = user(1L);
-        Property deletedProperty = property(10L, 1L);
-        deletedProperty.delete();
-        Checklist checklist = Checklist.createFrom(user, deletedProperty, 1, List.of());
-        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 999L)));
 
         assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
                 );
     }
 
     @Test
-    @DisplayName("매물이 삭제된 상태면 항목을 수정할 수 없고 NOT_FOUND 예외가 발생한다")
+    @DisplayName("매물이 삭제된 상태면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void getChecklistThrowsWhenPropertyDeleted() {
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(deletedProperty));
+
+        assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("매물이 삭제된 상태면 항목을 수정할 수 없고 CHECKLIST_NOT_FOUND 예외가 발생한다")
     void updateChecklistItemThrowsWhenPropertyDeleted() {
         User user = user(1L);
         Property deletedProperty = property(10L, 1L);
@@ -463,7 +490,7 @@ class ChecklistServiceTest {
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 }
