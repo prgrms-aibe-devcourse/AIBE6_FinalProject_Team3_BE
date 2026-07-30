@@ -43,6 +43,10 @@ public class GeminiClientImpl implements GeminiClient {
                임대인과 협의하기 위한 예시임을 함께 안내하세요.
             5. 모든 답변에는 이 분석이 법적 효력이 없는 참고용 정보이며,
                AI가 생성한 결과임을 명시하세요.
+            6. question 필드는 사용자가 아니라 중개사/임대인에게 직접 던질 질문이어야 합니다.
+               사용자 자신의 상황을 확인하는 질문(예: 당신은 ~하시나요)이 아니라,
+               상대방에게 정보나 예외 여부를 묻는 질문(예: ~한 경우도 포함되나요,
+               ~는 허용되나요)으로 작성하세요.
             """;
 
     private static final Map<String, Object> RESPONSE_SCHEMA = Map.of(
@@ -56,7 +60,11 @@ public class GeminiClientImpl implements GeminiClient {
                                             "originalText", Map.of("type", "STRING"),
                                             "riskFlag", Map.of("type", "BOOLEAN"),
                                             "explanation", Map.of("type", "STRING"),
-                                            "question", Map.of("type", "STRING"),
+                                            "question", Map.of(
+                                                    "type", "STRING",
+                                                    "description",
+                                                    "중개사/임대인에게 직접 물어볼 질문 (사용자 자기점검 질문 금지)"
+                                            ),
                                             "suggestedText", Map.of("type", "STRING")
                                     ),
                                     "required", List.of(
