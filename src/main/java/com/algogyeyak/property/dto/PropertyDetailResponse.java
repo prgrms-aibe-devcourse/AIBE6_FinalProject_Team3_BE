@@ -10,6 +10,8 @@ import java.util.List;
 /**
  * 매물 상세조회(GET /properties/{id}) 응답 DTO.
  * 목록(PropertyListResponse)과 달리 설명/이미지/전체 주소/시세비교까지 포함한다.
+ * checklistCreated/reported는 checklist/report 저장소를 조회해야 알 수 있는 값이라
+ * Property 엔티티만으로는 채울 수 없어 from()의 파라미터로 받는다.
  */
 public record PropertyDetailResponse(
         Long propertyId,
@@ -22,11 +24,21 @@ public record PropertyDetailResponse(
         AddressResponse address,
         List<String> imageUrls,
         MarketComparisonResponse marketComparison,
+        // 본인이 이 매물의 임장 체크리스트를 생성한 적이 있는지 여부(진행 상태까지는 아니고 생성 여부만).
+        boolean checklistCreated,
+        // 본인이 이 매물을 신고한 적이 있는지 여부. 마켓플레이스식 "다른 사람이 신고했는지"가 아니라
+        // 자가 플래그 구조 특성상 "내가 신고했었는지"를 뜻한다.
+        boolean reported,
         String status,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
-    public static PropertyDetailResponse from(Property property, MarketComparisonResponse marketComparison) {
+    public static PropertyDetailResponse from(
+            Property property,
+            MarketComparisonResponse marketComparison,
+            boolean checklistCreated,
+            boolean reported
+    ) {
         return new PropertyDetailResponse(
                 property.getId(),
                 property.getPropertyType().name(),
@@ -38,6 +50,8 @@ public record PropertyDetailResponse(
                 AddressResponse.from(property.getAddress()),
                 property.getImages().stream().map(PropertyImage::getImageUrl).toList(),
                 marketComparison,
+                checklistCreated,
+                reported,
                 property.getStatus().name(),
                 property.getCreatedAt(),
                 property.getUpdatedAt()
