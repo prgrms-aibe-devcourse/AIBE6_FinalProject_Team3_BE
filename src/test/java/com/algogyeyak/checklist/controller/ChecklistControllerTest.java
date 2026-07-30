@@ -232,10 +232,12 @@ class ChecklistControllerTest {
     void listMyChecklistsReturnsOverviewForAuthenticatedUser() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         ChecklistOverviewResponse started = new ChecklistOverviewResponse(
-                10L, 100L, "서울특별시 강남구 테헤란로 123", null, "OFFICETEL", "JEONSE", ChecklistStatus.IN_PROGRESS
+                10L, 100L, "서울특별시 강남구 테헤란로 123", null, "OFFICETEL", "JEONSE", ChecklistStatus.IN_PROGRESS,
+                java.time.LocalDateTime.of(2026, 7, 30, 10, 0)
         );
         ChecklistOverviewResponse notStarted = new ChecklistOverviewResponse(
-                20L, null, "서울특별시 마포구 월드컵로 1", null, "MULTI_FAMILY", "MONTHLY_RENT", ChecklistStatus.NOT_STARTED
+                20L, null, "서울특별시 마포구 월드컵로 1", null, "MULTI_FAMILY", "MONTHLY_RENT", ChecklistStatus.NOT_STARTED,
+                java.time.LocalDateTime.of(2026, 6, 1, 12, 0)
         );
         when(checklistService.listMyChecklists(1L)).thenReturn(List.of(started, notStarted));
 

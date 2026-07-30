@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -145,6 +146,9 @@ public class ChecklistService {
     /**
      * 로그인 유저의 매물 전체 + 매물별 체크리스트 현황을 반환한다. 체크리스트를 아직 시작 안 한
      * 매물도 포함되며(checklistId=null, status=NOT_STARTED), 삭제된 매물은 제외한다.
+     * 정렬은 최종 점검일(lastCheckedAt) 최신순 - 매물 조회 자체가 이미 등록일(createdAt) 최신순으로
+     * 오기 때문에, 안정 정렬(Stream.sorted)로 lastCheckedAt만 덮어씌우면 동률일 때 자연히
+     * 등록일 최신순으로 유지된다.
      */
     public List<ChecklistOverviewResponse> listMyChecklists(Long userId) {
         List<Property> properties = propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(userId, PropertyStatus.ACTIVE);
@@ -153,6 +157,7 @@ public class ChecklistService {
 
         return properties.stream()
                 .map(property -> ChecklistOverviewResponse.from(property, checklistsByPropertyId.get(property.getId())))
+                .sorted(Comparator.comparing(ChecklistOverviewResponse::lastCheckedAt).reversed())
                 .toList();
     }
 }
