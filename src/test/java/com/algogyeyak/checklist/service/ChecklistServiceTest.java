@@ -388,6 +388,23 @@ class ChecklistServiceTest {
     }
 
     @Test
+    @DisplayName("매물이 삭제된 상태면 결과 조회 시 NOT_FOUND 예외가 발생한다")
+    void getChecklistResultThrowsWhenPropertyDeleted() {
+        User user = user(1L);
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        Checklist checklist = Checklist.createFrom(user, deletedProperty, 1, List.of());
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+        when(checklistRepository.findById(100L)).thenReturn(Optional.of(checklist));
+
+        assertThatThrownBy(() -> checklistService.getChecklistResult(1L, 100L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                );
+    }
+
+    @Test
     @DisplayName("본인 매물의 체크리스트를 조회하면 문항까지 포함해 반환한다")
     void getChecklistReturnsChecklistWithItems() {
         User user = user(1L);
