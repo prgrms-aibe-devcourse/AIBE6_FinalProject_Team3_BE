@@ -50,6 +50,10 @@ public class ChecklistItemTemplate {
     @Column(name = "guide_text")
     private String guideText;
 
+    // guideText가 짧은 실무 안내라면, helperText는 부동산 지식이 없는 사용자도 이해할 수 있게 풀어쓴 설명이다.
+    @Column(name = "helper_text", columnDefinition = "TEXT")
+    private String helperText;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ChecklistImportance importance;
@@ -76,6 +80,7 @@ public class ChecklistItemTemplate {
             ChecklistCategory category,
             String content,
             String guideText,
+            String helperText,
             ChecklistImportance importance,
             ChecklistItemType itemType,
             int displayOrder,
@@ -87,6 +92,7 @@ public class ChecklistItemTemplate {
         this.category = category;
         this.content = content;
         this.guideText = guideText;
+        this.helperText = helperText;
         this.importance = importance;
         this.itemType = itemType;
         this.displayOrder = displayOrder;

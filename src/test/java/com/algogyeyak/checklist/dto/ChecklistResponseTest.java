@@ -83,4 +83,25 @@ class ChecklistResponseTest {
                         "A-서류-일반-10"   // DOCUMENTS, GENERAL
                 );
     }
+
+    @Test
+    @DisplayName("from()은 문항의 helperText를 그대로 담는다")
+    void fromIncludesHelperText() {
+        ChecklistItemTemplate template = ChecklistItemTemplate.builder()
+                .version(1)
+                .category(ChecklistCategory.DOCUMENTS)
+                .content("등기부등본을 확인했나요?")
+                .helperText("등기부등본은 이 집이 진짜 누구 것인지 보여주는 서류예요.")
+                .importance(ChecklistImportance.REQUIRED)
+                .itemType(ChecklistItemType.CHECK)
+                .displayOrder(1)
+                .active(true)
+                .build();
+        Checklist checklist = Checklist.createFrom(testUser(), testProperty(10L), 1, List.of(template));
+
+        ChecklistResponse response = ChecklistResponse.from(checklist);
+
+        assertThat(response.items().get(0).helperText())
+                .isEqualTo("등기부등본은 이 집이 진짜 누구 것인지 보여주는 서류예요.");
+    }
 }
