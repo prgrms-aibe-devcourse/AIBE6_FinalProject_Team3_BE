@@ -7,7 +7,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.algogyeyak.checklist.repository.ChecklistRepository;
+import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
@@ -22,14 +25,20 @@ import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 @ExtendWith(MockitoExtension.class)
 class PropertyServiceTest {
@@ -43,13 +52,22 @@ class PropertyServiceTest {
     @Mock
     private MarketComparisonService marketComparisonService;
 
+    @Mock
+    private ChecklistRepository checklistRepository;
+
+    @Mock
+    private PropertyReportRepository propertyReportRepository;
+
     private PropertyService propertyService;
 
     private static final Long USER_ID = 1L;
 
     @BeforeEach
     void setUp() {
-        propertyService = new PropertyService(propertyRepository, kakaoAddressClient, marketComparisonService);
+        propertyService = new PropertyService(
+                propertyRepository, kakaoAddressClient, marketComparisonService,
+                checklistRepository, propertyReportRepository
+        );
     }
 
     private AddressResolutionResult resolvedAddress() {
@@ -134,6 +152,129 @@ class PropertyServiceTest {
     }
 
     @Test
+    void 도로명주소가_없으면_지번주소로_중복_등록을_체크한다() {
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "서울특별시 종로구 충신동 1",
+                PropertyType.DETACHED_HOUSE,
+                TransactionType.JEONSE,
+                200_000_000L,
+                null,
+                50.0,
+                null,
+                null
+        );
+
+        AddressResolutionResult jibunOnly = AddressResolutionResult.builder()
+                .resolved(true)
+                .roadAddress(null)
+                .jibunAddress("서울특별시 종로구 충신동 1")
+                .latitude(37.5735)
+                .longitude(127.0083)
+                .build();
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(jibunOnly);
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_JibunAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), eq("서울특별시 종로구 충신동 1")
+        )).thenReturn(true);
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void 연립다세대이면서_도로명주소가_없으면_매칭정확도_안내문구가_포함된다() {
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "서울특별시 종로구 청운동 1",
+                PropertyType.MULTI_FAMILY,
+                TransactionType.JEONSE,
+                200_000_000L,
+                null,
+                50.0,
+                null,
+                null
+        );
+
+        AddressResolutionResult jibunOnly = AddressResolutionResult.builder()
+                .resolved(true)
+                .roadAddress(null)
+                .jibunAddress("서울특별시 종로구 청운동 1")
+                .latitude(37.5865)
+                .longitude(126.9689)
+                .build();
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(jibunOnly);
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_JibunAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
+        )).thenReturn(false);
+        when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+
+        PropertyRegisterResponse response = propertyService.register(USER_ID, request);
+
+        assertThat(response.notice()).contains("연립다세대");
+    }
+
+    @Test
+    void 허용되지_않은_확장자의_이미지면_예외가_발생한다() {
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "서울특별시 강남구 테헤란로 123",
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                List.of("https://cdn.algogyeyak.com/img/abc.bmp")
+        );
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
+    @Test
+    void 이미지_URL이_http_https가_아니면_예외가_발생한다() {
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "서울특별시 강남구 테헤란로 123",
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                List.of("ftp://cdn.algogyeyak.com/img/abc.jpg")
+        );
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
+    @Test
+    void 이미지가_10장을_초과하면_예외가_발생한다() {
+        List<String> tooManyImages = IntStream.range(0, 11)
+                .mapToObj(i -> "https://cdn.algogyeyak.com/img/" + i + ".jpg")
+                .toList();
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "서울특별시 강남구 테헤란로 123",
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                tooManyImages
+        );
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
+    @Test
     void 월세인데_월임대료가_없으면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "서울특별시 강남구 테헤란로 123",
@@ -186,14 +327,37 @@ class PropertyServiceTest {
                 .build();
         property.assignAddress(address);
 
-        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(USER_ID, PropertyStatus.ACTIVE))
-                .thenReturn(List.of(property));
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.findAllByUserIdAndStatus(USER_ID, PropertyStatus.ACTIVE, pageable))
+                .thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
-        List<PropertyListResponse> result = propertyService.getMyProperties(USER_ID);
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable);
 
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).roadAddress()).isEqualTo("서울특별시 강남구 테헤란로 123");
-        assertThat(result.get(0).transactionType()).isEqualTo("JEONSE");
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).roadAddress()).isEqualTo("서울특별시 강남구 테헤란로 123");
+        assertThat(result.content().get(0).transactionType()).isEqualTo("JEONSE");
+        assertThat(result.totalElements()).isEqualTo(1);
+        assertThat(result.hasNext()).isFalse();
+    }
+
+    @Test
+    void 허용되지_않은_정렬필드로_목록조회하면_예외가_발생한다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "userId"));
+
+        assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.INVALID_SORT_FIELD);
+    }
+
+    @Test
+    void 페이지_크기가_최대치를_초과하면_예외가_발생한다() {
+        Pageable pageable = PageRequest.of(0, 101, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.BAD_REQUEST);
     }
 
     @Test
@@ -211,12 +375,41 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(checklistRepository.findByPropertyId(1L)).thenReturn(Optional.empty());
+        when(propertyReportRepository.existsByPropertyIdAndReporterId(1L, USER_ID)).thenReturn(false);
 
         PropertyDetailResponse response = propertyService.getProperty(USER_ID, 1L);
 
         assertThat(response.description()).isEqualTo("역세권 오피스텔");
         assertThat(response.address().roadAddress()).isEqualTo("서울특별시 강남구 테헤란로 123");
         assertThat(response.marketComparison().status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.checklistCreated()).isFalse();
+        assertThat(response.reported()).isFalse();
+    }
+
+    @Test
+    void 매물_상세조회_응답에_체크리스트_생성여부와_신고여부가_반영된다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description(null)
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(checklistRepository.findByPropertyId(1L))
+                .thenReturn(Optional.of(com.algogyeyak.checklist.entity.Checklist.builder().build()));
+        when(propertyReportRepository.existsByPropertyIdAndReporterId(1L, USER_ID)).thenReturn(true);
+
+        PropertyDetailResponse response = propertyService.getProperty(USER_ID, 1L);
+
+        assertThat(response.checklistCreated()).isTrue();
+        assertThat(response.reported()).isTrue();
     }
 
     @Test

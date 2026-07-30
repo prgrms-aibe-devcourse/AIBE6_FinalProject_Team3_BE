@@ -165,6 +165,36 @@ class PropertyReportServiceTest {
     }
 
     @Test
+    void ETC_사유_detail이_500자를_넘으면_예외가_발생한다() {
+        Property property = ownedProperty(USER_ID);
+        when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(property));
+
+        String tooLong = "가".repeat(501);
+        PropertyReportRequest request = new PropertyReportRequest(PropertyReportReason.ETC, tooLong);
+
+        assertThatThrownBy(() -> propertyReportService.report(USER_ID, PROPERTY_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.REPORT_DETAIL_TOO_LONG);
+    }
+
+    @Test
+    void ETC가_아닌_사유는_detail이_길어도_통과한다() {
+        Property property = ownedProperty(USER_ID);
+        when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(property));
+        when(propertyReportRepository.existsByPropertyIdAndReporterId(PROPERTY_ID, USER_ID)).thenReturn(false);
+        when(propertyReportRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // 어차피 엔티티 생성 시 null로 버려지는 값이라 길이 제한에 안 걸려야 한다.
+        String tooLong = "가".repeat(501);
+        PropertyReportRequest request = new PropertyReportRequest(PropertyReportReason.DUPLICATE, tooLong);
+
+        PropertyReportResponse response = propertyReportService.report(USER_ID, PROPERTY_ID, request);
+
+        assertThat(response.detail()).isNull();
+    }
+
+    @Test
     void 동일_매물을_중복_신고하면_예외가_발생한다() {
         Property property = ownedProperty(USER_ID);
         when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(property));

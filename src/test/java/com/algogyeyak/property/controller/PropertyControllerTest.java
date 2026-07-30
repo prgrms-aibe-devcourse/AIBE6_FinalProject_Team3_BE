@@ -17,6 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
@@ -34,6 +35,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -141,15 +146,31 @@ class PropertyControllerTest {
                 LocalDateTime.of(2026, 7, 23, 10, 0)
         );
 
-        when(propertyService.getMyProperties(anyLong())).thenReturn(List.of(item));
+        Pageable pageable = PageRequest.of(0, 20);
+        Page<PropertyListResponse> page = new PageImpl<>(List.of(item), pageable, 1);
+        when(propertyService.getMyProperties(anyLong(), any(Pageable.class))).thenReturn(PageResponse.from(page));
 
         mockMvc.perform(get("/properties")
                         .with(asUser(USER_ID))
                         .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data[0].propertyId").value(101))
-                .andExpect(jsonPath("$.data[0].roadAddress").value("서울특별시 강남구 테헤란로 123"));
+                .andExpect(jsonPath("$.data.content[0].propertyId").value(101))
+                .andExpect(jsonPath("$.data.content[0].roadAddress").value("서울특별시 강남구 테헤란로 123"))
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+    }
+
+    @Test
+    void 허용되지_않은_정렬필드로_목록조회하면_400을_반환한다() throws Exception {
+        when(propertyService.getMyProperties(anyLong(), any(Pageable.class)))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_SORT_FIELD));
+
+        mockMvc.perform(get("/properties")
+                        .queryParam("sort", "userId,desc")
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -170,6 +191,8 @@ class PropertyControllerTest {
                 ),
                 List.of("https://cdn.algogyeyak.com/img/abc.jpg"),
                 MarketComparisonResponse.unavailable("stub"),
+                false,
+                false,
                 "ACTIVE",
                 LocalDateTime.of(2026, 7, 23, 10, 0),
                 LocalDateTime.of(2026, 7, 23, 10, 0)
@@ -228,6 +251,8 @@ class PropertyControllerTest {
                 ),
                 List.of(),
                 MarketComparisonResponse.unavailable("stub"),
+                false,
+                false,
                 "ACTIVE",
                 LocalDateTime.of(2026, 7, 23, 10, 0),
                 LocalDateTime.of(2026, 7, 23, 11, 0)
