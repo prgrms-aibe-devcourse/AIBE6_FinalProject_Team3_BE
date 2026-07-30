@@ -73,20 +73,20 @@ public class ChecklistService {
     @Transactional
     public ChecklistItem updateChecklistItem(Long userId, Long checklistId, Long itemId, ChecklistItemUpdateRequest request) {
         Checklist checklist = checklistRepository.findById(checklistId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHECKLIST_NOT_FOUND));
 
         if (!checklist.getUser().getId().equals(userId)) {
-            throw new BusinessException(ErrorCode.FORBIDDEN, "본인의 체크리스트만 수정할 수 있습니다.");
+            throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED, "본인의 체크리스트만 수정할 수 있습니다.");
         }
 
         if (checklist.getProperty().isDeleted()) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "체크리스트를 찾을 수 없습니다.");
+            throw new BusinessException(ErrorCode.CHECKLIST_NOT_FOUND);
         }
 
         ChecklistItem item = checklist.getItems().stream()
                 .filter(candidate -> candidate.getId().equals(itemId))
                 .findFirst()
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "체크리스트 항목을 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.CHECKLIST_ITEM_NOT_FOUND));
 
         if (request.checked() != null) {
             item.check(request.checked());

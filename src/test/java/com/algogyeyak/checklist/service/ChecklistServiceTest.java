@@ -277,7 +277,7 @@ class ChecklistServiceTest {
     }
 
     @Test
-    @DisplayName("존재하지 않는 체크리스트면 NOT_FOUND 예외가 발생한다")
+    @DisplayName("존재하지 않는 체크리스트면 CHECKLIST_NOT_FOUND 예외가 발생한다")
     void updateChecklistItemThrowsWhenChecklistNotFound() {
         when(checklistRepository.findById(999L)).thenReturn(Optional.empty());
 
@@ -286,12 +286,12 @@ class ChecklistServiceTest {
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 
     @Test
-    @DisplayName("본인 소유가 아닌 체크리스트면 FORBIDDEN 예외가 발생한다")
+    @DisplayName("본인 소유가 아닌 체크리스트면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
     void updateChecklistItemThrowsWhenNotOwner() {
         User owner = user(1L);
         Checklist checklist = checklistWithOneCheckItem(owner);
@@ -303,12 +303,12 @@ class ChecklistServiceTest {
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
                 );
     }
 
     @Test
-    @DisplayName("존재하지 않는 항목이면 NOT_FOUND 예외가 발생한다")
+    @DisplayName("존재하지 않는 항목이면 CHECKLIST_ITEM_NOT_FOUND 예외가 발생한다")
     void updateChecklistItemThrowsWhenItemNotFound() {
         User user = user(1L);
         Checklist checklist = checklistWithOneCheckItem(user);
@@ -321,7 +321,7 @@ class ChecklistServiceTest {
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_ITEM_NOT_FOUND)
                 );
     }
 
@@ -470,7 +470,7 @@ class ChecklistServiceTest {
     }
 
     @Test
-    @DisplayName("매물이 삭제된 상태면 항목을 수정할 수 없고 NOT_FOUND 예외가 발생한다")
+    @DisplayName("매물이 삭제된 상태면 항목을 수정할 수 없고 CHECKLIST_NOT_FOUND 예외가 발생한다")
     void updateChecklistItemThrowsWhenPropertyDeleted() {
         User user = user(1L);
         Property deletedProperty = property(10L, 1L);
@@ -490,7 +490,7 @@ class ChecklistServiceTest {
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 }
