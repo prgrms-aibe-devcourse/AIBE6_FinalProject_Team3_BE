@@ -409,6 +409,7 @@ class ChecklistServiceTest {
     void getChecklistReturnsChecklistWithItems() {
         User user = user(1L);
         Checklist checklist = checklistWithOneCheckItem(user);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
         when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
 
         Checklist result = checklistService.getChecklist(1L, 10L);
@@ -418,44 +419,53 @@ class ChecklistServiceTest {
     }
 
     @Test
-    @DisplayName("해당 매물에 체크리스트가 없으면 NOT_FOUND 예외가 발생한다")
+    @DisplayName("존재하지 않는 매물을 조회하면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void getChecklistThrowsWhenPropertyNotFound() {
+        when(propertyRepository.findById(10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("매물은 있지만 체크리스트가 없으면 CHECKLIST_NOT_FOUND 예외가 발생한다")
     void getChecklistThrowsWhenNoneExists() {
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
         when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.CHECKLIST_NOT_FOUND)
                 );
     }
 
     @Test
-    @DisplayName("본인 소유가 아닌 체크리스트를 조회하면 FORBIDDEN 예외가 발생한다")
+    @DisplayName("본인 소유가 아닌 매물을 조회하면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
     void getChecklistThrowsWhenNotOwner() {
-        User owner = user(1L);
-        Checklist checklist = checklistWithOneCheckItem(owner);
-        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
-
-        assertThatThrownBy(() -> checklistService.getChecklist(999L, 10L))
-                .isInstanceOf(BusinessException.class)
-                .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN)
-                );
-    }
-
-    @Test
-    @DisplayName("매물이 삭제된 상태면 체크리스트가 있어도 NOT_FOUND 예외가 발생한다")
-    void getChecklistThrowsWhenPropertyDeleted() {
-        User user = user(1L);
-        Property deletedProperty = property(10L, 1L);
-        deletedProperty.delete();
-        Checklist checklist = Checklist.createFrom(user, deletedProperty, 1, List.of());
-        when(checklistRepository.findByPropertyId(10L)).thenReturn(Optional.of(checklist));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 999L)));
 
         assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception ->
-                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND)
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
+                );
+    }
+
+    @Test
+    @DisplayName("매물이 삭제된 상태면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void getChecklistThrowsWhenPropertyDeleted() {
+        Property deletedProperty = property(10L, 1L);
+        deletedProperty.delete();
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(deletedProperty));
+
+        assertThatThrownBy(() -> checklistService.getChecklist(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
                 );
     }
 
