@@ -13,6 +13,7 @@ import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
+import com.algogyeyak.property.dto.PropertySearchCondition;
 import com.algogyeyak.property.dto.PropertyUpdateRequest;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
@@ -100,16 +101,58 @@ public class PropertyService {
      * 본인이 등록한 매물 목록 조회. 개인 분석 도구 성격상 마켓플레이스식 전체조회가 아니라
      * 요청자 본인 소유 + ACTIVE 상태 매물만 페이지네이션해서 반환한다 (기본 정렬: 최신순).
      * page/size는 Controller의 @PageableDefault가 기본값을 채워주므로 항상 값이 있다고 가정한다.
+     * condition의 필드는 전부 선택값 - null인 조건은 필터링하지 않는다.
      */
-    public PageResponse<PropertyListResponse> getMyProperties(Long userId, Pageable pageable) {
+    public PageResponse<PropertyListResponse> getMyProperties(
+            Long userId, Pageable pageable, PropertySearchCondition condition
+    ) {
         if (pageable.getPageSize() <= 0) {
             throw new BusinessException(ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION, "size는 1 이상이어야 합니다.");
         }
         PageableUtils.validateSort(pageable, SORTABLE_PROPERTIES);
         PageableUtils.validateMaxSize(pageable);
+        validateSearchCondition(condition);
 
-        Page<Property> properties = propertyRepository.findAllByUserIdAndStatus(userId, PropertyStatus.ACTIVE, pageable);
+        Page<Property> properties = propertyRepository.search(
+                userId,
+                PropertyStatus.ACTIVE,
+                condition.region(),
+                condition.minArea(),
+                condition.maxArea(),
+                condition.transactionType(),
+                condition.propertyType(),
+                condition.minDeposit(),
+                condition.maxDeposit(),
+                condition.minMonthlyRent(),
+                condition.maxMonthlyRent(),
+                pageable
+        );
         return PageResponse.from(properties, PropertyListResponse::from);
+    }
+
+    /**
+     * 면적/보증금/월세 범위의 최소값이 최대값보다 크면 결과가 항상 0건이 되는데, 이건 사용자 실수(값을
+     * 반대로 입력)일 가능성이 높아 조용히 빈 목록을 주기보다 명확히 400으로 알려준다.
+     */
+    private void validateSearchCondition(PropertySearchCondition condition) {
+        if (condition.minArea() != null && condition.maxArea() != null
+                && condition.minArea() > condition.maxArea()) {
+            throw new BusinessException(
+                    ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION, "면적 최소값이 최대값보다 클 수 없습니다."
+            );
+        }
+        if (condition.minDeposit() != null && condition.maxDeposit() != null
+                && condition.minDeposit() > condition.maxDeposit()) {
+            throw new BusinessException(
+                    ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION, "보증금 최소값이 최대값보다 클 수 없습니다."
+            );
+        }
+        if (condition.minMonthlyRent() != null && condition.maxMonthlyRent() != null
+                && condition.minMonthlyRent() > condition.maxMonthlyRent()) {
+            throw new BusinessException(
+                    ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION, "월세 최소값이 최대값보다 클 수 없습니다."
+            );
+        }
     }
 
     /**
