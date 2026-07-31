@@ -1,5 +1,7 @@
 package com.algogyeyak.property.service;
 
+import com.algogyeyak.checklist.repository.ChecklistItemRepository;
+import com.algogyeyak.checklist.repository.ChecklistItemRepository.ChecklistProgressProjection;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -24,7 +26,9 @@ import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -40,6 +44,7 @@ public class PropertyService {
     private final KakaoAddressClient kakaoAddressClient;
     private final MarketComparisonService marketComparisonService;
     private final ChecklistRepository checklistRepository;
+    private final ChecklistItemRepository checklistItemRepository;
     private final PropertyReportRepository propertyReportRepository;
 
     // 목록 조회 정렬 허용 필드 - PageableUtils.validateSort가 이 밖의 필드는 INVALID_SORT_FIELD로 막는다.
@@ -127,7 +132,29 @@ public class PropertyService {
                 condition.maxMonthlyRent(),
                 pageable
         );
-        return PageResponse.from(properties, PropertyListResponse::from);
+
+        Map<Long, Integer> checklistProgressByPropertyId = checklistItemRepository.findProgressByUserId(userId)
+                .stream()
+                .collect(Collectors.toMap(
+                        ChecklistProgressProjection::getPropertyId,
+                        PropertyService::toProgressPercent
+                ));
+
+        return PageResponse.from(
+                properties,
+                property -> PropertyListResponse.from(property, checklistProgressByPropertyId.get(property.getId()))
+        );
+    }
+
+    /**
+     * totalCount가 0이면(이론상 생기지 않아야 하지만, 체크리스트는 생성 시점에 항상 템플릿 문항을
+     * 함께 복사하므로) 0으로 나누는 대신 진행률을 0%로 취급한다.
+     */
+    private static Integer toProgressPercent(ChecklistProgressProjection projection) {
+        if (projection.getTotalCount() == 0) {
+            return 0;
+        }
+        return (int) Math.round(projection.getCheckedCount() * 100.0 / projection.getTotalCount());
     }
 
     /**
