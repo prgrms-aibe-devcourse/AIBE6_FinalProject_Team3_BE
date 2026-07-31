@@ -110,6 +110,20 @@ class AuthControllerTest {
     }
 
     @Test
+    void signupRejectsDuplicateNickname() throws Exception {
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("중복닉네임")).thenReturn(true);
+
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"new@example.com","password":"password1","nickname":"중복닉네임"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("AUTH_NICKNAME_ALREADY_EXISTS"));
+    }
+
+    @Test
     void signupRejectsInvalidPayload() throws Exception {
         mockMvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -118,6 +132,21 @@ class AuthControllerTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void signupRejectsNicknameTooShortWhenEmailAndPasswordAreValid() throws Exception {
+        // 이메일/비밀번호는 정상이고 닉네임만 최소 길이(2자) 미만인 경우를 따로 격리해서 확인한다 -
+        // signupRejectsInvalidPayload는 이메일/비밀번호/닉네임을 동시에 위반해서 어느 필드 때문에
+        // 400이 나는지 명확히 검증하지 못했다.
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"valid@example.com","password":"password1","nickname":"닉"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.error.fieldErrors[*].field").value(hasItem("nickname")));
     }
 
     @Test
@@ -215,6 +244,46 @@ class AuthControllerTest {
                                 """))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("AUTH_CURRENT_PASSWORD_MISMATCH"));
+    }
+
+    @Test
+    void updatePasswordRejectsAccountWithoutEmail() throws Exception {
+        // 카카오처럼 이메일 동의항목 없이 가입한 계정 - 컨트롤러 레벨(HTTP)에서 403 +
+        // AUTH_EMAIL_REQUIRED_FOR_PASSWORD를 확인한다 (서비스 레이어 테스트만 있었음).
+        String token = jwtProvider.createAccessToken(1L, "social@example.com", Role.USER);
+        User user = User.createOAuthUser(null, "소셜유저", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        mockMvc.perform(patch("/auth/password")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword":"newPassword1"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("AUTH_EMAIL_REQUIRED_FOR_PASSWORD"));
+    }
+
+    @Test
+    void updatePasswordRejectsDevLoginAdminAccount() throws Exception {
+        // dev-login 관리자 계정(application.yml 기본값 DEV_LOGIN_EMAIL=admin@algogyeyak.local)은
+        // 비밀번호 설정 자체가 금지된다 - 컨트롤러 레벨(HTTP)에서 403 + FORBIDDEN을 확인한다
+        // (서비스 레이어 테스트만 있었음).
+        String adminEmail = "admin@algogyeyak.local";
+        String token = jwtProvider.createAccessToken(1L, adminEmail, Role.ADMIN);
+        User admin = User.createLocalUser(adminEmail, null, "관리자");
+        ReflectionTestUtils.setField(admin, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(admin));
+
+        mockMvc.perform(patch("/auth/password")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword":"newPassword1"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
     @Test
