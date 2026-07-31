@@ -49,8 +49,9 @@ public class PropertyController {
     /**
      * 본인이 등록한 매물 목록 조회. (개인 분석 도구 성격상 전체 공개 매물 검색이 아니라 본인 소유 매물만 반환)
      * 기본 정렬은 등록일 최신순, 기본 페이지 크기는 20 (최대 100 - PageableUtils.validateMaxSize).
-     * region/minArea/maxArea/transactionType/propertyType/minDeposit/maxDeposit은 전부 선택 파라미터 -
-     * 아무것도 안 넘기면 기존과 동일하게 본인 소유 전체 목록을 반환한다.
+     * region/minArea/maxArea/transactionType/propertyType/minDeposit/maxDeposit/minMonthlyRent/
+     * maxMonthlyRent는 전부 선택 파라미터 - 아무것도 안 넘기면 기존과 동일하게 본인 소유 전체 목록을 반환한다.
+     * minMonthlyRent/maxMonthlyRent는 전세 매물의 monthlyRent가 항상 null이라 사실상 월세 매물에만 적용된다.
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<PropertyListResponse>>> list(
@@ -62,10 +63,13 @@ public class PropertyController {
             @RequestParam(required = false) TransactionType transactionType,
             @RequestParam(required = false) PropertyType propertyType,
             @RequestParam(required = false) Long minDeposit,
-            @RequestParam(required = false) Long maxDeposit
+            @RequestParam(required = false) Long maxDeposit,
+            @RequestParam(required = false) Long minMonthlyRent,
+            @RequestParam(required = false) Long maxMonthlyRent
     ) {
         PropertySearchCondition condition = new PropertySearchCondition(
-                region, minArea, maxArea, transactionType, propertyType, minDeposit, maxDeposit
+                region, minArea, maxArea, transactionType, propertyType,
+                minDeposit, maxDeposit, minMonthlyRent, maxMonthlyRent
         );
         PageResponse<PropertyListResponse> response =
                 propertyService.getMyProperties(principal.userId(), pageable, condition);

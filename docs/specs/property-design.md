@@ -40,12 +40,12 @@
 | 요구사항 | 실제 구현 |
 |---|---|
 | 인증된 사용자가 등록한 매물만 조회 | ✅ |
-| 지역/면적/거래유형/주택유형/가격범위 검색 | ❌ **여전히 구현 안 됨.** 검색 필터 쿼리 파라미터는 없고, 본인 소유 ACTIVE 매물 전체를 페이지네이션해서 반환할 뿐 |
+| 지역/면적/거래유형/주택유형/가격범위 검색 | ✅ `region`(도로명/지번주소 LIKE 부분일치)/`minArea`·`maxArea`/`transactionType`/`propertyType`/`minDeposit`·`maxDeposit`/`minMonthlyRent`·`maxMonthlyRent` 전부 선택 쿼리파라미터로 지원(`PropertySearchCondition`, `PropertyRepository.search`). 아무것도 안 넘기면 기존과 동일하게 본인 소유 전체 목록. `minMonthlyRent`/`maxMonthlyRent`는 전세 매물의 `monthlyRent`가 항상 null이라 사실상 월세 매물에만 적용됨 |
 | 삭제된 매물 제외 | ✅ (`status = ACTIVE` 조건) |
 | 페이지네이션 | ✅ `page`/`size`/`sort` 쿼리 파라미터(Spring Data `Pageable`) 지원, 기본값 `size=20`·`createdAt desc`. 응답이 `List<PropertyListResponse>`에서 `PageResponse<PropertyListResponse>`(`content`/`page`/`size`/`totalElements`/`totalPages`/`hasNext`)로 바뀐 **breaking change** — FE는 `$.data[...]`가 아니라 `$.data.content[...]`를 읽어야 함. 정렬은 `createdAt`/`deposit`/`area`만 허용(`PageableUtils.validateSort`), 최대 페이지 크기 100(`PageableUtils.validateMaxSize`) |
 | 지도 마커 정보 제공 | ✅ 각 항목에 좌표(`roadAddress`/`jibunAddress`, 위경도는 상세조회에만 포함 — 목록엔 주소 문자열만) — ⚠️ 목록 응답엔 위경도(latitude/longitude)가 없어 "지도 마커"로 바로 쓰기엔 부족할 수 있음, 확인 필요 |
 | 실패: 인증 실패 | ✅ 401 |
-| 실패: 잘못된 검색 조건 | ⚠️ 허용되지 않은 정렬 필드는 이제 `INVALID_SORT_FIELD`(400)로, 페이지 크기 초과(100장 초과)는 `BAD_REQUEST`(400)로 실제로 막힘. 다만 `PROPERTY_INVALID_SEARCH_CONDITION`(size≤0 가드)은 `@PageableDefault`를 쓰는 현재 컨트롤러 흐름상 실질적으로 도달 불가능한 방어 코드로 남아있음 |
+| 실패: 잘못된 검색 조건 | ✅ 허용되지 않은 정렬 필드는 `INVALID_SORT_FIELD`(400), 페이지 크기 초과(100장 초과)는 `BAD_REQUEST`(400)로 막힘. 면적/보증금/월세 범위의 최소값이 최대값보다 크면 `PROPERTY_INVALID_SEARCH_CONDITION`(400) — 검색 필터가 추가되며 이 코드가 실제로 도달 가능해짐(이전엔 size≤0 가드만 있던 도달 불가능한 방어 코드였음) |
 
 ## 매물 상세 조회 (`GET /properties/{propertyId}`) — 요구사항 대비
 
@@ -142,7 +142,7 @@
 4. ~~매물 상세 응답에 임장 체크리스트 생성 여부가 포함되지 않음~~ → `checklistCreated` 필드 추가로 해소됨
 5. ~~매물 상세 응답에 누적 신고 여부가 포함되지 않음~~ → `reported` 필드 추가로 해소됨(단, 아래 6번의 자가 플래그 구조라 "본인이 신고했는지" 기준)
 6. 매물 신고가 "본인 매물을 본인이 신고"하는 자가 플래그 구조 — 원래 의도(마켓플레이스식 신고였는지)를 확인 필요
-7. 매물 목록 조회에 지역/면적/거래유형/주택유형/가격범위 **검색**이 전혀 없음(페이지네이션은 아래 7-1로 분리 해소)
+7. ~~매물 목록 조회에 지역/면적/거래유형/주택유형/가격범위 검색이 전혀 없음~~ → `PropertySearchCondition`(region/minArea·maxArea/transactionType/propertyType/minDeposit·maxDeposit/minMonthlyRent·maxMonthlyRent) 추가로 해소됨(페이지네이션은 아래 7-1로 이미 분리 해소돼 있었음)
    - 7-1. ~~페이지네이션이 전혀 없음~~ → `page`/`size`/`sort` 지원으로 해소됨. 단, 응답이 `List`에서 `PageResponse`로 바뀐 breaking change라 FE 연동 확인 필요
 8. `PropertyType`에 아파트(APARTMENT)가 없음 — 의도된 범위인지 확인
 9. 매물 수정 시 주소/매물유형/거래유형 변경이 애초에 불가능한 구조 — 요구사항의 "주소 변경 시 재정규화" 시나리오 자체가 발생할 수 없음

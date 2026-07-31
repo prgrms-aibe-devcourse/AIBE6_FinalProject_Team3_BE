@@ -180,6 +180,8 @@ class PropertyControllerTest {
                         .queryParam("propertyType", "OFFICETEL")
                         .queryParam("minDeposit", "10000000")
                         .queryParam("maxDeposit", "50000000")
+                        .queryParam("minMonthlyRent", "300000")
+                        .queryParam("maxMonthlyRent", "800000")
                         .with(asUser(USER_ID))
                         .with(csrf()))
                 .andExpect(status().isOk());
@@ -192,6 +194,8 @@ class PropertyControllerTest {
         org.assertj.core.api.Assertions.assertThat(captured.propertyType()).isEqualTo(PropertyType.OFFICETEL);
         org.assertj.core.api.Assertions.assertThat(captured.minDeposit()).isEqualTo(10_000_000L);
         org.assertj.core.api.Assertions.assertThat(captured.maxDeposit()).isEqualTo(50_000_000L);
+        org.assertj.core.api.Assertions.assertThat(captured.minMonthlyRent()).isEqualTo(300_000L);
+        org.assertj.core.api.Assertions.assertThat(captured.maxMonthlyRent()).isEqualTo(800_000L);
     }
 
     @Test

@@ -17,9 +17,13 @@ public record PropertySearchCondition(
         TransactionType transactionType,
         PropertyType propertyType,
         Long minDeposit,
-        Long maxDeposit
+        Long maxDeposit,
+        // 전세는 monthlyRent가 항상 null이라 이 조건은 사실상 월세 매물에만 의미가 있다 -
+        // transactionType=JEONSE와 함께 넘어와도 에러는 아니고 그냥 결과가 0건이 될 뿐이다.
+        Long minMonthlyRent,
+        Long maxMonthlyRent
 ) {
     public static PropertySearchCondition empty() {
-        return new PropertySearchCondition(null, null, null, null, null, null, null);
+        return new PropertySearchCondition(null, null, null, null, null, null, null, null, null);
     }
 }

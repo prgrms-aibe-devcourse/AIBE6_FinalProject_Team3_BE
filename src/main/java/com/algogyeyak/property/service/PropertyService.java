@@ -123,13 +123,15 @@ public class PropertyService {
                 condition.propertyType(),
                 condition.minDeposit(),
                 condition.maxDeposit(),
+                condition.minMonthlyRent(),
+                condition.maxMonthlyRent(),
                 pageable
         );
         return PageResponse.from(properties, PropertyListResponse::from);
     }
 
     /**
-     * 면적/보증금 범위의 최소값이 최대값보다 크면 결과가 항상 0건이 되는데, 이건 사용자 실수(값을
+     * 면적/보증금/월세 범위의 최소값이 최대값보다 크면 결과가 항상 0건이 되는데, 이건 사용자 실수(값을
      * 반대로 입력)일 가능성이 높아 조용히 빈 목록을 주기보다 명확히 400으로 알려준다.
      */
     private void validateSearchCondition(PropertySearchCondition condition) {
@@ -143,6 +145,12 @@ public class PropertyService {
                 && condition.minDeposit() > condition.maxDeposit()) {
             throw new BusinessException(
                     ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION, "보증금 최소값이 최대값보다 클 수 없습니다."
+            );
+        }
+        if (condition.minMonthlyRent() != null && condition.maxMonthlyRent() != null
+                && condition.minMonthlyRent() > condition.maxMonthlyRent()) {
+            throw new BusinessException(
+                    ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION, "월세 최소값이 최대값보다 클 수 없습니다."
             );
         }
     }
