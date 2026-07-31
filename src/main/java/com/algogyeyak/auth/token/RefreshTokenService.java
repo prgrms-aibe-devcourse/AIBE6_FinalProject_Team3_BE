@@ -96,7 +96,7 @@ public class RefreshTokenService {
         }
 
         User user = refreshToken.getUser();
-        if (user.isWithdrawn()) {
+        if (user.isWithdrawn() || user.isSuspended()) {
             refreshTokenRepository.delete(refreshToken);
             throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, "존재하지 않거나 탈퇴한 사용자입니다.");
         }

@@ -65,6 +65,7 @@ public class SecurityConfig {
                                 "/auth/signup", "/auth/login", "/auth/dev-login",
                                 "/auth/password-policy"
                         ).permitAll()
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 // H2 콘솔은 내부적으로 프레임(iframe)을 사용하는데, 기본 X-Frame-Options: DENY가 이를 막는다.

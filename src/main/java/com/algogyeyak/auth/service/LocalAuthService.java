@@ -73,7 +73,7 @@ public class LocalAuthService {
     @Transactional(readOnly = true)
     public User login(String email, String rawPassword) {
         User user = userRepository.findByEmail(EmailNormalizer.normalize(email))
-                .filter(found -> !found.isWithdrawn())
+                .filter(found -> !found.isWithdrawn() && !found.isSuspended())
                 .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS));
 
         // passwordHash가 없는 계정(소셜 전용 가입)은 계정 존재 여부를 드러내지 않도록 자격 증명
@@ -96,7 +96,7 @@ public class LocalAuthService {
     @Transactional
     public void setPassword(Long userId, String currentPassword, String newPassword) {
         User user = userRepository.findById(userId)
-                .filter(found -> !found.isWithdrawn())
+                .filter(found -> !found.isWithdrawn() && !found.isSuspended())
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
 
         // {@link #login}은 email+passwordHash 조합으로만 계정을 찾으므로, email이 없는 계정(카카오는
