@@ -94,6 +94,36 @@ class LocalAuthServiceTest {
     }
 
     @Test
+    void signupRecoversAsNicknameDuplicateWhenConcurrentSignupHitsUniqueConstraint() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저"))
+                .thenReturn(false) // 최초 체크 시점
+                .thenReturn(true); // INSERT 실패 후 재확인
+        when(userRepository.saveAndFlush(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        assertEquals(ErrorCode.AUTH_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
+    }
+
+    @Test
+    void signupRethrowsOriginalExceptionWhenConstraintViolationMatchesNeitherEmailNorNickname() {
+        // 이메일도 닉네임도 재확인 결과 중복이 아니라면 - 무조건 닉네임 탓이라고 단정하지 않고
+        // 원래 예외를 그대로 던져야 한다 (예: 다른 유니크 제약이 추가되거나, 일시적 DB 문제).
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        DataIntegrityViolationException original = new DataIntegrityViolationException("unknown constraint violation");
+        when(userRepository.saveAndFlush(any(User.class))).thenThrow(original);
+
+        DataIntegrityViolationException thrown = assertThrows(DataIntegrityViolationException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        assertEquals(original, thrown);
+    }
+
+    @Test
     void loginSucceedsWithMatchingPassword() {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
