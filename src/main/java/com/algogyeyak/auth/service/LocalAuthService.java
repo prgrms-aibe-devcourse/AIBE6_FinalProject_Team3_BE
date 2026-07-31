@@ -114,7 +114,7 @@ public class LocalAuthService {
         String existingHash = user.getPasswordHash();
         if (existingHash != null
                 && (currentPassword == null || !passwordEncoder.matches(currentPassword, existingHash))) {
-            throw new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS, "현재 비밀번호가 올바르지 않습니다.");
+            throw new BusinessException(ErrorCode.AUTH_CURRENT_PASSWORD_MISMATCH);
         }
 
         user.updatePasswordHash(passwordEncoder.encode(newPassword));

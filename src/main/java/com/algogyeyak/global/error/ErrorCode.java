@@ -19,7 +19,14 @@ public enum ErrorCode {
     AUTH_TOKEN_MISSING(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_MISSING", "인증 토큰이 없습니다."),
     AUTH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "유효하지 않은 토큰입니다."),
     AUTH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_EXPIRED", "토큰이 만료되었습니다."),
-    AUTH_EMAIL_REQUIRED_FOR_PASSWORD(HttpStatus.BAD_REQUEST, "AUTH_EMAIL_REQUIRED_FOR_PASSWORD", "이메일이 연동되지 않은 계정은 비밀번호를 설정할 수 없습니다."),
+    // 이미 access token으로 인증된 사용자가 계정 상태/추가 검증 때문에 이 작업을 할 수 없는 경우이므로
+    // (인증 자체가 안 된 게 아님) 401이 아니라 403으로 통일한다 — setPassword()의 세 실패 케이스
+    // (이메일 없음/현재 비밀번호 불일치/dev-login 계정)가 전부 같은 성격이면서도 이전엔 400/401/403이
+    // 뒤섞여 있었다.
+    AUTH_EMAIL_REQUIRED_FOR_PASSWORD(HttpStatus.FORBIDDEN, "AUTH_EMAIL_REQUIRED_FOR_PASSWORD", "이메일이 연동되지 않은 계정은 비밀번호를 설정할 수 없습니다."),
+    // login()의 AUTH_INVALID_CREDENTIALS(401, 미인증 컨텍스트)와 의미가 달라 별도 코드로 분리했다 —
+    // 여긴 이미 인증된 사용자가 2차 확인(현재 비밀번호)에 실패한 경우라 403이 맞다.
+    AUTH_CURRENT_PASSWORD_MISMATCH(HttpStatus.FORBIDDEN, "AUTH_CURRENT_PASSWORD_MISMATCH", "현재 비밀번호가 올바르지 않습니다."),
 
     // Property 도메인
     PROPERTY_NOT_FOUND(HttpStatus.NOT_FOUND, "PROPERTY_NOT_FOUND", "존재하지 않는 매물입니다."),

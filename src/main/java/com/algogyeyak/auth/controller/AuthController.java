@@ -156,7 +156,8 @@ public class AuthController {
     @SecurityRequirement(name = "bearerAuth")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "변경 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "새 비밀번호 형식이 올바르지 않음 (영문+숫자 포함, 8~72자)")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증되지 않았거나 기존 비밀번호가 일치하지 않음")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "access token이 없거나 유효하지 않음 (AUTH_TOKEN_MISSING / AUTH_TOKEN_INVALID / AUTH_TOKEN_EXPIRED)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "이메일이 연동되지 않은 계정, 현재 비밀번호 불일치, 또는 dev-login 계정 (AUTH_EMAIL_REQUIRED_FOR_PASSWORD / AUTH_CURRENT_PASSWORD_MISMATCH / FORBIDDEN)")
     @PatchMapping("/password")
     public ResponseEntity<ApiResponse<Void>> updatePassword(
             @AuthenticationPrincipal JwtUserPrincipal principal,

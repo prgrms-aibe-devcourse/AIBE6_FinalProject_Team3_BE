@@ -213,8 +213,8 @@ class AuthControllerTest {
                         .content("""
                                 {"currentPassword":"wrong-current","newPassword":"newPassword1"}
                                 """))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.code").value("AUTH_INVALID_CREDENTIALS"));
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("AUTH_CURRENT_PASSWORD_MISMATCH"));
     }
 
     @Test

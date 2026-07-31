@@ -197,7 +197,7 @@ class LocalAuthServiceTest {
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> localAuthService.setPassword(1L, null, "newPassword1"));
 
-        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+        assertEquals(ErrorCode.AUTH_CURRENT_PASSWORD_MISMATCH, exception.getErrorCode());
         assertEquals("encoded-hash", user.getPasswordHash());
     }
 
@@ -211,7 +211,7 @@ class LocalAuthServiceTest {
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> localAuthService.setPassword(1L, "wrong-current", "newPassword1"));
 
-        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+        assertEquals(ErrorCode.AUTH_CURRENT_PASSWORD_MISMATCH, exception.getErrorCode());
     }
 
     @Test
