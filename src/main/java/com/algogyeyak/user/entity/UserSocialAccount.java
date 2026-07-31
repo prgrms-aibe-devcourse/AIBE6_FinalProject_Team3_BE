@@ -23,9 +23,8 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.LocalDateTime;
 
 /**
- * 한 User가 동시에 여러 소셜 제공자를 연동할 수 있게 하는 연결 테이블. {@link User#getProvider()}/
- * {@link User#getProviderId()}는 "가장 최근에 로그인에 사용한 수단"만 가리키는 캐시로 남겨두고,
- * "이 유저가 실제로 연동해둔 모든 소셜 계정 목록"은 이 테이블이 진짜 소스다.
+ * 한 User가 동시에 여러 소셜 제공자를 연동할 수 있게 하는 연결 테이블. "이 유저가 실제로 연동해둔
+ * 모든 소셜 계정 목록"의 유일한 소스다 — {@code User}는 더 이상 provider/providerId를 갖지 않는다.
  *
  * LOCAL(이메일/비밀번호)은 여기 포함하지 않는다 — User 자체가 이미 email+passwordHash로 로컬 계정임을
  * 충분히 표현하고, 외부 provider_id 같은 게 애초에 없기 때문이다.

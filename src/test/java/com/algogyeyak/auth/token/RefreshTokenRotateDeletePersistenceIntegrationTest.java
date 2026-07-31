@@ -2,7 +2,6 @@ package com.algogyeyak.auth.token;
 
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,7 +35,7 @@ class RefreshTokenRotateDeletePersistenceIntegrationTest {
     @Test
     void expiredRowIsActuallyGoneAfterRotateThrows() throws Exception {
         User user = userRepository.saveAndFlush(
-                User.createOAuthUser("expired-cleanup@example.com", "만료행유저", "http://img", AuthProvider.KAKAO, "expired-1"));
+                User.createOAuthUser("expired-cleanup@example.com", "만료행유저", "http://img"));
         String rawToken = "already-expired-raw-token";
         refreshTokenRepository.saveAndFlush(RefreshToken.builder()
                 .user(user)

@@ -6,7 +6,6 @@ import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
-import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
@@ -183,7 +182,7 @@ class AuthControllerTest {
     @Test
     void updatePasswordSucceedsForOAuthOnlyAccountWithoutCurrentPassword() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "social@example.com", Role.USER);
-        User user = User.createOAuthUser("social@example.com", "소셜유저", null, AuthProvider.KAKAO, "999");
+        User user = User.createOAuthUser("social@example.com", "소셜유저", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
@@ -337,7 +336,7 @@ class AuthControllerTest {
     void meReturnsCurrentUserWithValidAccessTokenCookie() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         User user = User.createOAuthUser(
-                "test@example.com", "테스트유저", "https://example.com/avatar.png", AuthProvider.KAKAO, "123");
+                "test@example.com", "테스트유저", "https://example.com/avatar.png");
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
 
         mockMvc.perform(get("/auth/me")
@@ -375,7 +374,7 @@ class AuthControllerTest {
     void meRejectsWhenUserHasWithdrawn() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         User user = User.createOAuthUser(
-                "test@example.com", "테스트유저", "https://example.com/avatar.png", AuthProvider.KAKAO, "123");
+                "test@example.com", "테스트유저", "https://example.com/avatar.png");
         user.withdraw();
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
 
@@ -410,7 +409,7 @@ class AuthControllerTest {
     void accessTokenIsRejectedAfterLogout() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         User user = User.createOAuthUser(
-                "test@example.com", "테스트유저", "https://example.com/avatar.png", AuthProvider.KAKAO, "123");
+                "test@example.com", "테스트유저", "https://example.com/avatar.png");
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
 
         mockMvc.perform(post("/auth/logout")
@@ -432,7 +431,7 @@ class AuthControllerTest {
         // 블랙리스트에 오르지 않아, 로그아웃 후에도 만료 전까지 계속 유효했다.
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         User user = User.createOAuthUser(
-                "test@example.com", "테스트유저", "https://example.com/avatar.png", AuthProvider.KAKAO, "123");
+                "test@example.com", "테스트유저", "https://example.com/avatar.png");
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
 
         mockMvc.perform(post("/auth/logout")
@@ -465,7 +464,7 @@ class AuthControllerTest {
 
     @Test
     void refreshIssuesNewAccessAndRefreshTokenCookiesForValidToken() throws Exception {
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         ReflectionTestUtils.setField(user, "id", 1L);
         when(refreshTokenService.rotate("old-refresh-token"))
                 .thenReturn(new RefreshTokenService.RotationResult(user, "new-refresh-token"));

@@ -71,20 +71,12 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     // 재로그인 시 기존 회원의 닉네임/프로필 사진은 OAuth 제공자 값으로 덮어쓰지 않는다.
     // 최초 가입 이후에는 프로필 등록/수정 화면에서 관리하는 값이 우선하므로 그대로 재사용한다.
     //
-    // UserSocialAccount가 "이 유저가 실제로 연동해둔 모든 소셜 계정"의 진짜 소스다 — User.provider/
-    // providerId는 그중 가장 최근에 로그인에 쓴 수단만 가리키는 캐시로, 프로필 화면 등에서
-    // "지금 어떤 계정으로 로그인했는지" 보여줄 때만 참고하면 된다.
+    // UserSocialAccount가 "이 유저가 실제로 연동해둔 모든 소셜 계정"의 유일한 소스다.
     private FindOrCreateResult findOrCreateUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
         Optional<UserSocialAccount> bySocialAccount =
                 userSocialAccountRepository.findByProviderAndProviderId(provider, userInfo.getProviderId());
         if (bySocialAccount.isPresent()) {
-            User user = bySocialAccount.get().getUser();
-            // 이미 연동해둔 다른 provider로 다시 로그인한 경우, "가장 최근 로그인 수단" 캐시만
-            // 갱신한다 — 이미 존재하는 연동이라 새 UserSocialAccount는 만들 필요가 없다.
-            if (user.getProvider() != provider) {
-                user.linkProvider(provider, userInfo.getProviderId());
-            }
-            return new FindOrCreateResult(user, false);
+            return new FindOrCreateResult(bySocialAccount.get().getUser(), false);
         }
 
         Optional<User> linked = linkToExistingAccountByEmail(provider, userInfo);
@@ -105,7 +97,6 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
      */
     private Optional<User> linkToExistingAccountByEmail(AuthProvider provider, OAuth2UserInfo userInfo) {
         return findVerifiedEmailMatch(userInfo).map(user -> {
-            user.linkProvider(provider, userInfo.getProviderId());
             linkNewSocialAccount(user, provider, userInfo.getProviderId());
             return user;
         });
@@ -149,8 +140,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         // 찾을 수 없으니 이 위험 자체가 차단된다. 로컬 가입/로그인과 동일한 정규화를 거치는 것도
         // 마찬가지 이유(대소문자만 다른 이메일이 다른 계정으로 취급되는 것 방지)다.
         String email = userInfo.isEmailVerified() ? EmailNormalizer.normalize(userInfo.getEmail()) : null;
-        User newUser = User.createOAuthUser(
-                email, nickname, userInfo.getProfileImageUrl(), provider, userInfo.getProviderId());
+        User newUser = User.createOAuthUser(email, nickname, userInfo.getProfileImageUrl());
 
         try {
             // INSERT를 별도(REQUIRES_NEW) 트랜잭션/세션에서 시도한다. 같은 세션에서 saveAndFlush가

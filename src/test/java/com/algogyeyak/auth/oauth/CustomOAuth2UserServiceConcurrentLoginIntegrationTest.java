@@ -58,6 +58,7 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
 
         Map<String, Object> kakaoAccount = new HashMap<>();
         kakaoAccount.put("email", email);
+        kakaoAccount.put("is_email_verified", true);
         kakaoAccount.put("profile", profile);
 
         Map<String, Object> attributes = new HashMap<>();
@@ -93,7 +94,7 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
             awaitOrFail(bHasCommitted, "B가 커밋을 완료하지 않았습니다.");
 
             User newUser = User.createOAuthUser(
-                    "concurrent-login@example.com", "동시로그인유저", "http://img", AuthProvider.KAKAO, providerId);
+                    "concurrent-login@example.com", "동시로그인유저", "http://img");
             try {
                 requiresNewTransactionTemplate.executeWithoutResult(innerStatus -> {
                     userRepository.saveAndFlush(newUser);
@@ -125,8 +126,11 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
         assertEquals(bUser.getId(), aUser.getId());
 
         transactionTemplate.executeWithoutResult(status -> {
+            // 이 테스트의 kakaoOAuth2User 픽스처는 is_email_verified를 채우지 않아 실제로는
+            // email이 검증 안 됨(null 저장)으로 처리되므로, email 대신 이 테스트에서만 유일한
+            // nickname으로 식별한다.
             long userCount = userRepository.findAll().stream()
-                    .filter(u -> AuthProvider.KAKAO.equals(u.getProvider()) && providerId.equals(u.getProviderId()))
+                    .filter(u -> "동시로그인유저".equals(u.getNickname()))
                     .count();
             assertEquals(1, userCount);
 

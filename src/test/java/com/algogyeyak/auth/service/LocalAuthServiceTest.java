@@ -3,7 +3,6 @@ package com.algogyeyak.auth.service;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -141,7 +140,7 @@ class LocalAuthServiceTest {
     @Test
     void loginThrowsForSocialOnlyAccountWithoutRevealingItExists() {
         // 소셜 전용 가입은 passwordHash가 없다 — 계정 존재 여부를 드러내지 않도록 일반 자격 증명 오류와 동일하게 처리한다.
-        User socialUser = User.createOAuthUser("social@example.com", "소셜유저", null, AuthProvider.KAKAO, "999");
+        User socialUser = User.createOAuthUser("social@example.com", "소셜유저", null);
         when(userRepository.findByEmail("social@example.com")).thenReturn(Optional.of(socialUser));
 
         BusinessException exception = assertThrows(BusinessException.class,
@@ -161,7 +160,7 @@ class LocalAuthServiceTest {
 
     @Test
     void setPasswordSucceedsForOAuthOnlyAccountWithoutCurrentPassword() {
-        User user = User.createOAuthUser("social@example.com", "소셜유저", null, AuthProvider.KAKAO, "999");
+        User user = User.createOAuthUser("social@example.com", "소셜유저", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
@@ -178,7 +177,7 @@ class LocalAuthServiceTest {
         // login()은 email+passwordHash 조합으로만 계정을 찾으므로, 이런 계정에 비밀번호를 설정해도
         // 그걸로 로그인할 방법이 없다 — 프론트가 "같은 이메일로 로그인할 수도 있어요"라고 안내해놓고
         // 실제로는 불가능한 상황을 막기 위해 여기서 거부해야 한다.
-        User user = User.createOAuthUser(null, "소셜유저", null, AuthProvider.KAKAO, "999");
+        User user = User.createOAuthUser(null, "소셜유저", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 

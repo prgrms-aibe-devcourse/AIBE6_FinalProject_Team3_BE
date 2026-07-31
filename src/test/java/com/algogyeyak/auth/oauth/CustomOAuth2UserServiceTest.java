@@ -85,8 +85,6 @@ class CustomOAuth2UserServiceTest {
         User user = ((CustomOAuth2User) result).getUser();
         assertEquals("테스트유저", user.getNickname());
         assertEquals("test@kakao.com", user.getEmail());
-        assertEquals(AuthProvider.KAKAO, user.getProvider());
-        assertEquals("123", user.getProviderId());
         assertFalse(((CustomOAuth2User) result).isLinkedToExistingAccount());
 
         verify(repository).saveAndFlush(any(User.class));
@@ -101,7 +99,7 @@ class CustomOAuth2UserServiceTest {
         CustomOAuth2UserService service = service(repository, socialAccountRepository);
 
         // 로그인 이후 프로필 등록/수정 화면에서 닉네임과 사진을 직접 바꾼 상태를 가정한다.
-        User existing = User.createOAuthUser("old@kakao.com", "커스텀닉네임", "http://custom", AuthProvider.KAKAO, "123");
+        User existing = User.createOAuthUser("old@kakao.com", "커스텀닉네임", "http://custom");
         UserSocialAccount existingSocialAccount = UserSocialAccount.of(existing, AuthProvider.KAKAO, "123");
         when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123"))
                 .thenReturn(Optional.of(existingSocialAccount));
@@ -141,7 +139,7 @@ class CustomOAuth2UserServiceTest {
         UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
         CustomOAuth2UserService service = service(repository, socialAccountRepository);
 
-        User winner = User.createOAuthUser("test@kakao.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User winner = User.createOAuthUser("test@kakao.com", "테스트유저", "http://img");
         UserSocialAccount winnerSocialAccount = UserSocialAccount.of(winner, AuthProvider.KAKAO, "123");
 
         // 첫 조회 시점엔 아직 아무도 없다고 나오지만(레이스), save 시도 시 다른 스레드가 먼저 커밋해서 유니크 제약 위반이 난다.
@@ -173,9 +171,6 @@ class CustomOAuth2UserServiceTest {
 
         User user = ((CustomOAuth2User) result).getUser();
         assertEquals(existingLocalUser, user);
-        // 새 User row를 만드는 게 아니라 기존 계정에 이번 로그인 수단을 새로 연동한 것뿐이다.
-        assertEquals(AuthProvider.KAKAO, user.getProvider());
-        assertEquals("123", user.getProviderId());
         // 로컬 로그인이 계속 가능하도록 이메일/비밀번호 해시는 그대로 유지되어야 한다.
         assertEquals("encoded-hash", user.getPasswordHash());
         assertEquals("로컬유저", user.getNickname());
@@ -205,7 +200,6 @@ class CustomOAuth2UserServiceTest {
 
         User user = ((CustomOAuth2User) result).getUser();
         assertEquals(existingLocalUser, user);
-        assertEquals(AuthProvider.KAKAO, user.getProvider());
         assertTrue(((CustomOAuth2User) result).isLinkedToExistingAccount());
         verify(repository, never()).saveAndFlush(any(User.class));
     }
@@ -231,7 +225,6 @@ class CustomOAuth2UserServiceTest {
                         "kakao", kakaoOAuth2User(123L, "카카오닉네임", "http://img", "shared@example.com", false)));
 
         // 실패 처리 과정에서도 기존 계정이 이번 로그인 수단으로 연동되지 않은 채 그대로 남아 있어야 한다.
-        assertEquals(AuthProvider.LOCAL, existingUser.getProvider());
         verify(socialAccountRepository, never()).saveAndFlush(any(UserSocialAccount.class));
     }
 
@@ -254,7 +247,6 @@ class CustomOAuth2UserServiceTest {
         // null로 저장하면 findByEmail이 이 row를 절대 찾을 수 없어 그 위험이 원천 차단된다.
         User user = ((CustomOAuth2User) result).getUser();
         assertEquals(null, user.getEmail());
-        assertEquals(AuthProvider.KAKAO, user.getProvider());
         assertFalse(((CustomOAuth2User) result).isLinkedToExistingAccount());
     }
 
@@ -284,10 +276,8 @@ class CustomOAuth2UserServiceTest {
         UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
         CustomOAuth2UserService service = service(repository, socialAccountRepository);
 
-        // 구글로 가입했고, 이후 카카오도 연동해둔 유저 — 지금은 가장 최근에 카카오로 로그인해서
-        // User.provider가 KAKAO로 캐시돼 있는 상태를 가정한다.
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.GOOGLE, "google-1");
-        user.linkProvider(AuthProvider.KAKAO, "kakao-1");
+        // 구글로 가입했고, 이후 카카오도 연동해둔 유저가 다시 구글로 로그인하는 상황.
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         UserSocialAccount googleAccount = UserSocialAccount.of(user, AuthProvider.GOOGLE, "google-1");
         when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.GOOGLE, "google-1"))
                 .thenReturn(Optional.of(googleAccount));
@@ -304,9 +294,7 @@ class CustomOAuth2UserServiceTest {
 
         // 이미 연동돼 있던 구글로 다시 로그인한 것뿐이라 새 연동(linked=true)이 아니다.
         assertFalse(((CustomOAuth2User) result).isLinkedToExistingAccount());
-        // "가장 최근 로그인 수단" 캐시가 다시 구글로 갱신되어야 한다.
-        assertEquals(AuthProvider.GOOGLE, user.getProvider());
-        assertEquals("google-1", user.getProviderId());
+        assertEquals(user, ((CustomOAuth2User) result).getUser());
         // 이미 존재하는 연동이므로 새 UserSocialAccount를 만들 필요가 없다.
         verify(socialAccountRepository, never()).saveAndFlush(any(UserSocialAccount.class));
         verify(repository, never()).saveAndFlush(any(User.class));
@@ -320,7 +308,7 @@ class CustomOAuth2UserServiceTest {
 
         // 구글로 이미 가입돼 있는 유저가 처음으로 카카오도 연동하는 상황.
         User existingGoogleUser =
-                User.createOAuthUser("shared@example.com", "구글유저", "http://img", AuthProvider.GOOGLE, "google-1");
+                User.createOAuthUser("shared@example.com", "구글유저", "http://img");
         when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "kakao-1")).thenReturn(Optional.empty());
         when(repository.findByEmail("shared@example.com")).thenReturn(Optional.of(existingGoogleUser));
         when(socialAccountRepository.saveAndFlush(any(UserSocialAccount.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -331,8 +319,6 @@ class CustomOAuth2UserServiceTest {
         User user = ((CustomOAuth2User) result).getUser();
         assertEquals(existingGoogleUser, user);
         assertTrue(((CustomOAuth2User) result).isLinkedToExistingAccount());
-        // 카카오가 새로 연동되어 "가장 최근 로그인 수단"이 카카오로 바뀌었어야 한다.
-        assertEquals(AuthProvider.KAKAO, user.getProvider());
         // 구글 연동 자체가 사라진 건 아니다 — 이 유저가 다시 구글로 로그인하면 여전히 같은 계정을
         // 찾을 수 있어야 한다는 게 다중 연동의 핵심이므로, 새 UserSocialAccount(카카오)가 추가로
         // 만들어졌는지만 확인한다(구글 row는 처음부터 건드리지 않았다).

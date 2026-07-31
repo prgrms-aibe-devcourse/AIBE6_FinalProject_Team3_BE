@@ -3,7 +3,6 @@ package com.algogyeyak.auth.token;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -30,7 +29,7 @@ class RefreshTokenServiceTest {
             new RefreshTokenService(refreshTokenRepository, transactionManager);
 
     private User user(Long id) {
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         ReflectionTestUtils.setField(user, "id", id);
         return user;
     }
