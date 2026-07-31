@@ -7,7 +7,10 @@ import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
+import com.algogyeyak.property.dto.PropertySearchCondition;
 import com.algogyeyak.property.dto.PropertyUpdateRequest;
+import com.algogyeyak.property.entity.PropertyType;
+import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.service.PropertyService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -45,13 +49,26 @@ public class PropertyController {
     /**
      * 본인이 등록한 매물 목록 조회. (개인 분석 도구 성격상 전체 공개 매물 검색이 아니라 본인 소유 매물만 반환)
      * 기본 정렬은 등록일 최신순, 기본 페이지 크기는 20 (최대 100 - PageableUtils.validateMaxSize).
+     * region/minArea/maxArea/transactionType/propertyType/minDeposit/maxDeposit은 전부 선택 파라미터 -
+     * 아무것도 안 넘기면 기존과 동일하게 본인 소유 전체 목록을 반환한다.
      */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<PropertyListResponse>>> list(
             @AuthenticationPrincipal JwtUserPrincipal principal,
-            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
+            @RequestParam(required = false) String region,
+            @RequestParam(required = false) Double minArea,
+            @RequestParam(required = false) Double maxArea,
+            @RequestParam(required = false) TransactionType transactionType,
+            @RequestParam(required = false) PropertyType propertyType,
+            @RequestParam(required = false) Long minDeposit,
+            @RequestParam(required = false) Long maxDeposit
     ) {
-        PageResponse<PropertyListResponse> response = propertyService.getMyProperties(principal.userId(), pageable);
+        PropertySearchCondition condition = new PropertySearchCondition(
+                region, minArea, maxArea, transactionType, propertyType, minDeposit, maxDeposit
+        );
+        PageResponse<PropertyListResponse> response =
+                propertyService.getMyProperties(principal.userId(), pageable, condition);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

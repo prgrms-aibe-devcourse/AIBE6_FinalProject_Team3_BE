@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 
 import com.algogyeyak.checklist.repository.ChecklistRepository;
@@ -19,6 +20,7 @@ import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
+import com.algogyeyak.property.dto.PropertySearchCondition;
 import com.algogyeyak.property.dto.PropertyUpdateRequest;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
@@ -328,10 +330,14 @@ class PropertyServiceTest {
         property.assignAddress(address);
 
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
-        when(propertyRepository.findAllByUserIdAndStatus(USER_ID, PropertyStatus.ACTIVE, pageable))
-                .thenReturn(new PageImpl<>(List.of(property), pageable, 1));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
-        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable);
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
 
         assertThat(result.content()).hasSize(1);
         assertThat(result.content().get(0).roadAddress()).isEqualTo("서울특별시 강남구 테헤란로 123");
@@ -344,7 +350,7 @@ class PropertyServiceTest {
     void 허용되지_않은_정렬필드로_목록조회하면_예외가_발생한다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "userId"));
 
-        assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable))
+        assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty()))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INVALID_SORT_FIELD);
@@ -354,10 +360,72 @@ class PropertyServiceTest {
     void 페이지_크기가_최대치를_초과하면_예외가_발생한다() {
         Pageable pageable = PageRequest.of(0, 101, Sort.by(Sort.Direction.DESC, "createdAt"));
 
-        assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable))
+        assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty()))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.BAD_REQUEST);
+    }
+
+    @Test
+    void 지역_검색어로_필터링하면_repository_search에_region이_전달된다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                "역삼동", null, null, null, null, null, null
+        );
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                eq("역삼동"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable, condition);
+
+        assertThat(result.content()).isEmpty();
+    }
+
+    @Test
+    void 면적_거래유형_매물유형_보증금_조건이_repository_search에_그대로_전달된다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                null, 20.0, 30.0, TransactionType.JEONSE, PropertyType.OFFICETEL, 10_000_000L, 50_000_000L
+        );
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), eq(20.0), eq(30.0),
+                eq(TransactionType.JEONSE), eq(PropertyType.OFFICETEL),
+                eq(10_000_000L), eq(50_000_000L),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable, condition);
+
+        assertThat(result.content()).isEmpty();
+    }
+
+    @Test
+    void 면적_최소값이_최대값보다_크면_예외가_발생한다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                null, 30.0, 20.0, null, null, null, null
+        );
+
+        assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, condition))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION);
+    }
+
+    @Test
+    void 보증금_최소값이_최대값보다_크면_예외가_발생한다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                null, null, null, null, null, 50_000_000L, 10_000_000L
+        );
+
+        assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, condition))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION);
     }
 
     @Test

@@ -23,6 +23,7 @@ import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
+import com.algogyeyak.property.dto.PropertySearchCondition;
 import com.algogyeyak.property.dto.PropertyUpdateRequest;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
@@ -148,7 +149,8 @@ class PropertyControllerTest {
 
         Pageable pageable = PageRequest.of(0, 20);
         Page<PropertyListResponse> page = new PageImpl<>(List.of(item), pageable, 1);
-        when(propertyService.getMyProperties(anyLong(), any(Pageable.class))).thenReturn(PageResponse.from(page));
+        when(propertyService.getMyProperties(anyLong(), any(Pageable.class), any(PropertySearchCondition.class)))
+                .thenReturn(PageResponse.from(page));
 
         mockMvc.perform(get("/properties")
                         .with(asUser(USER_ID))
@@ -162,8 +164,39 @@ class PropertyControllerTest {
     }
 
     @Test
+    void 매물_목록조회시_쿼리파라미터가_검색조건으로_전달된다() throws Exception {
+        Pageable pageable = PageRequest.of(0, 20);
+        Page<PropertyListResponse> page = new PageImpl<>(List.of(), pageable, 0);
+        org.mockito.ArgumentCaptor<PropertySearchCondition> captor =
+                org.mockito.ArgumentCaptor.forClass(PropertySearchCondition.class);
+        when(propertyService.getMyProperties(anyLong(), any(Pageable.class), captor.capture()))
+                .thenReturn(PageResponse.from(page));
+
+        mockMvc.perform(get("/properties")
+                        .queryParam("region", "역삼동")
+                        .queryParam("minArea", "20")
+                        .queryParam("maxArea", "30")
+                        .queryParam("transactionType", "JEONSE")
+                        .queryParam("propertyType", "OFFICETEL")
+                        .queryParam("minDeposit", "10000000")
+                        .queryParam("maxDeposit", "50000000")
+                        .with(asUser(USER_ID))
+                        .with(csrf()))
+                .andExpect(status().isOk());
+
+        PropertySearchCondition captured = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(captured.region()).isEqualTo("역삼동");
+        org.assertj.core.api.Assertions.assertThat(captured.minArea()).isEqualTo(20.0);
+        org.assertj.core.api.Assertions.assertThat(captured.maxArea()).isEqualTo(30.0);
+        org.assertj.core.api.Assertions.assertThat(captured.transactionType()).isEqualTo(TransactionType.JEONSE);
+        org.assertj.core.api.Assertions.assertThat(captured.propertyType()).isEqualTo(PropertyType.OFFICETEL);
+        org.assertj.core.api.Assertions.assertThat(captured.minDeposit()).isEqualTo(10_000_000L);
+        org.assertj.core.api.Assertions.assertThat(captured.maxDeposit()).isEqualTo(50_000_000L);
+    }
+
+    @Test
     void 허용되지_않은_정렬필드로_목록조회하면_400을_반환한다() throws Exception {
-        when(propertyService.getMyProperties(anyLong(), any(Pageable.class)))
+        when(propertyService.getMyProperties(anyLong(), any(Pageable.class), any(PropertySearchCondition.class)))
                 .thenThrow(new BusinessException(ErrorCode.INVALID_SORT_FIELD));
 
         mockMvc.perform(get("/properties")
