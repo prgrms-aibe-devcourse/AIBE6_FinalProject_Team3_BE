@@ -48,32 +48,40 @@ public class FakeListingSignalService {
         RiskSignalType signalType = detector.type();
         SignalCheckResult result = detector.detect(property, comparison);
 
-        Long checkId = upsertCheck(property.getId(), signalType, result.status(), result.reason());
-
-        riskRepository.deleteByPropertyIdAndSignalType(property.getId(), signalType);
-
-        if (result.status() == RiskCheckStatus.SUCCESS && !result.detectedSignals().isEmpty()) {
-            List<PropertyRisk> entities = result.detectedSignals().stream()
-                    .map(signal -> PropertyRisk.of(checkId, property.getId(), signalType, signal.description()))
-                    .toList();
-            riskRepository.saveAll(entities);
-        }
+        upsertCheck(property, signalType, result.status(), result.reason());
+        upsertRisk(property, signalType, result);
     }
 
-    private Long upsertCheck(Long propertyId, RiskSignalType signalType, RiskCheckStatus status, RiskCheckReason reason) {
-        PropertyRiskCheck check = riskCheckRepository.findByPropertyIdAndSignalType(propertyId, signalType)
+    private void upsertCheck(Property property, RiskSignalType signalType, RiskCheckStatus status, RiskCheckReason reason) {
+        PropertyRiskCheck check = riskCheckRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
                 .orElse(null);
 
         if (check == null) {
             PropertyRiskCheck newCheck = switch (status) {
-                case SUCCESS -> PropertyRiskCheck.success(propertyId, signalType, policyConfig.getVersion());
-                case UNDETERMINABLE -> PropertyRiskCheck.undeterminable(propertyId, signalType, reason, policyConfig.getVersion());
-                case FAILED -> PropertyRiskCheck.failed(propertyId, signalType, reason, policyConfig.getVersion());
+                case SUCCESS -> PropertyRiskCheck.success(property, signalType, policyConfig.getVersion());
+                case UNDETERMINABLE -> PropertyRiskCheck.undeterminable(property, signalType, reason, policyConfig.getVersion());
+                case FAILED -> PropertyRiskCheck.failed(property, signalType, reason, policyConfig.getVersion());
             };
-            return riskCheckRepository.save(newCheck).getId();
+            riskCheckRepository.save(newCheck);
+            return;
         }
 
         check.overwrite(status, reason, policyConfig.getVersion());
-        return check.getId();
+    }
+
+    // status=SUCCESS이고 설명이 있는 경우에만 리스크 1건을 upsert하고, 그 외(신호 해소·판정불가·실패)에는
+    // 이전에 저장해둔 리스크가 있다면 지운다 — property_risks는 (property_id, signal_type)당 최신 판정
+    // 결과 1건만 유지한다.
+    private void upsertRisk(Property property, RiskSignalType signalType, SignalCheckResult result) {
+        if (result.status() != RiskCheckStatus.SUCCESS || result.description() == null) {
+            riskRepository.deleteByPropertyIdAndSignalType(property.getId(), signalType);
+            return;
+        }
+
+        riskRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
+                .ifPresentOrElse(
+                        risk -> risk.overwrite(result.description()),
+                        () -> riskRepository.save(PropertyRisk.of(property, signalType, result.description()))
+                );
     }
 }

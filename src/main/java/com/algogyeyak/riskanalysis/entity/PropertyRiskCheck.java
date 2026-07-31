@@ -1,5 +1,6 @@
 package com.algogyeyak.riskanalysis.entity;
 
+import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.riskanalysis.enums.RiskCheckReason;
 import com.algogyeyak.riskanalysis.enums.RiskCheckStatus;
 import com.algogyeyak.riskanalysis.enums.RiskSignalType;
@@ -23,8 +24,9 @@ public class PropertyRiskCheck {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "property_id", nullable = false)
-    private Long propertyId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "property_id", nullable = false)
+    private Property property;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "signal_type", nullable = false)
@@ -44,10 +46,10 @@ public class PropertyRiskCheck {
     private LocalDateTime checkedAt;
 
     @Builder
-    private PropertyRiskCheck(Long propertyId, RiskSignalType signalType, RiskCheckStatus status,
+    private PropertyRiskCheck(Property property, RiskSignalType signalType, RiskCheckStatus status,
                               RiskCheckReason reason, String policyVersion,
                               LocalDateTime checkedAt) {
-        this.propertyId = propertyId;
+        this.property = property;
         this.signalType = signalType;
         this.status = status;
         this.reason = reason;
@@ -55,9 +57,9 @@ public class PropertyRiskCheck {
         this.checkedAt = checkedAt;
     }
 
-    public static PropertyRiskCheck success(Long propertyId, RiskSignalType signalType, String policyVersion) {
+    public static PropertyRiskCheck success(Property property, RiskSignalType signalType, String policyVersion) {
         return PropertyRiskCheck.builder()
-                .propertyId(propertyId)
+                .property(property)
                 .signalType(signalType)
                 .status(RiskCheckStatus.SUCCESS)
                 .reason(null)
@@ -66,9 +68,9 @@ public class PropertyRiskCheck {
                 .build();
     }
 
-    public static PropertyRiskCheck undeterminable(Long propertyId, RiskSignalType signalType, RiskCheckReason reason, String policyVersion) {
+    public static PropertyRiskCheck undeterminable(Property property, RiskSignalType signalType, RiskCheckReason reason, String policyVersion) {
         return PropertyRiskCheck.builder()
-                .propertyId(propertyId)
+                .property(property)
                 .signalType(signalType)
                 .status(RiskCheckStatus.UNDETERMINABLE)
                 .reason(reason)
@@ -77,9 +79,9 @@ public class PropertyRiskCheck {
                 .build();
     }
 
-    public static PropertyRiskCheck failed(Long propertyId, RiskSignalType signalType, RiskCheckReason reason, String policyVersion) {
+    public static PropertyRiskCheck failed(Property property, RiskSignalType signalType, RiskCheckReason reason, String policyVersion) {
         return PropertyRiskCheck.builder()
-                .propertyId(propertyId)
+                .property(property)
                 .signalType(signalType)
                 .status(RiskCheckStatus.FAILED)
                 .reason(reason)

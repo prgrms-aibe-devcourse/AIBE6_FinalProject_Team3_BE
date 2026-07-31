@@ -10,7 +10,6 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -23,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ChecklistResponseTest {
 
     private User testUser() {
-        return User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        return User.createOAuthUser("test@example.com", "테스트유저", "http://img");
     }
 
     private Property testProperty(Long id) {

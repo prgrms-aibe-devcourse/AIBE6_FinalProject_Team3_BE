@@ -5,8 +5,10 @@ import com.algogyeyak.riskanalysis.enums.RiskSignalType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface PropertyRiskRepository extends JpaRepository<PropertyRisk, Long> {
-    List<PropertyRisk> findByPropertyIdOrderByDetectedAtDesc(Long propertyId);
-    void deleteByPropertyIdAndSignalType(Long propertyId, RiskSignalType signalType); // 신호별 재계산 시 해당 신호 결과만 삭제
+    Optional<PropertyRisk> findByPropertyIdAndSignalType(Long propertyId, RiskSignalType signalType);
+    List<PropertyRisk> findAllByPropertyId(Long propertyId);
+    void deleteByPropertyIdAndSignalType(Long propertyId, RiskSignalType signalType); // 신호가 더 이상 감지되지 않을 때 삭제
 }
