@@ -6,6 +6,7 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -215,6 +216,7 @@ class LocalAuthServiceTest {
                 () -> localAuthService.setPassword(1L, null, "newPassword1"));
 
         assertEquals(ErrorCode.AUTH_EMAIL_REQUIRED_FOR_PASSWORD, exception.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
         assertEquals(null, user.getPasswordHash());
     }
 
@@ -228,6 +230,7 @@ class LocalAuthServiceTest {
                 () -> localAuthService.setPassword(1L, null, "newPassword1"));
 
         assertEquals(ErrorCode.AUTH_CURRENT_PASSWORD_MISMATCH, exception.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
         assertEquals("encoded-hash", user.getPasswordHash());
     }
 
@@ -242,6 +245,7 @@ class LocalAuthServiceTest {
                 () -> localAuthService.setPassword(1L, "wrong-current", "newPassword1"));
 
         assertEquals(ErrorCode.AUTH_CURRENT_PASSWORD_MISMATCH, exception.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
     }
 
     @Test
@@ -278,6 +282,7 @@ class LocalAuthServiceTest {
                 () -> localAuthService.setPassword(1L, null, "newPassword1"));
 
         assertEquals(ErrorCode.FORBIDDEN, exception.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
         assertEquals(null, admin.getPasswordHash());
     }
 }

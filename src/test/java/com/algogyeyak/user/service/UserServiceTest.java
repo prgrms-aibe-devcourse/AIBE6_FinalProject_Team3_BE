@@ -9,6 +9,7 @@ import com.algogyeyak.user.enums.TransactionType;
 import com.algogyeyak.user.repository.UserPreferenceRepository;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
@@ -50,6 +51,7 @@ class UserServiceTest {
                 () -> userService.registerProfile(1L, registerRequest(null)));
 
         assertEquals(ErrorCode.USER_PROFILE_ALREADY_EXISTS, exception.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
     }
 
     @Test
@@ -63,6 +65,7 @@ class UserServiceTest {
                 () -> userService.registerProfile(1L, registerRequest("중복닉네임")));
 
         assertEquals(ErrorCode.USER_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
     }
 
     @Test
@@ -78,5 +81,6 @@ class UserServiceTest {
                 () -> userService.updateMyProfile(1L, request));
 
         assertEquals(ErrorCode.USER_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
     }
 }
