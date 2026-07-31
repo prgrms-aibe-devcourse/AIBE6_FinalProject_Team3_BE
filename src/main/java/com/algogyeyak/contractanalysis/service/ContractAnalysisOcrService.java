@@ -3,8 +3,10 @@ package com.algogyeyak.contractanalysis.service;
 import com.algogyeyak.contractanalysis.client.ClovaOcrClient;
 import com.algogyeyak.contractanalysis.client.dto.ClovaOcrResponse;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisOcrResponse;
+import com.algogyeyak.contractanalysis.dto.ContractAnalysisOcrResponse.UncertainField;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
@@ -13,8 +15,8 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 public class ContractAnalysisOcrService {
 
-    private static final String OCR_LOW_CONFIDENCE_FALLBACK = "MANUAL_INPUT";
-    private static final double MIN_CONFIDENCE = 0.7;
+    // 거부 기준이 아니라, 프론트가 사용자에게 "확인이 필요합니다"라고 표시해줄 참고용 임계값이다.
+    private static final double UNCERTAIN_CONFIDENCE_THRESHOLD = 0.7;
     private static final long MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
     private static final Map<String, String> CONTENT_TYPE_TO_CLOVA_FORMAT = Map.of(
             "image/jpeg", "jpg",
@@ -37,26 +39,25 @@ public class ContractAnalysisOcrService {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_OCR_EMPTY_RESULT);
         }
 
-        double minConfidence = fields.stream()
-                .mapToDouble(this::confidenceOf)
-                .min()
-                .orElse(0);
-
-        if (minConfidence < MIN_CONFIDENCE) {
-            throw new BusinessException(
-                    ErrorCode.CONTRACT_ANALYSIS_OCR_LOW_CONFIDENCE,
-                    ErrorCode.CONTRACT_ANALYSIS_OCR_LOW_CONFIDENCE.getMessage(),
-                    OCR_LOW_CONFIDENCE_FALLBACK
-            );
-        }
-
         String extractedText = joinFields(fields);
         double averageConfidence = fields.stream()
                 .mapToDouble(this::confidenceOf)
                 .average()
                 .orElse(0);
+        List<UncertainField> uncertainFields = findUncertainFields(fields);
 
-        return ContractAnalysisOcrResponse.of(extractedText, roundToTwoDecimals(averageConfidence));
+        return ContractAnalysisOcrResponse.of(extractedText, roundToTwoDecimals(averageConfidence), uncertainFields);
+    }
+
+    private List<UncertainField> findUncertainFields(List<ClovaOcrResponse.Field> fields) {
+        List<UncertainField> uncertainFields = new ArrayList<>();
+        for (int i = 0; i < fields.size(); i++) {
+            ClovaOcrResponse.Field field = fields.get(i);
+            if (confidenceOf(field) < UNCERTAIN_CONFIDENCE_THRESHOLD) {
+                uncertainFields.add(new UncertainField(field.inferText(), i));
+            }
+        }
+        return uncertainFields;
     }
 
     private String validateAndResolveFormat(MultipartFile image) {

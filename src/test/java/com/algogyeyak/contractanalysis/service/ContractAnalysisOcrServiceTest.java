@@ -1,6 +1,5 @@
 package com.algogyeyak.contractanalysis.service;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -39,44 +38,43 @@ class ContractAnalysisOcrServiceTest {
     }
 
     @Test
-    void recognizeThrowsLowConfidenceWhenAnyFieldBelowThreshold() {
-        // 나머지는 신뢰도가 높아도, 필드 하나(0.65)가 0.7 미만이면 전체가 실패해야 한다.
+    void recognizeSucceedsAndReportsUncertainFieldsWhenSomeFieldsBelowThreshold() {
+        // 나머지 필드 신뢰도가 높더라도, 필드 하나(0.65)가 0.7 미만이라는 이유로 더 이상 전체를 실패시키지 않는다.
+        // 대신 낮은 신뢰도 필드를 uncertainFields로 참고 정보만 내려준다.
         when(clovaOcrClient.recognize(any(), anyString()))
                 .thenReturn(responseWithConfidences(0.99, 0.65, 0.98));
 
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> service.recognize(jpegImage())
-        );
+        ContractAnalysisOcrResponse response = service.recognize(jpegImage());
 
-        assertEquals(ErrorCode.CONTRACT_ANALYSIS_OCR_LOW_CONFIDENCE, exception.getErrorCode());
-        assertEquals("MANUAL_INPUT", exception.getFallback());
+        assertEquals(1, response.uncertainFields().size());
+        assertEquals(1, response.uncertainFields().get(0).index());
+        assertEquals("단어", response.uncertainFields().get(0).text());
     }
 
     @Test
-    void recognizeThrowsLowConfidenceWhenFieldConfidenceIsNull() {
-        // Clova가 특정 필드에 confidence를 안 내려주는 경우 0.0으로 취급해 안전하게 걸러야 한다.
+    void recognizeTreatsNullFieldConfidenceAsUncertain() {
+        // Clova가 특정 필드에 confidence를 안 내려주는 경우 0.0으로 취급해 uncertainFields에 담아야 한다.
         List<ClovaOcrResponse.Field> fields = List.of(
                 new ClovaOcrResponse.Field("단어", null, false)
         );
         when(clovaOcrClient.recognize(any(), anyString()))
                 .thenReturn(new ClovaOcrResponse(List.of(new ClovaOcrResponse.Image("SUCCESS", fields))));
 
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> service.recognize(jpegImage())
-        );
+        ContractAnalysisOcrResponse response = service.recognize(jpegImage());
 
-        assertEquals(ErrorCode.CONTRACT_ANALYSIS_OCR_LOW_CONFIDENCE, exception.getErrorCode());
+        assertEquals(1, response.uncertainFields().size());
+        assertEquals(0, response.uncertainFields().get(0).index());
     }
 
     @Test
-    void recognizeSucceedsWhenConfidenceIsExactlyAtThreshold() {
-        // 0.7 "미만"만 실패해야 하므로, 정확히 0.7인 경우는 통과해야 한다.
+    void recognizeReportsNoUncertainFieldsWhenConfidenceIsExactlyAtThreshold() {
+        // 0.7 "미만"만 불확실로 표시해야 하므로, 정확히 0.7인 경우는 uncertainFields에 포함되지 않는다.
         when(clovaOcrClient.recognize(any(), anyString()))
                 .thenReturn(responseWithConfidences(0.7, 0.7));
 
-        assertDoesNotThrow(() -> service.recognize(jpegImage()));
+        ContractAnalysisOcrResponse response = service.recognize(jpegImage());
+
+        assertEquals(0, response.uncertainFields().size());
     }
 
     @Test
@@ -88,5 +86,19 @@ class ContractAnalysisOcrServiceTest {
 
         assertEquals(0.9, response.confidence());
         assertEquals(true, response.editable());
+        assertEquals(0, response.uncertainFields().size());
+    }
+
+    @Test
+    void recognizeThrowsEmptyResultWhenNoFieldsRecognized() {
+        when(clovaOcrClient.recognize(any(), anyString()))
+                .thenReturn(new ClovaOcrResponse(List.of(new ClovaOcrResponse.Image("SUCCESS", List.of()))));
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.recognize(jpegImage())
+        );
+
+        assertEquals(ErrorCode.CONTRACT_ANALYSIS_OCR_EMPTY_RESULT, exception.getErrorCode());
     }
 }
