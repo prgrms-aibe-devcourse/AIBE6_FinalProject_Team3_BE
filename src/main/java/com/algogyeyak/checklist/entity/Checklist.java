@@ -96,6 +96,7 @@ public class Checklist {
                     .category(template.getCategory())
                     .content(template.getContent())
                     .guideText(template.getGuideText())
+                    .helperText(template.getHelperText())
                     .importance(template.getImportance())
                     .itemType(template.getItemType())
                     .code(template.getCode())
