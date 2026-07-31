@@ -178,6 +178,12 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             return userSocialAccountRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
                     .map(UserSocialAccount::getUser)
                     .or(() -> findVerifiedEmailMatch(userInfo))
+                    .map(winner -> {
+                        // 동시 레이스로 복구된 winner도 다른 모든 경로와 동일하게 정지/탈퇴 여부를
+                        // 확인해야 한다 - 그렇지 않으면 이 레이스 케이스만 그 검사를 우회하게 된다.
+                        rejectIfBlocked(winner);
+                        return winner;
+                    })
                     .orElseThrow(() -> new OAuth2AuthenticationException(
                             new OAuth2Error("email_conflict", "이미 사용 중인 이메일입니다.", null), e));
         }

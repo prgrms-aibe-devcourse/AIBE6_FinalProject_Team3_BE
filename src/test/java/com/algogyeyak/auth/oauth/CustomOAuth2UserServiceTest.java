@@ -320,6 +320,30 @@ class CustomOAuth2UserServiceTest {
     }
 
     @Test
+    void rejectsLoginWhenWinnerRecoveredFromConcurrentRaceHasBeenSuspended() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        // createUser()가 유니크 제약 위반 후 findByProviderAndProviderId()/findVerifiedEmailMatch()로
+        // 복구하는 winner 경로에도 rejectIfBlocked()가 빠져 있었다 - 동시 레이스에서 복구된 계정이
+        // 정지 상태여도 그대로 로그인되던 구멍의 회귀 테스트.
+        User winner = User.createOAuthUser("test@kakao.com", "테스트유저", "http://img");
+        winner.suspend();
+        UserSocialAccount winnerSocialAccount = UserSocialAccount.of(winner, AuthProvider.KAKAO, "123");
+
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winnerSocialAccount));
+        when(repository.saveAndFlush(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+
+        assertThrows(OAuth2AuthenticationException.class,
+                () -> service.processOAuth2User(
+                        "kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com")));
+    }
+
+    @Test
     void rejectsLoginAndDoesNotLinkWhenExistingAccountFoundByEmailHasWithdrawn() {
         UserRepository repository = mock(UserRepository.class);
         UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
