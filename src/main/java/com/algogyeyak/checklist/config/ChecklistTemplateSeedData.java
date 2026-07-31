@@ -64,7 +64,7 @@ public final class ChecklistTemplateSeedData {
         order = add(templates, ChecklistCategory.DOCUMENTS, "등기부등본을 확인했나요?", null,
                 "등기부등본은 이 집이 진짜 누구 것인지, 빚(대출)이 얼마나 있는지 나라에서 보여주는 서류예요. "
                         + "인터넷등기소(iros.go.kr)에서 적은 돈(700원 정도)만 내면 바로 확인할 수 있어요. "
-                        + "계약 전에 꼭 확인해서, 지금 계약하려는 사람이 진짜 주인이 맞는지, 빚이 너무 많지는 않은지 봐야 해요.",
+                        + "계약 전에 꼭 확인해서, **지금 계약하려는 사람이 진짜 주인이 맞는지**, 빚이 너무 많지는 않은지 봐야 해요.",
                 ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, order);
         order = add(templates, ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?",
                 "신탁등기가 있으면 실소유자가 별도로 있어 계약 권한이 다를 수 있어요.",
@@ -72,19 +72,19 @@ public final class ChecklistTemplateSeedData {
                         + "여행 갈 때 친구한테 '내 물건 좀 봐줘'라고 맡기는 것과 비슷해요. "
                         + "이렇게 맡기고 나면, 서류상으로는 신탁회사가 진짜 주인이 돼요. "
                         + "그래서 원래 집주인이 세입자랑 계약을 해도, 진짜 주인 역할을 하는 신탁회사가 '그 계약 괜찮아요'라고 허락해줘야 안전해요. "
-                        + "허락 없이 계약하면 나중에 신탁회사가 '난 모르는 계약이에요'라고 인정 안 해줄 수 있고, 그럼 보증금을 못 돌려받을 수도 있어요.",
+                        + "허락 없이 계약하면 나중에 신탁회사가 '난 모르는 계약이에요'라고 인정 안 해줄 수 있고, 그럼 **보증금을 못 돌려받을 수도 있어요**.",
                 ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, ChecklistItemCode.TRUST_REGISTRATION, order);
         order = add(templates, ChecklistCategory.DOCUMENTS, "등기부등본상 소유자와 임대인(계약 당사자)의 명의가 다른가요?",
                 "명의가 다르면 위임장 등 대리 계약 권한을 별도로 확인해야 해요.",
                 "등기부등본에 적힌 진짜 집주인이랑, 지금 나랑 계약하는 사람이 다른 경우예요. "
-                        + "이럴 땐 그 사람이 진짜 주인 허락 없이 마음대로 계약하는 걸 수도 있어서, 나중에 진짜 주인이 '난 그런 계약 몰라요'라고 하면 계약이 취소되고 보증금을 못 돌려받을 수 있어요. "
-                        + "그래서 명의가 다를 땐, 진짜 주인이 '이 사람이 대신 계약해도 돼요'라고 써준 서류(위임장)가 있는지 꼭 확인해야 해요.",
+                        + "이럴 땐 그 사람이 진짜 주인 허락 없이 마음대로 계약하는 걸 수도 있어서, 나중에 진짜 주인이 '난 그런 계약 몰라요'라고 하면 계약이 취소되고 **보증금을 못 돌려받을 수 있어요**. "
+                        + "그래서 명의가 다를 땐, 진짜 주인이 '이 사람이 대신 계약해도 돼요'라고 써준 **서류(위임장)가 있는지 꼭 확인**해야 해요.",
                 ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, ChecklistItemCode.OWNERSHIP_MATCH, order);
         order = add(templates, ChecklistCategory.DOCUMENTS, "소유권 취득일을 확인했나요?",
                 "최근에 소유권이 바뀐 집은, 전세가율이 이미 높은 경우 보증금 반환 위험이 더 커질 수 있어요.",
                 "얼마 전에 주인이 바뀐 집은 조금 더 조심해야 해요. "
                         + "만약 지금 주인이 대출을 많이 받아서 이 집을 산 거라면, 나중에 대출을 못 갚아서 집이 경매(강제로 팔리는 것)에 넘어갈 수 있어요. "
-                        + "그러면 세입자는 보증금을 못 돌려받을 수도 있어요. 그래서 언제 지금 주인이 이 집을 샀는지 확인해두면 좋아요.",
+                        + "그러면 세입자는 **보증금을 못 돌려받을 수도 있어요**. 그래서 언제 지금 주인이 이 집을 샀는지 확인해두면 좋아요.",
                 ChecklistImportance.REQUIRED, ChecklistItemType.DATE, ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE, order);
         order = add(templates, ChecklistCategory.DOCUMENTS, "임대인의 세금체납 여부를 확인해보셨나요?",
                 "국세·지방세 완납증명서를 임대인에게 요청해 확인할 수 있어요 (자동 조회는 지원하지 않아요).",
@@ -95,13 +95,13 @@ public final class ChecklistTemplateSeedData {
                         + "이 집이 나중에 경매(강제로 팔리는 것)에 넘어가면, 확정일자를 먼저 받은 사람 순서대로 돈을 먼저 받아가요. "
                         + "'선순위 보증금'은 나보다 먼저 확정일자를 받아서 나보다 먼저 돈을 받아갈 사람들의 보증금을 다 합친 금액이에요. "
                         + "이게 너무 많으면, 집을 팔아도 내 보증금을 돌려줄 돈이 안 남을 수 있어요. "
-                        + "그래서 계약 전에 임대인한테 '확정일자 부여현황'이라는 서류를 달라고 해서, 나보다 먼저 돈 받아갈 사람이 얼마나 있는지 미리 확인해야 해요.",
+                        + "그래서 계약 전에 임대인한테 **'확정일자 부여현황'이라는 서류를 달라고 해서**, 나보다 먼저 돈 받아갈 사람이 얼마나 있는지 미리 확인해야 해요.",
                 ChecklistImportance.REQUIRED, ChecklistItemType.DOCUMENT_REQUEST, ChecklistItemCode.DATE_OF_CONFIRMATION_REQUEST, order);
         order = add(templates, ChecklistCategory.DOCUMENTS, "전입세대열람원을 임대인에게 요청했나요?",
                 "다른 세입자의 전입 여부를 확인하는 서류예요. 자동으로 조회되지 않아 직접 요청해야 해요.",
                 "전입세대열람원은 그 집에 누가 살고 있다고 나라에 신고했는지 보여주는 서류예요. "
                         + "계약서를 가지고 가까운 주민센터(행정복지센터)에 가면 발급받을 수 있고, 정부24 홈페이지에서도 가능해요. "
-                        + "이 서류가 필요한 이유는, 나 말고 이미 그 집에 산다고 신고한 다른 사람이 있으면 그 사람이 나보다 먼저 보증금을 받아갈 수도 있기 때문이에요. "
+                        + "이 서류가 필요한 이유는, 나 말고 이미 그 집에 산다고 신고한 다른 사람이 있으면 **그 사람이 나보다 먼저 보증금을 받아갈 수도 있기 때문**이에요. "
                         + "그래서 계약 전에 미리 확인해두는 게 안전해요.",
                 ChecklistImportance.REQUIRED, ChecklistItemType.DOCUMENT_REQUEST, ChecklistItemCode.RESIDENT_REGISTRATION_REQUEST, order);
         order = add(templates, ChecklistCategory.DOCUMENTS, "계약조건(특약사항 포함)을 다시 확인했나요?", null,
