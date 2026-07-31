@@ -6,7 +6,6 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -36,7 +35,7 @@ class ChecklistOverviewResponseTest {
     @DisplayName("체크리스트가 있으면 최종 점검일은 checklist.updatedAt을 쓴다")
     void lastCheckedAtUsesChecklistUpdatedAtWhenChecklistExists() {
         Property property = property(LocalDateTime.of(2026, 1, 1, 0, 0));
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         Checklist checklist = Checklist.createFrom(user, property, 1, List.of());
         LocalDateTime checklistUpdatedAt = LocalDateTime.of(2026, 7, 30, 10, 0);
         ReflectionTestUtils.setField(checklist, "updatedAt", checklistUpdatedAt);
