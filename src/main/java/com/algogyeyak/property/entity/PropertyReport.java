@@ -11,6 +11,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -26,7 +27,8 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
  * DUPLICATE 사유도 자동탐지 결과와 통합하지 않고 독립적으로 기록한다.
  */
 @Entity
-@Table(name = "property_report")
+@Table(name = "property_report",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"property_id", "reporter_id"}))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)

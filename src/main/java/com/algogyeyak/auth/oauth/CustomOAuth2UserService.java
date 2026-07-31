@@ -76,7 +76,9 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         Optional<UserSocialAccount> bySocialAccount =
                 userSocialAccountRepository.findByProviderAndProviderId(provider, userInfo.getProviderId());
         if (bySocialAccount.isPresent()) {
-            return new FindOrCreateResult(bySocialAccount.get().getUser(), false);
+            User user = bySocialAccount.get().getUser();
+            rejectIfBlocked(user);
+            return new FindOrCreateResult(user, false);
         }
 
         Optional<User> linked = linkToExistingAccountByEmail(provider, userInfo);
@@ -85,6 +87,15 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         }
 
         return new FindOrCreateResult(createUser(provider, userInfo, nickname), false);
+    }
+
+    // 로컬 로그인(LocalAuthService.login)/refresh(RefreshTokenService.rotate)는 이미 탈퇴·정지 계정을
+    // 거부하는데, 소셜 로그인만 이 검사가 빠져 있으면 정지된 계정도 새 토큰을 계속 발급받을 수 있다.
+    private void rejectIfBlocked(User user) {
+        if (user.isWithdrawn() || user.isSuspended()) {
+            throw new OAuth2AuthenticationException(
+                    new OAuth2Error("account_blocked", "로그인할 수 없는 계정입니다.", null));
+        }
     }
 
     /**
@@ -97,6 +108,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
      */
     private Optional<User> linkToExistingAccountByEmail(AuthProvider provider, OAuth2UserInfo userInfo) {
         return findVerifiedEmailMatch(userInfo).map(user -> {
+            rejectIfBlocked(user);
             linkNewSocialAccount(user, provider, userInfo.getProviderId());
             return user;
         });

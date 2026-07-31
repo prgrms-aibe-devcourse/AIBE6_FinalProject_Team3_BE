@@ -17,6 +17,7 @@ import com.algogyeyak.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -68,10 +69,24 @@ class AdminUserControllerTest {
         return user;
     }
 
+    // JwtAuthenticationFilter가 매 요청 DB에서 유저 상태/권한을 재확인하므로, 토큰의 주체(ADMIN_ID/
+    // USER_ID)에 대한 활성 유저 스텁이 없으면 인증 자체가 실패해 각 테스트의 실제 목적(200/403/404 등)을
+    // 검증하기 전에 401로 끝나버린다. 개별 테스트가 다른 대상(TARGET_ID)을 별도로 스텁하는 것과는
+    // 별개로, 필터 통과를 위한 최소 조건만 여기서 채워둔다.
+    @BeforeEach
+    void stubAuthenticatedUsersForFilter() {
+        when(userRepository.findById(ADMIN_ID)).thenReturn(Optional.of(buildUser(ADMIN_ID, "admin@example.com", "관리자", Role.ADMIN)));
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(buildUser(USER_ID, "user@example.com", "일반유저", Role.USER)));
+    }
+
     @Test
     void 일반유저_토큰으로_접근하면_403이다() throws Exception {
+        // accessDeniedHandler를 명시적으로 등록하기 전에는 Boot의 기본 /error 포워드를 거치며
+        // 실제 배포 환경(Tomcat)에서 401로 잘못 응답되는 회귀가 있었다(MockMvc에서는 재현되지
+        // 않았음) - 상태코드뿐 아니라 우리 공통 응답 포맷/코드까지 확인해 그 회귀를 다시 잡는다.
         mockMvc.perform(get("/admin/users").cookie(userCookie()))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
     @Test

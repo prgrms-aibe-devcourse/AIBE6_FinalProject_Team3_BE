@@ -10,8 +10,10 @@ import com.algogyeyak.auth.oauth.CustomOAuth2UserService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.response.ApiError;
 import com.algogyeyak.global.response.ApiResponse;
+import com.algogyeyak.user.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -28,6 +30,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
@@ -43,6 +46,7 @@ public class SecurityConfig {
     private final CookieAuthorizationRequestRepository cookieAuthorizationRequestRepository;
     private final JwtProvider jwtProvider;
     private final AccessTokenRevocationService accessTokenRevocationService;
+    private final UserRepository userRepository;
 
     // 이 클래스 내부에서만 쓰는 단순 직렬화 용도라 Boot이 자동 구성하는 ObjectMapper 빈에 의존하지 않는다.
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -84,15 +88,16 @@ public class SecurityConfig {
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint((request, response, authException) -> {
                             ErrorCode errorCode = resolveAuthFailureErrorCode(request);
-                            response.setStatus(errorCode.getStatus().value());
-                            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-                            ApiError error = ApiError.of(errorCode.getCode(), errorCode.getMessage());
-                            response.getOutputStream().write(
-                                    objectMapper.writeValueAsBytes(ApiResponse.failure(error)));
+                            writeErrorResponse(response, errorCode);
                         })
+                        // 명시적으로 지정하지 않으면 인증은 됐지만 권한이 부족한 요청(/admin/** 등
+                        // hasRole 매처에 걸리는 경우)이 Boot의 기본 /error 포워드를 거치면서 우리
+                        // 공통 응답 포맷이 아닌 응답이 나가거나, 상황에 따라 401로 잘못 보이는 등
+                        // 일관성이 없었다 - FORBIDDEN(403)으로 명확히 고정한다.
+                        .accessDeniedHandler((request, response, accessDeniedException) ->
+                                writeErrorResponse(response, ErrorCode.FORBIDDEN))
                 )
-                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
@@ -104,6 +109,14 @@ public class SecurityConfig {
     private ErrorCode resolveAuthFailureErrorCode(HttpServletRequest request) {
         Object reason = request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE);
         return reason instanceof ErrorCode errorCode ? errorCode : ErrorCode.UNAUTHORIZED;
+    }
+
+    private void writeErrorResponse(HttpServletResponse response, ErrorCode errorCode) throws IOException {
+        response.setStatus(errorCode.getStatus().value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        ApiError error = ApiError.of(errorCode.getCode(), errorCode.getMessage());
+        response.getOutputStream().write(objectMapper.writeValueAsBytes(ApiResponse.failure(error)));
     }
 
     @Bean

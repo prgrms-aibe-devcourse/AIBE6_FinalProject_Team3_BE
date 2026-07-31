@@ -18,7 +18,9 @@ import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
+import com.algogyeyak.user.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +32,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -55,6 +58,18 @@ class ChecklistControllerTest {
 
     @MockitoBean
     private ChecklistService checklistService;
+
+    @MockitoBean
+    private UserRepository userRepository;
+
+    // JwtAuthenticationFilter가 매 요청 DB에서 유저 상태/권한을 재확인하므로, 이 스텁이 없으면 이
+    // 클래스의 모든 인증된 요청이 401로 실패한다 - 이 파일의 테스트는 전부 userId=1L을 공유한다.
+    @BeforeEach
+    void stubAuthenticatedUserForFilter() {
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+    }
 
     @Test
     @DisplayName("인증된 사용자가 매물 체크리스트 생성을 요청하면 생성된 체크리스트를 반환한다")

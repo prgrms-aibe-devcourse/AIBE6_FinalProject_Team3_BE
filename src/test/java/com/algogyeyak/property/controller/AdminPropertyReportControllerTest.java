@@ -22,6 +22,7 @@ import com.algogyeyak.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -103,10 +104,24 @@ class AdminPropertyReportControllerTest {
         return user;
     }
 
+    // JwtAuthenticationFilter가 매 요청 DB에서 유저 상태/권한을 재확인하므로, 토큰 주체(ADMIN_ID/
+    // USER_ID)에 대한 활성 유저 스텁이 없으면 인증 자체가 401로 실패한다 - AdminUserControllerTest와 동일.
+    @BeforeEach
+    void stubAuthenticatedUsersForFilter() {
+        User admin = User.createLocalUser("admin@example.com", "hash", "관리자");
+        ReflectionTestUtils.setField(admin, "id", ADMIN_ID);
+        ReflectionTestUtils.setField(admin, "role", Role.ADMIN);
+        User user = User.createLocalUser("user@example.com", "hash", "일반유저");
+        ReflectionTestUtils.setField(user, "id", USER_ID);
+        when(userRepository.findById(ADMIN_ID)).thenReturn(Optional.of(admin));
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+    }
+
     @Test
     void 일반유저_토큰으로_접근하면_403이다() throws Exception {
         mockMvc.perform(get("/admin/property-reports").cookie(userCookie()))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
     @Test

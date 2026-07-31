@@ -301,6 +301,45 @@ class CustomOAuth2UserServiceTest {
     }
 
     @Test
+    void rejectsLoginWhenExistingSocialAccountUserHasBeenSuspended() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        // 로컬 로그인/refresh는 이미 정지 계정을 거부하는데, 소셜 로그인만 이 검사가 빠져 있으면
+        // 관리자가 정지시킨 유저가 소셜 로그인으로 계속 새 세션을 받을 수 있었다.
+        User suspended = User.createOAuthUser("test@kakao.com", "테스트유저", "http://img");
+        suspended.suspend();
+        UserSocialAccount socialAccount = UserSocialAccount.of(suspended, AuthProvider.KAKAO, "123");
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123"))
+                .thenReturn(Optional.of(socialAccount));
+
+        assertThrows(OAuth2AuthenticationException.class,
+                () -> service.processOAuth2User(
+                        "kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com")));
+    }
+
+    @Test
+    void rejectsLoginAndDoesNotLinkWhenExistingAccountFoundByEmailHasWithdrawn() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        // 로컬로 가입했다가 탈퇴한 계정에, 탈퇴 후 처음 시도하는 소셜 로그인이 이메일 매칭으로
+        // 조용히 연동/로그인되면 안 된다.
+        User withdrawn = User.createLocalUser("shared@example.com", "encoded-hash", "로컬유저");
+        withdrawn.withdraw();
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.empty());
+        when(repository.findByEmail("shared@example.com")).thenReturn(Optional.of(withdrawn));
+
+        assertThrows(OAuth2AuthenticationException.class,
+                () -> service.processOAuth2User(
+                        "kakao", kakaoOAuth2User(123L, "카카오닉네임", "http://img", "shared@example.com")));
+
+        verify(socialAccountRepository, never()).saveAndFlush(any(UserSocialAccount.class));
+    }
+
+    @Test
     void linkingSecondProviderKeepsFirstProviderStillUsable() {
         UserRepository repository = mock(UserRepository.class);
         UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
