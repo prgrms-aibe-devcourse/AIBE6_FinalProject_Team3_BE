@@ -88,17 +88,17 @@ public class RefreshTokenService {
     @Transactional(noRollbackFor = BusinessException.class)
     public RotationResult rotate(String rawToken) {
         RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(hash(rawToken))
-                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
 
         if (refreshToken.isExpired(LocalDateTime.now())) {
             refreshTokenRepository.delete(refreshToken);
-            throw new BusinessException(ErrorCode.UNAUTHORIZED, "만료된 Refresh Token입니다.");
+            throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_EXPIRED);
         }
 
         User user = refreshToken.getUser();
         if (user.isWithdrawn()) {
             refreshTokenRepository.delete(refreshToken);
-            throw new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다.");
+            throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, "존재하지 않거나 탈퇴한 사용자입니다.");
         }
 
         String newRawToken = generateRawToken();

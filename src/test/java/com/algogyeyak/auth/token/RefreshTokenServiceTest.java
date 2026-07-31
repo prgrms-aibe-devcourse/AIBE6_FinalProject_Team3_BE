@@ -129,7 +129,7 @@ class RefreshTokenServiceTest {
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.rotate("unknown-token"));
-        assertEquals(ErrorCode.UNAUTHORIZED, exception.getErrorCode());
+        assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
     }
 
     @Test
@@ -139,7 +139,9 @@ class RefreshTokenServiceTest {
                 .user(user).tokenHash("hash").expiresAt(LocalDateTime.now().minusSeconds(1)).build();
         when(refreshTokenRepository.findByTokenHash(any())).thenReturn(Optional.of(expired));
 
-        assertThrows(BusinessException.class, () -> refreshTokenService.rotate("expired-token"));
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> refreshTokenService.rotate("expired-token"));
+        assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_EXPIRED, exception.getErrorCode());
         verify(refreshTokenRepository).delete(expired);
     }
 
@@ -151,7 +153,9 @@ class RefreshTokenServiceTest {
                 .user(user).tokenHash("hash").expiresAt(LocalDateTime.now().plusDays(1)).build();
         when(refreshTokenRepository.findByTokenHash(any())).thenReturn(Optional.of(stored));
 
-        assertThrows(BusinessException.class, () -> refreshTokenService.rotate("token"));
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> refreshTokenService.rotate("token"));
+        assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
         verify(refreshTokenRepository).delete(stored);
     }
 

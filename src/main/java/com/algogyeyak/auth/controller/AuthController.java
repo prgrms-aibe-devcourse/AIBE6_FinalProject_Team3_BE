@@ -223,12 +223,12 @@ public class AuthController {
     @Operation(summary = "토큰 재발급", description = "refresh token 쿠키를 검증해 access/refresh 토큰을 재발급(로테이션)한 뒤 쿠키로 내려준다. 토큰은 응답 body가 아닌 Set-Cookie로 전달된다.")
     @SecurityRequirement(name = "refresh_token")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "재발급 성공")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "refresh token이 없거나 유효하지 않음")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "refresh token이 없거나 유효하지 않거나 만료됨 (AUTH_REFRESH_TOKEN_MISSING / AUTH_REFRESH_TOKEN_INVALID / AUTH_REFRESH_TOKEN_EXPIRED)")
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<Void>> refresh(HttpServletRequest request, HttpServletResponse response) {
         String rawRefreshToken = CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
                 .map(cookie -> cookie.getValue())
-                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "Refresh Token이 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_MISSING));
 
         RefreshTokenService.RotationResult result = refreshTokenService.rotate(rawRefreshToken);
         User user = result.user();

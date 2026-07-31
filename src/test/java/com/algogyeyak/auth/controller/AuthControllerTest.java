@@ -476,7 +476,7 @@ class AuthControllerTest {
         mockMvc.perform(post("/auth/refresh"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+                .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_MISSING"));
     }
 
     @Test
@@ -499,11 +499,11 @@ class AuthControllerTest {
     @Test
     void refreshRejectsInvalidOrExpiredToken() throws Exception {
         when(refreshTokenService.rotate("bad-token"))
-                .thenThrow(new BusinessException(ErrorCode.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."));
+                .thenThrow(new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
 
         mockMvc.perform(post("/auth/refresh")
                         .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "bad-token")))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.message").value("유효하지 않은 Refresh Token입니다."));
+                .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_INVALID"));
     }
 }

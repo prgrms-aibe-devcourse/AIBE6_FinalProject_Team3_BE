@@ -27,6 +27,14 @@ public enum ErrorCode {
     // login()의 AUTH_INVALID_CREDENTIALS(401, 미인증 컨텍스트)와 의미가 달라 별도 코드로 분리했다 —
     // 여긴 이미 인증된 사용자가 2차 확인(현재 비밀번호)에 실패한 경우라 403이 맞다.
     AUTH_CURRENT_PASSWORD_MISMATCH(HttpStatus.FORBIDDEN, "AUTH_CURRENT_PASSWORD_MISMATCH", "현재 비밀번호가 올바르지 않습니다."),
+    // access token(AUTH_TOKEN_MISSING/INVALID/EXPIRED)과 동일한 세분화 패턴을 refresh token에도
+    // 맞춘다 - 이전엔 쿠키 없음/토큰 못 찾음/만료/탈퇴 사용자가 전부 UNAUTHORIZED 하나로 뭉뚱그려져
+    // message 텍스트로만 구분 가능했다.
+    AUTH_REFRESH_TOKEN_MISSING(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_MISSING", "Refresh Token이 없습니다."),
+    // 탈퇴한 사용자의 refresh token도 이 코드로 처리한다 - 클라이언트 입장에서 "재로그인이 필요하다"는
+    // 결론은 동일하고, 계정 존재 여부를 굳이 구분해 알려줄 필요가 없다.
+    AUTH_REFRESH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_INVALID", "유효하지 않은 Refresh Token입니다."),
+    AUTH_REFRESH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_EXPIRED", "만료된 Refresh Token입니다."),
 
     // Property 도메인
     PROPERTY_NOT_FOUND(HttpStatus.NOT_FOUND, "PROPERTY_NOT_FOUND", "존재하지 않는 매물입니다."),
