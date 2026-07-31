@@ -43,8 +43,7 @@ public class UserService {
         User user = getActiveUserOrThrow(userId);
 
         if (userPreferenceRepository.existsByUserId(userId)) {
-            // 409 Conflict에 대응하는 ErrorCode가 없어 우선 BAD_REQUEST로 처리 — 확인 필요
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "이미 프로필이 등록되어 있습니다.");
+            throw new BusinessException(ErrorCode.USER_PROFILE_ALREADY_EXISTS);
         }
 
         if (StringUtils.hasText(request.getNickname())
@@ -112,8 +111,7 @@ public class UserService {
 
     private void validateNicknameNotDuplicated(Long userId, String nickname) {
         if (userRepository.existsByNicknameAndIdNot(nickname, userId)) {
-            // 마찬가지로 409에 대응하는 코드가 없어 BAD_REQUEST로 처리 — 확인 필요
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "이미 사용 중인 닉네임입니다.");
+            throw new BusinessException(ErrorCode.USER_NICKNAME_ALREADY_EXISTS);
         }
     }
 
