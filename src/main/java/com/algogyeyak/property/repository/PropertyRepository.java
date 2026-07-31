@@ -4,6 +4,7 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -81,4 +82,13 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
      * 자체의 목록조회(getMyProperties)는 위 search(...)를 쓴다.
      */
     List<Property> findAllByUserIdAndStatusOrderByCreatedAtDesc(Long userId, PropertyStatus status);
+
+    // 관리자 통계 대시보드: 활성 매물 수 카드용.
+    long countByStatus(PropertyStatus status);
+
+    // 관리자 통계 대시보드: 최근 N일 등록 추이용. UserRepository.findCreatedAtSince와 동일한 이유로
+    // DB별 날짜 절삭 함수 대신 원본 시각만 가져와 서비스에서 집계한다. 이후 삭제된 매물도 등록
+    // "발생" 자체는 그대로 집계에 포함되어야 하므로 status로 필터링하지 않는다.
+    @Query("SELECT p.createdAt FROM Property p WHERE p.createdAt >= :since")
+    List<LocalDateTime> findCreatedAtSince(@Param("since") LocalDateTime since);
 }

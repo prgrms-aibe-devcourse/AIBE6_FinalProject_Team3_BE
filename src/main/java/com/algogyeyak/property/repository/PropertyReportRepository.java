@@ -29,4 +29,10 @@ public interface PropertyReportRepository extends JpaRepository<PropertyReport, 
             @Param("reason") PropertyReportReason reason,
             Pageable pageable
     );
+
+    // 관리자 통계 대시보드: 처리 대기(RECEIVED) 신고 수 카드용.
+    long countByStatus(PropertyReportStatus status);
+
+    // 관리자 통계 대시보드: 신고 사유별 분포용.
+    long countByReason(PropertyReportReason reason);
 }

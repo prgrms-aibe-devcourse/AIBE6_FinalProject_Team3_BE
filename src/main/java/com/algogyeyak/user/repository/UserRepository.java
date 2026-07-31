@@ -3,6 +3,8 @@ package com.algogyeyak.user.repository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -39,4 +41,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
             @Param("status") UserStatus status,
             Pageable pageable
     );
+
+    // 관리자 통계 대시보드: 역할별 분포 카드용.
+    long countByRole(Role role);
+
+    // 관리자 통계 대시보드: 최근 N일 가입 추이용. DB별 날짜 절삭 함수(FUNCTION('DATE', ...) 등) 차이에
+    // 기대지 않기 위해 원본 시각만 가져오고, 일자별 집계는 서비스에서 LocalDateTime::toLocalDate로 한다.
+    @Query("SELECT u.createdAt FROM User u WHERE u.createdAt >= :since")
+    List<LocalDateTime> findCreatedAtSince(@Param("since") LocalDateTime since);
 }
