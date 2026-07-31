@@ -1,7 +1,6 @@
 package com.algogyeyak.auth.token;
 
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -56,7 +55,7 @@ class RefreshTokenConcurrentIssueIntegrationTest {
     @Timeout(15)
     void secondTransactionRecoversAfterRealUniqueConstraintViolation() throws Exception {
         User user = userRepository.saveAndFlush(
-                User.createOAuthUser("concurrent@example.com", "동시성유저", "http://img", AuthProvider.KAKAO, "concurrent-1"));
+                User.createOAuthUser("concurrent@example.com", "동시성유저", "http://img"));
         Long userId = user.getId();
         LocalDateTime expiresAt = LocalDateTime.now().plusDays(1);
 

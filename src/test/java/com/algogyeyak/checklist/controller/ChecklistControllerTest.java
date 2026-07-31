@@ -17,7 +17,6 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.enums.Role;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -61,7 +60,7 @@ class ChecklistControllerTest {
     @DisplayName("인증된 사용자가 매물 체크리스트 생성을 요청하면 생성된 체크리스트를 반환한다")
     void createChecklistReturnsChecklistForAuthenticatedUser() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         ReflectionTestUtils.setField(user, "id", 1L);
 
         ChecklistItemTemplate template = ChecklistItemTemplate.builder()
@@ -188,7 +187,7 @@ class ChecklistControllerTest {
     @DisplayName("인증된 사용자가 매물 체크리스트를 조회하면 문항까지 포함해 반환한다")
     void getChecklistReturnsChecklistForAuthenticatedUser() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         ReflectionTestUtils.setField(user, "id", 1L);
 
         ChecklistItemTemplate template = ChecklistItemTemplate.builder()
@@ -232,10 +231,12 @@ class ChecklistControllerTest {
     void listMyChecklistsReturnsOverviewForAuthenticatedUser() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         ChecklistOverviewResponse started = new ChecklistOverviewResponse(
-                10L, 100L, "서울특별시 강남구 테헤란로 123", null, "OFFICETEL", "JEONSE", ChecklistStatus.IN_PROGRESS
+                10L, 100L, "서울특별시 강남구 테헤란로 123", null, "OFFICETEL", "JEONSE", ChecklistStatus.IN_PROGRESS,
+                java.time.LocalDateTime.of(2026, 7, 30, 10, 0)
         );
         ChecklistOverviewResponse notStarted = new ChecklistOverviewResponse(
-                20L, null, "서울특별시 마포구 월드컵로 1", null, "MULTI_FAMILY", "MONTHLY_RENT", ChecklistStatus.NOT_STARTED
+                20L, null, "서울특별시 마포구 월드컵로 1", null, "MULTI_FAMILY", "MONTHLY_RENT", ChecklistStatus.NOT_STARTED,
+                java.time.LocalDateTime.of(2026, 6, 1, 12, 0)
         );
         when(checklistService.listMyChecklists(1L)).thenReturn(List.of(started, notStarted));
 

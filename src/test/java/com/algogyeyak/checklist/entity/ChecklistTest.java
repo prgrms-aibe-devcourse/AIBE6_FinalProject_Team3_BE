@@ -4,7 +4,6 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -17,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ChecklistTest {
 
     private User testUser() {
-        return User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        return User.createOAuthUser("test@example.com", "테스트유저", "http://img");
     }
 
     private Property testProperty(Long id) {
@@ -74,6 +73,27 @@ class ChecklistTest {
         assertThat(firstItem.getContent()).isEqualTo("누수 확인");
         assertThat(firstItem.isChecked()).isFalse();
         assertThat(firstItem.isIssueFound()).isFalse();
+    }
+
+    @Test
+    @DisplayName("createFrom()은 템플릿의 helperText도 문항에 스냅샷 복사한다")
+    void createFromCopiesHelperTextIntoItems() {
+        User user = testUser();
+        ChecklistItemTemplate templateWithHelperText = ChecklistItemTemplate.builder()
+                .version(1)
+                .category(ChecklistCategory.DOCUMENTS)
+                .content("등기부등본을 확인했나요?")
+                .helperText("등기부등본은 이 집이 진짜 누구 것인지 보여주는 서류예요.")
+                .importance(ChecklistImportance.REQUIRED)
+                .itemType(ChecklistItemType.CHECK)
+                .displayOrder(1)
+                .active(true)
+                .build();
+
+        Checklist checklist = Checklist.createFrom(user, testProperty(10L), 1, List.of(templateWithHelperText));
+
+        assertThat(checklist.getItems().get(0).getHelperText())
+                .isEqualTo("등기부등본은 이 집이 진짜 누구 것인지 보여주는 서류예요.");
     }
 
     @Test

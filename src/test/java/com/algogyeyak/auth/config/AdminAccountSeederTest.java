@@ -1,9 +1,9 @@
 package com.algogyeyak.auth.config;
 
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
+import com.algogyeyak.user.repository.UserSocialAccountRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -24,7 +24,8 @@ import static org.mockito.Mockito.when;
 class AdminAccountSeederTest {
 
     private final UserRepository userRepository = mock(UserRepository.class);
-    private final AdminAccountSeeder seeder = new AdminAccountSeeder(userRepository);
+    private final UserSocialAccountRepository userSocialAccountRepository = mock(UserSocialAccountRepository.class);
+    private final AdminAccountSeeder seeder = new AdminAccountSeeder(userRepository, userSocialAccountRepository);
 
     private void enableWith(String email) {
         ReflectionTestUtils.setField(seeder, "devLoginEnabled", true);
@@ -113,24 +114,12 @@ class AdminAccountSeederTest {
     }
 
     @Test
-    @DisplayName("같은 이메일의 계정이 KAKAO면(실제 소셜 사용자와 겹침) 건드리지 않고 넘어간다(기동은 실패시키지 않는다)")
-    void skipsWithoutThrowingWhenMatchingAccountIsKakao() throws Exception {
+    @DisplayName("같은 이메일의 계정에 소셜 계정이 연동되어 있으면(실제 소셜 사용자와 겹침) 건드리지 않고 넘어간다(기동은 실패시키지 않는다)")
+    void skipsWithoutThrowingWhenMatchingAccountHasSocialAccountLinked() throws Exception {
         enableWith("admin@algogyeyak.local");
-        User existing = User.createOAuthUser("admin@algogyeyak.local", "관리자", null, AuthProvider.KAKAO, "999");
+        User existing = User.createOAuthUser("admin@algogyeyak.local", "관리자", null);
         when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(existing));
-
-        seeder.run(new DefaultApplicationArguments());
-
-        assertEquals(Role.USER, existing.getRole());
-        verify(userRepository, never()).save(any(User.class));
-    }
-
-    @Test
-    @DisplayName("같은 이메일의 계정이 GOOGLE이면(실제 소셜 사용자와 겹침) 건드리지 않고 넘어간다(기동은 실패시키지 않는다)")
-    void skipsWithoutThrowingWhenMatchingAccountIsGoogle() throws Exception {
-        enableWith("admin@algogyeyak.local");
-        User existing = User.createOAuthUser("admin@algogyeyak.local", "관리자", null, AuthProvider.GOOGLE, "999");
-        when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(existing));
+        when(userSocialAccountRepository.existsByUserId(existing.getId())).thenReturn(true);
 
         seeder.run(new DefaultApplicationArguments());
 

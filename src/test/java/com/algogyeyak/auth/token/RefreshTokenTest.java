@@ -1,7 +1,6 @@
 package com.algogyeyak.auth.token;
 
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -12,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RefreshTokenTest {
 
     private RefreshToken tokenExpiringAt(LocalDateTime expiresAt) {
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         return RefreshToken.builder().user(user).tokenHash("hash").expiresAt(expiresAt).build();
     }
 

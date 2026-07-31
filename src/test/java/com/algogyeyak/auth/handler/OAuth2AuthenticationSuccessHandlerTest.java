@@ -7,7 +7,6 @@ import com.algogyeyak.auth.oauth.CookieUtils;
 import com.algogyeyak.auth.oauth.CustomOAuth2User;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -42,7 +41,7 @@ class OAuth2AuthenticationSuccessHandlerTest {
     }
 
     private Authentication authenticationFor(Long userId, boolean linkedToExistingAccount) {
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         ReflectionTestUtils.setField(user, "id", userId);
         CustomOAuth2User principal = new CustomOAuth2User(user, Map.of("id", "123"), linkedToExistingAccount);
         return new UsernamePasswordAuthenticationToken(principal, null);

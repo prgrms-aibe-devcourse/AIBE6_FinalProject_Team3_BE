@@ -20,12 +20,12 @@ import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.AuthProvider;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -48,7 +48,7 @@ class ChecklistServiceTest {
             new ChecklistService(checklistRepository, templateRepository, userRepository, propertyRepository);
 
     private User user(Long id) {
-        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img", AuthProvider.KAKAO, "123");
+        User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         ReflectionTestUtils.setField(user, "id", id);
         return user;
     }
@@ -184,11 +184,13 @@ class ChecklistServiceTest {
     void listMyChecklistsMatchesEachPropertyWithItsChecklist() {
         Property started = property(10L, 1L);
         Property notStarted = property(20L, 1L);
+        ReflectionTestUtils.setField(notStarted, "updatedAt", LocalDateTime.of(2026, 1, 1, 0, 0));
         when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
                 .thenReturn(List.of(started, notStarted));
 
         Checklist checklist = checklistWithOneCheckItem(user(1L));
         ReflectionTestUtils.setField(checklist, "id", 100L);
+        ReflectionTestUtils.setField(checklist, "updatedAt", LocalDateTime.of(2026, 7, 1, 0, 0));
         checklist.getItems().get(0).check(true);
         checklist.refreshStatus();
         when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of(checklist));
@@ -214,6 +216,49 @@ class ChecklistServiceTest {
         List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("최종 점검일(lastCheckedAt) 최신순으로 정렬한다")
+    void listMyChecklistsSortsByLastCheckedAtDescending() {
+        Property older = property(10L, 1L);
+        Property newer = property(20L, 1L);
+        // 매물 조회 자체는 항상 createdAt DESC로 오지만(=매물 등록순), 응답은 lastCheckedAt 기준으로 재정렬돼야 한다.
+        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
+                .thenReturn(List.of(older, newer));
+
+        Checklist olderChecklist = Checklist.createFrom(user(1L), older, 1, List.of());
+        ReflectionTestUtils.setField(olderChecklist, "id", 100L);
+        ReflectionTestUtils.setField(olderChecklist, "updatedAt", LocalDateTime.of(2026, 1, 1, 0, 0));
+
+        Checklist newerChecklist = Checklist.createFrom(user(1L), newer, 1, List.of());
+        ReflectionTestUtils.setField(newerChecklist, "id", 200L);
+        ReflectionTestUtils.setField(newerChecklist, "updatedAt", LocalDateTime.of(2026, 7, 1, 0, 0));
+
+        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of(olderChecklist, newerChecklist));
+
+        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
+
+        assertThat(result).extracting(ChecklistOverviewResponse::propertyId)
+                .containsExactly(20L, 10L);
+    }
+
+    @Test
+    @DisplayName("lastCheckedAt이 같으면 매물 조회 순서(등록일 최신순)를 그대로 유지한다")
+    void listMyChecklistsKeepsOriginalOrderWhenLastCheckedAtTies() {
+        Property first = property(10L, 1L);
+        Property second = property(20L, 1L);
+        LocalDateTime sameTime = LocalDateTime.of(2026, 5, 1, 0, 0);
+        ReflectionTestUtils.setField(first, "updatedAt", sameTime);
+        ReflectionTestUtils.setField(second, "updatedAt", sameTime);
+        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
+                .thenReturn(List.of(first, second));
+        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of());
+
+        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
+
+        assertThat(result).extracting(ChecklistOverviewResponse::propertyId)
+                .containsExactly(10L, 20L);
     }
 
     private Checklist checklistWithOneCheckItem(User user) {
