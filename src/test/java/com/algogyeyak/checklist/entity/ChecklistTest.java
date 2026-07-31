@@ -76,6 +76,27 @@ class ChecklistTest {
     }
 
     @Test
+    @DisplayName("createFrom()은 템플릿의 helperText도 문항에 스냅샷 복사한다")
+    void createFromCopiesHelperTextIntoItems() {
+        User user = testUser();
+        ChecklistItemTemplate templateWithHelperText = ChecklistItemTemplate.builder()
+                .version(1)
+                .category(ChecklistCategory.DOCUMENTS)
+                .content("등기부등본을 확인했나요?")
+                .helperText("등기부등본은 이 집이 진짜 누구 것인지 보여주는 서류예요.")
+                .importance(ChecklistImportance.REQUIRED)
+                .itemType(ChecklistItemType.CHECK)
+                .displayOrder(1)
+                .active(true)
+                .build();
+
+        Checklist checklist = Checklist.createFrom(user, testProperty(10L), 1, List.of(templateWithHelperText));
+
+        assertThat(checklist.getItems().get(0).getHelperText())
+                .isEqualTo("등기부등본은 이 집이 진짜 누구 것인지 보여주는 서류예요.");
+    }
+
+    @Test
     @DisplayName("refreshStatus()는 체크된 항목이 없으면 NOT_STARTED로 유지한다")
     void refreshStatusStaysNotStartedWithNoCheckedItems() {
         User user = testUser();

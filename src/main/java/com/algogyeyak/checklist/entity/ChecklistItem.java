@@ -52,6 +52,10 @@ public class ChecklistItem {
     @Column(name = "guide_text")
     private String guideText;
 
+    // 생성 시점에 템플릿의 helperText를 스냅샷 복사한다 (template.content/guideText와 동일한 방식).
+    @Column(name = "helper_text", columnDefinition = "TEXT")
+    private String helperText;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ChecklistImportance importance;
@@ -86,6 +90,7 @@ public class ChecklistItem {
             ChecklistCategory category,
             String content,
             String guideText,
+            String helperText,
             ChecklistImportance importance,
             ChecklistItemType itemType,
             ChecklistItemCode code,
@@ -95,6 +100,7 @@ public class ChecklistItem {
         this.category = category;
         this.content = content;
         this.guideText = guideText;
+        this.helperText = helperText;
         this.importance = importance;
         this.itemType = itemType;
         this.code = code;
