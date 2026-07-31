@@ -3,6 +3,8 @@ package com.algogyeyak.auth.jwt;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.user.enums.Role;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +12,12 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Date;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -119,6 +127,34 @@ class JwtAuthenticationFilterTest {
 
         assertNull(SecurityContextHolder.getContext().getAuthentication());
         assertEquals(ErrorCode.AUTH_TOKEN_EXPIRED, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
+    }
+
+    @Test
+    void doesNotSetAuthenticationWhenRoleClaimIsNotAValidEnumConstant() throws Exception {
+        // 서명은 멀쩡하지만(같은 시크릿으로 직접 서명), role 클레임이 지금 코드의 Role enum에 없는
+        // 값인 경우를 재현한다 - 예: 배포 중 enum 상수 이름이 바뀌기 전에 발급된 토큰. 이 경우도
+        // 컨테이너 기본 500이 아니라 AUTH_TOKEN_INVALID(401)로 처리되어야 한다.
+        SecretKey secretKey = Keys.hmacShaKeyFor(
+                "test-secret-key-must-be-at-least-32-bytes-long".getBytes(StandardCharsets.UTF_8));
+        Instant now = Instant.now();
+        String token = Jwts.builder()
+                .id(UUID.randomUUID().toString())
+                .subject("1")
+                .claim("email", "test@example.com")
+                .claim("role", "SUPERADMIN")
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(3600)))
+                .signWith(secretKey)
+                .compact();
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, mock(FilterChain.class));
+
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(ErrorCode.AUTH_TOKEN_INVALID, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
     }
 
     @Test
