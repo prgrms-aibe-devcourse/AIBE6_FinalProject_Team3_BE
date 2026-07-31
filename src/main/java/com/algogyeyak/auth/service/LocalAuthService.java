@@ -55,10 +55,18 @@ public class LocalAuthService {
             requiresNewTransactionTemplate.executeWithoutResult(status -> userRepository.saveAndFlush(newUser));
             return newUser;
         } catch (DataIntegrityViolationException e) {
+            // 이메일이 원인이 아니면 무조건 닉네임이 원인이라고 단정하지 않는다 - 실제로
+            // existsByNickname()까지 재확인한다. 지금은 유니크 제약이 이메일/닉네임 둘뿐이라
+            // 실질적으로 거의 항상 닉네임이 맞겠지만, 재확인 없이 단정하면 제약이 하나 더
+            // 늘어나거나 일시적인 DB 이슈로 같은 예외가 나는 경우에도 항상 "닉네임 중복"이라는
+            // 틀린 응답이 나갈 수 있다.
             if (userRepository.existsByEmail(normalizedEmail)) {
                 throw new BusinessException(ErrorCode.AUTH_EMAIL_ALREADY_EXISTS);
             }
-            throw new BusinessException(ErrorCode.AUTH_NICKNAME_ALREADY_EXISTS);
+            if (userRepository.existsByNickname(nickname)) {
+                throw new BusinessException(ErrorCode.AUTH_NICKNAME_ALREADY_EXISTS);
+            }
+            throw e;
         }
     }
 
@@ -114,7 +122,7 @@ public class LocalAuthService {
         String existingHash = user.getPasswordHash();
         if (existingHash != null
                 && (currentPassword == null || !passwordEncoder.matches(currentPassword, existingHash))) {
-            throw new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS, "현재 비밀번호가 올바르지 않습니다.");
+            throw new BusinessException(ErrorCode.AUTH_CURRENT_PASSWORD_MISMATCH);
         }
 
         user.updatePasswordHash(passwordEncoder.encode(newPassword));

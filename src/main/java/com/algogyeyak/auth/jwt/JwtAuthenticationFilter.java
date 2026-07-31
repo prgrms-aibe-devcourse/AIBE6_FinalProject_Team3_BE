@@ -72,9 +72,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        Long userId = Long.valueOf(claims.getSubject());
-        String email = claims.get("email", String.class);
-        Role role = Role.valueOf(claims.get("role", String.class));
+        // 서명 검증(parseClaims)은 통과했더라도 클레임 값 자체가 지금 코드 기준으로 더 이상
+        // 유효하지 않을 수 있다 - 예를 들어 Role enum 상수가 배포 중 이름이 바뀌거나 제거되면,
+        // 그 전에 발급된(서명은 멀쩡한) 토큰의 role 클레임이 Role.valueOf()에서 IllegalArgumentException을
+        // 던진다. 이 필터는 예외를 던지지 않고 실패 사유만 남기는 게 설계 의도이므로, 이 파싱도 같은
+        // catch 안에 넣어 컨테이너 기본 500으로 새지 않고 AUTH_TOKEN_INVALID(401)로 일관되게 처리한다.
+        Long userId;
+        String email;
+        Role role;
+        try {
+            userId = Long.valueOf(claims.getSubject());
+            email = claims.get("email", String.class);
+            role = Role.valueOf(claims.get("role", String.class));
+        } catch (IllegalArgumentException | NullPointerException e) {
+            request.setAttribute(AUTH_FAILURE_REASON_ATTRIBUTE, ErrorCode.AUTH_TOKEN_INVALID);
+            return;
+        }
         JwtUserPrincipal principal = new JwtUserPrincipal(userId, email, role);
 
         List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));

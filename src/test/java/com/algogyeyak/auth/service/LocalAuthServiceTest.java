@@ -6,6 +6,7 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -91,6 +92,36 @@ class LocalAuthServiceTest {
                 () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
 
         assertEquals(ErrorCode.AUTH_EMAIL_ALREADY_EXISTS, exception.getErrorCode());
+    }
+
+    @Test
+    void signupRecoversAsNicknameDuplicateWhenConcurrentSignupHitsUniqueConstraint() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저"))
+                .thenReturn(false) // 최초 체크 시점
+                .thenReturn(true); // INSERT 실패 후 재확인
+        when(userRepository.saveAndFlush(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        assertEquals(ErrorCode.AUTH_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
+    }
+
+    @Test
+    void signupRethrowsOriginalExceptionWhenConstraintViolationMatchesNeitherEmailNorNickname() {
+        // 이메일도 닉네임도 재확인 결과 중복이 아니라면 - 무조건 닉네임 탓이라고 단정하지 않고
+        // 원래 예외를 그대로 던져야 한다 (예: 다른 유니크 제약이 추가되거나, 일시적 DB 문제).
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        DataIntegrityViolationException original = new DataIntegrityViolationException("unknown constraint violation");
+        when(userRepository.saveAndFlush(any(User.class))).thenThrow(original);
+
+        DataIntegrityViolationException thrown = assertThrows(DataIntegrityViolationException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        assertEquals(original, thrown);
     }
 
     @Test
@@ -185,6 +216,7 @@ class LocalAuthServiceTest {
                 () -> localAuthService.setPassword(1L, null, "newPassword1"));
 
         assertEquals(ErrorCode.AUTH_EMAIL_REQUIRED_FOR_PASSWORD, exception.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
         assertEquals(null, user.getPasswordHash());
     }
 
@@ -197,7 +229,8 @@ class LocalAuthServiceTest {
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> localAuthService.setPassword(1L, null, "newPassword1"));
 
-        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+        assertEquals(ErrorCode.AUTH_CURRENT_PASSWORD_MISMATCH, exception.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
         assertEquals("encoded-hash", user.getPasswordHash());
     }
 
@@ -211,7 +244,8 @@ class LocalAuthServiceTest {
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> localAuthService.setPassword(1L, "wrong-current", "newPassword1"));
 
-        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+        assertEquals(ErrorCode.AUTH_CURRENT_PASSWORD_MISMATCH, exception.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
     }
 
     @Test
@@ -248,6 +282,7 @@ class LocalAuthServiceTest {
                 () -> localAuthService.setPassword(1L, null, "newPassword1"));
 
         assertEquals(ErrorCode.FORBIDDEN, exception.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, exception.getStatus());
         assertEquals(null, admin.getPasswordHash());
     }
 }

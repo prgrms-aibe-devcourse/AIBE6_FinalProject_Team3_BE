@@ -19,7 +19,26 @@ public enum ErrorCode {
     AUTH_TOKEN_MISSING(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_MISSING", "인증 토큰이 없습니다."),
     AUTH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "유효하지 않은 토큰입니다."),
     AUTH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_EXPIRED", "토큰이 만료되었습니다."),
-    AUTH_EMAIL_REQUIRED_FOR_PASSWORD(HttpStatus.BAD_REQUEST, "AUTH_EMAIL_REQUIRED_FOR_PASSWORD", "이메일이 연동되지 않은 계정은 비밀번호를 설정할 수 없습니다."),
+    // 이미 access token으로 인증된 사용자가 계정 상태/추가 검증 때문에 이 작업을 할 수 없는 경우이므로
+    // (인증 자체가 안 된 게 아님) 401이 아니라 403으로 통일한다 — setPassword()의 세 실패 케이스
+    // (이메일 없음/현재 비밀번호 불일치/dev-login 계정)가 전부 같은 성격이면서도 이전엔 400/401/403이
+    // 뒤섞여 있었다.
+    AUTH_EMAIL_REQUIRED_FOR_PASSWORD(HttpStatus.FORBIDDEN, "AUTH_EMAIL_REQUIRED_FOR_PASSWORD", "이메일이 연동되지 않은 계정은 비밀번호를 설정할 수 없습니다."),
+    // login()의 AUTH_INVALID_CREDENTIALS(401, 미인증 컨텍스트)와 의미가 달라 별도 코드로 분리했다 —
+    // 여긴 이미 인증된 사용자가 2차 확인(현재 비밀번호)에 실패한 경우라 403이 맞다.
+    AUTH_CURRENT_PASSWORD_MISMATCH(HttpStatus.FORBIDDEN, "AUTH_CURRENT_PASSWORD_MISMATCH", "현재 비밀번호가 올바르지 않습니다."),
+    // access token(AUTH_TOKEN_MISSING/INVALID/EXPIRED)과 동일한 세분화 패턴을 refresh token에도
+    // 맞춘다 - 이전엔 쿠키 없음/토큰 못 찾음/만료/탈퇴 사용자가 전부 UNAUTHORIZED 하나로 뭉뚱그려져
+    // message 텍스트로만 구분 가능했다.
+    AUTH_REFRESH_TOKEN_MISSING(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_MISSING", "Refresh Token이 없습니다."),
+    // 탈퇴한 사용자의 refresh token도 이 코드로 처리한다 - 클라이언트 입장에서 "재로그인이 필요하다"는
+    // 결론은 동일하고, 계정 존재 여부를 굳이 구분해 알려줄 필요가 없다.
+    AUTH_REFRESH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_INVALID", "유효하지 않은 Refresh Token입니다."),
+    AUTH_REFRESH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_EXPIRED", "만료된 Refresh Token입니다."),
+
+    // User 도메인
+    USER_PROFILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_PROFILE_ALREADY_EXISTS", "이미 프로필이 등록되어 있습니다."),
+    USER_NICKNAME_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_NICKNAME_ALREADY_EXISTS", "이미 사용 중인 닉네임입니다."),
 
     // Property 도메인
     PROPERTY_NOT_FOUND(HttpStatus.NOT_FOUND, "PROPERTY_NOT_FOUND", "존재하지 않는 매물입니다."),

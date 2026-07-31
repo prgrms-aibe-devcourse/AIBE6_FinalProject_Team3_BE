@@ -129,8 +129,10 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
     }
 
-    // 닉네임/프로필 사진은 JWT 발급 시점(OAuth 최초 로그인) 값이 아니라, 프로필 등록·수정 이후에도
-    // 항상 최신 값이 반영되도록 매 요청마다 User 엔티티에서 조회한다.
+    // 닉네임/프로필 사진/권한은 JWT 발급 시점(로그인 시점) 값이 아니라, 그 이후 변경돼도 항상 최신
+    // 값이 반영되도록 매 요청마다 User 엔티티에서 조회한다. role도 예외가 아니다 — 그렇지 않으면
+    // 관리자 권한이 회수된 사용자가 access token 만료(최대 30분) 전까지는 이 응답에서 계속 예전
+    // role을 보게 된다.
     @Operation(summary = "내 정보 조회", description = "access token 쿠키로 인증된 사용자 본인의 정보를 반환한다. Authorization: Bearer 헤더로도 인증 가능하다.")
     @SecurityRequirement(name = "access_token")
     @SecurityRequirement(name = "bearerAuth")
@@ -144,9 +146,7 @@ public class AuthController {
                 .filter(found -> !found.isWithdrawn())
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
 
-        MeResponse body = new MeResponse(
-                principal.userId(), principal.email(), user.getNickname(), user.getProfileImageUrl(), principal.role().name());
-        return ResponseEntity.ok(ApiResponse.success(body));
+        return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
     }
 
     // 구글/카카오로만 가입한 계정도 여기서 비밀번호를 설정하면 그 즉시 같은 이메일로 로컬
@@ -156,7 +156,8 @@ public class AuthController {
     @SecurityRequirement(name = "bearerAuth")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "변경 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "새 비밀번호 형식이 올바르지 않음 (영문+숫자 포함, 8~72자)")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증되지 않았거나 기존 비밀번호가 일치하지 않음")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "access token이 없거나 유효하지 않음 (AUTH_TOKEN_MISSING / AUTH_TOKEN_INVALID / AUTH_TOKEN_EXPIRED)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "이메일이 연동되지 않은 계정, 현재 비밀번호 불일치, 또는 dev-login 계정 (AUTH_EMAIL_REQUIRED_FOR_PASSWORD / AUTH_CURRENT_PASSWORD_MISMATCH / FORBIDDEN)")
     @PatchMapping("/password")
     public ResponseEntity<ApiResponse<Void>> updatePassword(
             @AuthenticationPrincipal JwtUserPrincipal principal,
@@ -222,12 +223,12 @@ public class AuthController {
     @Operation(summary = "토큰 재발급", description = "refresh token 쿠키를 검증해 access/refresh 토큰을 재발급(로테이션)한 뒤 쿠키로 내려준다. 토큰은 응답 body가 아닌 Set-Cookie로 전달된다.")
     @SecurityRequirement(name = "refresh_token")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "재발급 성공")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "refresh token이 없거나 유효하지 않음")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "refresh token이 없거나 유효하지 않거나 만료됨 (AUTH_REFRESH_TOKEN_MISSING / AUTH_REFRESH_TOKEN_INVALID / AUTH_REFRESH_TOKEN_EXPIRED)")
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<Void>> refresh(HttpServletRequest request, HttpServletResponse response) {
         String rawRefreshToken = CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
                 .map(cookie -> cookie.getValue())
-                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "Refresh Token이 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_MISSING));
 
         RefreshTokenService.RotationResult result = refreshTokenService.rotate(rawRefreshToken);
         User user = result.user();
