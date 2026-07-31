@@ -337,6 +337,7 @@ class AuthControllerTest {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         User user = User.createOAuthUser(
                 "test@example.com", "테스트유저", "https://example.com/avatar.png");
+        ReflectionTestUtils.setField(user, "id", 1L);
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
 
         mockMvc.perform(get("/auth/me")
@@ -348,6 +349,22 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.data.nickname").value("테스트유저"))
                 .andExpect(jsonPath("$.data.profileImageUrl").value("https://example.com/avatar.png"))
                 .andExpect(jsonPath("$.data.role").value("USER"));
+    }
+
+    @Test
+    void meReturnsCurrentRoleFromDbEvenWhenTokenWasIssuedWithStaleRole() throws Exception {
+        // 토큰 발급 시점엔 USER였지만, 그 사이 DB에서 ADMIN으로 승격된 상황을 재현한다 — 응답의
+        // role은 토큰 클레임이 아니라 DB 최신값(ADMIN)을 따라야 한다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createOAuthUser("test@example.com", "테스트유저", null);
+        user.grantAdminRole();
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
+
+        mockMvc.perform(get("/auth/me")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.role").value("ADMIN"));
     }
 
     @Test
