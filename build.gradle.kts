@@ -29,6 +29,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-restclient")
+    // 실거래가 비교 결과 캐싱 도입 예정(현재는 연결 준비만 - 실제 @Cacheable/캐시 대상 설계는
+    // 별도 작업으로 진행). Lettuce는 연결이 지연 생성이라 Redis가 안 떠 있어도 앱 기동엔 영향 없다.
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
     compileOnly("org.projectlombok:lombok")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     // 로컬 개발 전용: backend/.env를 자동으로 읽어 Spring 프로퍼티로 노출한다

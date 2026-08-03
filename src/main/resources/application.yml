@@ -1,6 +1,13 @@
 spring:
   application:
     name: algogyeyak
+  # 캐싱 연결 준비용 - 실제 캐시 대상/TTL 설계는 별도 작업. 로컬은 docker-compose의 redis
+  # 서비스(localhost:6379)를 그대로 쓴다. Lettuce는 연결이 지연 생성이라 Redis가 안 떠
+  # 있어도 앱 기동 자체는 영향받지 않는다.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   security:
     oauth2:
       client:

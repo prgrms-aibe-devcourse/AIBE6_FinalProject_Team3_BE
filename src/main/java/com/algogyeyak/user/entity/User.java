@@ -98,6 +98,30 @@ public class User {
         return this.status == UserStatus.WITHDRAWN;
     }
 
+    public boolean isSuspended() {
+        return this.status == UserStatus.SUSPENDED;
+    }
+
+    // 관리자 페이지 전용. 탈퇴한 사용자는 이미 익명화되어 되돌릴 수 없는 상태라 정지/활성화 대상에서 제외한다.
+    public void suspend() {
+        if (isWithdrawn()) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "탈퇴한 사용자는 정지할 수 없습니다.");
+        }
+        this.status = UserStatus.SUSPENDED;
+    }
+
+    public void activate() {
+        if (isWithdrawn()) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "탈퇴한 사용자는 활성화할 수 없습니다.");
+        }
+        this.status = UserStatus.ACTIVE;
+    }
+
+    // grantAdminRole()과 달리 ADMIN->USER 강등도 허용한다 (관리자 페이지의 일반 권한 변경 액션).
+    public void changeRole(Role role) {
+        this.role = role;
+    }
+
     /**
      * 회원 탈퇴 처리
      * - 상태를 WITHDRAWN으로 변경
