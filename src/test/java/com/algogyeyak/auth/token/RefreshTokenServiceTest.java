@@ -6,16 +6,19 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Collection;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -118,7 +121,7 @@ class RefreshTokenServiceTest {
     }
 
     @Test
-    void rotateThrowsAndCleansUpReverseIndexWhenUserWithdrawn() {
+    void rotateThrowsAndCleansUpOrphanedSessionWhenUserWithdrawn() {
         User user = user(1L);
         user.withdraw();
         doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
@@ -127,18 +130,29 @@ class RefreshTokenServiceTest {
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.rotate("token"));
         assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
-        verify(redisTemplate).delete("auth:refresh-token:by-user:1");
+        assertCleansUpBothOrphanedKeysFor("1");
     }
 
     @Test
-    void rotateThrowsAndCleansUpReverseIndexWhenUserNoLongerExists() {
+    void rotateThrowsAndCleansUpOrphanedSessionWhenUserNoLongerExists() {
         doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
         when(userRepository.findById(1L)).thenReturn(Optional.empty());
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.rotate("token"));
         assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
-        verify(redisTemplate).delete("auth:refresh-token:by-user:1");
+        assertCleansUpBothOrphanedKeysFor("1");
+    }
+
+    // ROTATE_SCRIPT가 이미 새 by-hash/by-user를 써버린 뒤 사용자 상태 확인에서 거부되는 경우,
+    // by-user만 지우면 새로 만든 by-hash가 TTL까지 고아로 남는다 - 둘 다 지우는지 검증한다.
+    @SuppressWarnings("unchecked")
+    private void assertCleansUpBothOrphanedKeysFor(String userId) {
+        ArgumentCaptor<Collection<String>> keysCaptor = ArgumentCaptor.forClass(Collection.class);
+        verify(redisTemplate).delete(keysCaptor.capture());
+        Collection<String> deletedKeys = keysCaptor.getValue();
+        assertTrue(deletedKeys.contains("auth:refresh-token:by-user:" + userId));
+        assertTrue(deletedKeys.stream().anyMatch(key -> key.startsWith("auth:refresh-token:by-hash:")));
     }
 
     @Test

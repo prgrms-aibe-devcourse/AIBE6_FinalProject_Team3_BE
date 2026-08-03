@@ -151,7 +151,11 @@ public class RefreshTokenService {
 
         User user = userRepository.findById(Long.valueOf(userId)).orElse(null);
         if (user == null || user.isWithdrawn() || user.isSuspended()) {
-            deleteByUserKey(userId);
+            // ROTATE_SCRIPT가 이미 새 by-hash/by-user를 써버린 뒤라, 여기서 둘 다 지워야 한다 -
+            // by-user만 지우면 newHash를 가리키는 by-hash 항목이 TTL까지 고아로 남는다. newRawToken은
+            // 클라이언트에 반환된 적이 없어 실제로 악용될 수는 없지만(누구도 그 raw token을 모름),
+            // 정리 관점에서 남겨둘 이유가 없다.
+            deleteOrphanedSession(userId, newHash);
             throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, "존재하지 않거나 탈퇴한 사용자입니다.");
         }
 
@@ -169,11 +173,11 @@ public class RefreshTokenService {
         }
     }
 
-    private void deleteByUserKey(String userId) {
+    private void deleteOrphanedSession(String userId, String newHash) {
         try {
-            redisTemplate.delete(byUserKey(userId));
+            redisTemplate.delete(List.of(byUserKey(userId), byHashKey(newHash)));
         } catch (DataAccessException e) {
-            log.warn("탈퇴/미존재 사용자의 refresh token 역인덱스 정리 실패 (TTL로 자연 정리됨) userId={}", userId, e);
+            log.warn("탈퇴/미존재 사용자의 refresh token 정리 실패 (TTL로 자연 정리됨) userId={}", userId, e);
         }
     }
 

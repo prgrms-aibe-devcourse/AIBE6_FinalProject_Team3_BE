@@ -178,6 +178,30 @@ class RefreshTokenServiceRedisIntegrationTest {
         refreshTokenService.rotate(legitToken);
     }
 
+    // rotate()는 사용자 상태를 확인하기 전에 이미 ROTATE_SCRIPT로 새 by-hash/by-user를 써버린다 -
+    // 정지된 사용자로 밝혀져 거부할 때 by-user만 지우면, 아무도 모르는 새 raw token을 가리키는
+    // by-hash가 TTL(최대 14일)까지 고아로 남는다. 둘 다 지워지는지 실제 Redis로 확인한다.
+    @Test
+    void rotateForSuspendedUserLeavesNoOrphanedByHashKey() {
+        User user = saveUser("suspended-rotate@example.com");
+        String rawToken = refreshTokenService.issue(user);
+        user.suspend();
+        userRepository.saveAndFlush(user);
+
+        // 테스트 클래스 전체가 같은 Redis 컨테이너를 공유하므로(@Container는 static), 전체
+        // 키스페이스가 이 테스트 하나만의 것이 아니다 - 절대 개수(0개)가 아니라, 이 rotate() 시도로
+        // 인한 순변화(delta)로 검증한다. 정상 정리라면 원래 있던 by-hash 1개가 소비되고 새로 만든
+        // by-hash도 지워져 순감소는 정확히 1이어야 한다 - 새 by-hash가 orphan으로 남으면 소비한
+        // 만큼만 상쇄돼 순변화가 0이 된다.
+        long byHashKeysBefore = redisTemplate.keys("auth:refresh-token:by-hash:*").size();
+
+        assertThrows(BusinessException.class, () -> refreshTokenService.rotate(rawToken));
+
+        long byHashKeysAfter = redisTemplate.keys("auth:refresh-token:by-hash:*").size();
+        assertEquals(byHashKeysBefore - 1, byHashKeysAfter,
+                "정지된 사용자의 rotate 시도 후 새로 만든 by-hash가 고아로 남으면 안 된다");
+    }
+
     @Test
     void revokeThenRotateWithSameTokenFails() {
         User user = saveUser("revoke@example.com");
