@@ -50,4 +50,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // 관리자 통계 대시보드: 신규 가입자 수 카드용(기간 내 가입).
     long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
+
+    // 관리자 통계 대시보드: 매물 등록자/미등록자 분포용 - 가입-등록 전환율을 보기 위해, 기간 내 가입한
+    // 유저들의 id만 뽑아 PropertyRepository.countDistinctUserIdIn에 넘긴다.
+    @Query("SELECT u.id FROM User u WHERE u.createdAt >= :start AND u.createdAt < :end")
+    List<Long> findIdsByCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 }

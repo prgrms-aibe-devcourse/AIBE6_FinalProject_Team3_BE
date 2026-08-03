@@ -2,6 +2,8 @@ package com.algogyeyak.admin.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -20,6 +22,7 @@ import jakarta.servlet.http.Cookie;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -83,14 +86,16 @@ class AdminStatsControllerTest {
 
     @Test
     void 관리자_토큰으로_대시보드_통계를_조회한다() throws Exception {
+        List<Long> userIdsJoinedInRange = LongStream.rangeClosed(1, 10).boxed().toList();
+
         when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(10L);
-        when(userRepository.count()).thenReturn(20L);
+        when(userRepository.findIdsByCreatedAtBetween(any(), any())).thenReturn(userIdsJoinedInRange);
         when(propertyRepository.countByStatusAndCreatedAtBetween(eq(PropertyStatus.ACTIVE), any(), any())).thenReturn(5L);
         when(propertyReportRepository.countByStatusAndCreatedAtBetween(eq(PropertyReportStatus.RECEIVED), any(), any()))
                 .thenReturn(2L);
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of(LocalDateTime.now()));
         when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
-        when(propertyRepository.countDistinctUserIdByCreatedAtBetween(any(), any())).thenReturn(4L);
+        when(propertyRepository.countDistinctUserIdIn(userIdsJoinedInRange)).thenReturn(4L);
         when(propertyReportRepository.countByReasonAndCreatedAtBetween(any(), any(), any())).thenReturn(0L);
 
         mockMvc.perform(get("/admin/stats/dashboard").cookie(adminCookie()))
@@ -103,19 +108,37 @@ class AdminStatsControllerTest {
                 .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[0].registered").value(true))
                 .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[0].count").value(4))
                 .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[1].registered").value(false))
-                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[1].count").value(16));
+                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[1].count").value(6));
     }
 
     @Test
-    void 조회_기간을_직접_지정하면_해당_일수만큼_추이를_반환한다() throws Exception {
+    void 기간_내_가입자가_없으면_등록자_조회를_건너뛰고_0으로_집계한다() throws Exception {
         when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(10L);
-        when(userRepository.count()).thenReturn(20L);
+        when(userRepository.findIdsByCreatedAtBetween(any(), any())).thenReturn(List.of());
         when(propertyRepository.countByStatusAndCreatedAtBetween(eq(PropertyStatus.ACTIVE), any(), any())).thenReturn(5L);
         when(propertyReportRepository.countByStatusAndCreatedAtBetween(eq(PropertyReportStatus.RECEIVED), any(), any()))
                 .thenReturn(2L);
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
         when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
-        when(propertyRepository.countDistinctUserIdByCreatedAtBetween(any(), any())).thenReturn(0L);
+        when(propertyReportRepository.countByReasonAndCreatedAtBetween(any(), any(), any())).thenReturn(0L);
+
+        mockMvc.perform(get("/admin/stats/dashboard").cookie(adminCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[0].count").value(0))
+                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[1].count").value(0));
+
+        verify(propertyRepository, never()).countDistinctUserIdIn(any());
+    }
+
+    @Test
+    void 조회_기간을_직접_지정하면_해당_일수만큼_추이를_반환한다() throws Exception {
+        when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(10L);
+        when(userRepository.findIdsByCreatedAtBetween(any(), any())).thenReturn(List.of());
+        when(propertyRepository.countByStatusAndCreatedAtBetween(eq(PropertyStatus.ACTIVE), any(), any())).thenReturn(5L);
+        when(propertyReportRepository.countByStatusAndCreatedAtBetween(eq(PropertyReportStatus.RECEIVED), any(), any()))
+                .thenReturn(2L);
+        when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
+        when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
         when(propertyReportRepository.countByReasonAndCreatedAtBetween(any(), any(), any())).thenReturn(0L);
 
         mockMvc.perform(get("/admin/stats/dashboard")

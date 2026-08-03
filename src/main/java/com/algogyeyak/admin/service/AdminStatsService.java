@@ -96,15 +96,19 @@ public class AdminStatsService {
                 .toList();
     }
 
-    // byPropertyRegistration은 전체 유저를 대상으로, 그중 선택한 기간 동안 매물을 등록한 사람과
-    // 등록하지 않은 사람을 나눈다(가입 시점이 기간 밖이어도 기간 내 등록 활동이 있으면 등록자로 집계) -
+    // byPropertyRegistration은 선택한 기간 내 가입자를 모집단으로 하는 가입→등록 전환율이다 -
+    // summary()의 신규 가입자 수와 항상 합이 맞아야 하므로 동일하게 기간 내 가입자 id로 모집단을
+    // 고정하고, 등록 여부는 가입 시점 이후 언제든(기간 밖이어도) 매물을 등록했는지로 판단한다.
     // byReportReason은 요약 카드와 동일하게 기간 내 접수 건만 집계한다.
     private AdminStatsDistributionResponse distributions(LocalDate start, LocalDate end) {
         LocalDateTime rangeStart = start.atStartOfDay();
         LocalDateTime rangeEnd = end.plusDays(1).atStartOfDay();
 
-        long registeredCount = propertyRepository.countDistinctUserIdByCreatedAtBetween(rangeStart, rangeEnd);
-        long unregisteredCount = userRepository.count() - registeredCount;
+        List<Long> userIdsJoinedInRange = userRepository.findIdsByCreatedAtBetween(rangeStart, rangeEnd);
+        long registeredCount = userIdsJoinedInRange.isEmpty()
+                ? 0L
+                : propertyRepository.countDistinctUserIdIn(userIdsJoinedInRange);
+        long unregisteredCount = userIdsJoinedInRange.size() - registeredCount;
         List<AdminStatsDistributionResponse.PropertyRegistrationCount> byPropertyRegistration = List.of(
                 new AdminStatsDistributionResponse.PropertyRegistrationCount(true, registeredCount),
                 new AdminStatsDistributionResponse.PropertyRegistrationCount(false, unregisteredCount));

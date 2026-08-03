@@ -92,8 +92,10 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
     // 관리자 통계 대시보드: 신규 등록 매물 수 카드용(기간 내 등록 + 활성 상태).
     long countByStatusAndCreatedAtBetween(PropertyStatus status, LocalDateTime start, LocalDateTime end);
 
-    // 관리자 통계 대시보드: 매물 등록자/미등록자 분포용 - 선택한 기간 동안 매물을 1건 이상 등록한
-    // 유저 수. 삭제 여부와 무관하게 "등록한 적이 있는지"를 기준으로 삼으므로 status로 필터링하지 않는다.
-    @Query("SELECT COUNT(DISTINCT p.userId) FROM Property p WHERE p.createdAt >= :start AND p.createdAt < :end")
-    long countDistinctUserIdByCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+    // 관리자 통계 대시보드: 매물 등록자/미등록자 분포용 - 주어진 유저 id들 중 매물을 1건이라도
+    // 등록한 유저가 몇 명인지. 가입 시점과 무관하게 "등록한 적이 있는지"를 기준으로 삼으므로(가입은
+    // 기간 내지만 등록은 그 이후일 수도 있음) status/기간으로 다시 필터링하지 않는다. userIds가
+    // 비어 있으면 호출부(AdminStatsService)에서 쿼리 자체를 건너뛴다.
+    @Query("SELECT COUNT(DISTINCT p.userId) FROM Property p WHERE p.userId IN :userIds")
+    long countDistinctUserIdIn(@Param("userIds") List<Long> userIds);
 }
