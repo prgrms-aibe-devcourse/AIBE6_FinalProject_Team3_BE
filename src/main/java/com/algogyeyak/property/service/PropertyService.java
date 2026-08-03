@@ -220,6 +220,10 @@ public class PropertyService {
         property.updateArea(request.area());
         property.updateDescription(request.description());
 
+        // 가격/면적이 바뀌었으니 캐시된 예전 시세비교 결과를 비우고 재계산한다 - 안 비우면
+        // compare()가 캐시 히트로 수정 전 결과를 그대로 반환해버린다.
+        marketComparisonService.evictCache(propertyId);
+
         return PropertyDetailResponse.from(
                 property,
                 marketComparisonService.compare(property),

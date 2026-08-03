@@ -49,7 +49,7 @@ class MarketComparisonServiceTest {
 
     // application.yml의 market-data.comparison.* 기본값과 동일하게 맞춰둔다.
     private static final MarketComparisonProperties PROPERTIES =
-            new MarketComparisonProperties(300, 600, 3, 0.2, 6);
+            new MarketComparisonProperties(300, 600, 3, 0.2, 6, 30);
 
     private void init() {
         service = new MarketComparisonService(kakaoRegionCodeClient, kakaoAddressClient, molitRentClient, PROPERTIES);

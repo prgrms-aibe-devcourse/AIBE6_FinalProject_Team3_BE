@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.algogyeyak.checklist.repository.ChecklistItemRepository;
@@ -616,6 +617,9 @@ class PropertyServiceTest {
         assertThat(response.deposit()).isEqualTo(35_000_000L);
         assertThat(response.area()).isEqualTo(25.0);
         assertThat(response.description()).isEqualTo("수정된 설명");
+        // 가격/면적이 바뀌었으니 예전 시세비교 결과 캐시를 비우고 재계산해야 한다 - 안 비우면
+        // 캐시 히트로 수정 전 결과가 그대로 반환된다.
+        verify(marketComparisonService).evictCache(1L);
     }
 
     @Test
