@@ -6,8 +6,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.algogyeyak.checklist.repository.ChecklistItemRepository;
+import com.algogyeyak.checklist.repository.ChecklistItemRepository.ChecklistProgressProjection;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -41,6 +44,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class PropertyServiceTest {
@@ -58,6 +62,9 @@ class PropertyServiceTest {
     private ChecklistRepository checklistRepository;
 
     @Mock
+    private ChecklistItemRepository checklistItemRepository;
+
+    @Mock
     private PropertyReportRepository propertyReportRepository;
 
     private PropertyService propertyService;
@@ -68,7 +75,7 @@ class PropertyServiceTest {
     void setUp() {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
-                checklistRepository, propertyReportRepository
+                checklistRepository, checklistItemRepository, propertyReportRepository
         );
     }
 
@@ -344,6 +351,51 @@ class PropertyServiceTest {
         assertThat(result.content().get(0).transactionType()).isEqualTo("JEONSE");
         assertThat(result.totalElements()).isEqualTo(1);
         assertThat(result.hasNext()).isFalse();
+    }
+
+    @Test
+    void 매물_목록조회_응답에_체크리스트_진행률이_매물별로_포함된다() {
+        Property propertyWithChecklist = Property.builder()
+                .userId(USER_ID)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .build();
+        ReflectionTestUtils.setField(propertyWithChecklist, "id", 1L);
+
+        Property propertyWithoutChecklist = Property.builder()
+                .userId(USER_ID)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(20_000_000L)
+                .monthlyRent(null)
+                .area(18.0)
+                .build();
+        ReflectionTestUtils.setField(propertyWithoutChecklist, "id", 2L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(propertyWithChecklist, propertyWithoutChecklist), pageable, 2));
+
+        // 문항 4개 중 3개 체크됨 -> 75%. propertyId 2번은 체크리스트가 아예 없어(집계 자체가 안 잡힘)
+        // checklistProgress가 null이어야 한다.
+        ChecklistProgressProjection progress = mock(ChecklistProgressProjection.class);
+        when(progress.getPropertyId()).thenReturn(1L);
+        when(progress.getTotalCount()).thenReturn(4L);
+        when(progress.getCheckedCount()).thenReturn(3L);
+        when(checklistItemRepository.findProgressByUserId(USER_ID)).thenReturn(List.of(progress));
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content()).hasSize(2);
+        assertThat(result.content().get(0).checklistProgress()).isEqualTo(75);
+        assertThat(result.content().get(1).checklistProgress()).isNull();
     }
 
     @Test

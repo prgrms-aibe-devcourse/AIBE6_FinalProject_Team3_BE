@@ -18,9 +18,14 @@ public record PropertyListResponse(
         String roadAddress,
         String jibunAddress,
         String status,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        Integer checklistProgress
 ) {
-    public static PropertyListResponse from(Property property) {
+    /**
+     * checklistProgress는 체크리스트를 아예 시작하지 않았으면 null(체크리스트 자체가 없어서 분모가
+     * 없음), 시작했으면 0~100 사이 정수(체크된 문항 수 / 전체 문항 수 * 100, 반올림)로 내려간다.
+     */
+    public static PropertyListResponse from(Property property, Integer checklistProgress) {
         var address = property.getAddress();
         return new PropertyListResponse(
                 property.getId(),
@@ -32,7 +37,8 @@ public record PropertyListResponse(
                 address != null ? address.getRoadAddress() : null,
                 address != null ? address.getJibunAddress() : null,
                 property.getStatus().name(),
-                property.getCreatedAt()
+                property.getCreatedAt(),
+                checklistProgress
         );
     }
 }

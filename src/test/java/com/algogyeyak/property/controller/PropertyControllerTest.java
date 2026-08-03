@@ -144,7 +144,8 @@ class PropertyControllerTest {
                 "서울특별시 강남구 테헤란로 123",
                 "서울특별시 강남구 역삼동 123-45",
                 "ACTIVE",
-                LocalDateTime.of(2026, 7, 23, 10, 0)
+                LocalDateTime.of(2026, 7, 23, 10, 0),
+                75
         );
 
         Pageable pageable = PageRequest.of(0, 20);
@@ -159,6 +160,7 @@ class PropertyControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.content[0].propertyId").value(101))
                 .andExpect(jsonPath("$.data.content[0].roadAddress").value("서울특별시 강남구 테헤란로 123"))
+                .andExpect(jsonPath("$.data.content[0].checklistProgress").value(75))
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.hasNext").value(false));
     }
