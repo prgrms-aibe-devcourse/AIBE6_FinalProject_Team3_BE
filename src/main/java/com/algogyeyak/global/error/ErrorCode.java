@@ -34,7 +34,14 @@ public enum ErrorCode {
     // 탈퇴한 사용자의 refresh token도 이 코드로 처리한다 - 클라이언트 입장에서 "재로그인이 필요하다"는
     // 결론은 동일하고, 계정 존재 여부를 굳이 구분해 알려줄 필요가 없다.
     AUTH_REFRESH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_INVALID", "유효하지 않은 Refresh Token입니다."),
+    // Redis TTL이 만료 판단의 유일한 소스가 된 이후로는(RefreshTokenService 참고), 자연 만료도
+    // "찾을 수 없음"으로 Redis에서 already evict되어 AUTH_REFRESH_TOKEN_INVALID와 구분이 불가능해졌다 —
+    // 더 이상 던져지지 않지만, 과거 발급된 문서/클라이언트 코드가 참조할 수 있어 코드 자체는 유지한다.
     AUTH_REFRESH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_EXPIRED", "만료된 Refresh Token입니다."),
+    // Redis(access token blacklist/refresh token 저장소) 장애 시 fail-closed 정책 — "이 토큰이
+    // 유효한지 확신할 수 없다"를 "유효하다"로 오인하지 않기 위해, 인증을 통과시키는 대신 503으로
+    // 명시적으로 실패시킨다. 재시도하면 복구될 수 있는 일시 장애라는 걸 알리기 위해 401이 아닌 503을 쓴다.
+    AUTH_TOKEN_STORE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AUTH_TOKEN_STORE_UNAVAILABLE", "인증 저장소에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해주세요."),
 
     // User 도메인
     USER_PROFILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_PROFILE_ALREADY_EXISTS", "이미 프로필이 등록되어 있습니다."),
