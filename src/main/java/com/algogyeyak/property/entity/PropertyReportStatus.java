@@ -1,9 +1,9 @@
 package com.algogyeyak.property.entity;
 
 /**
- * 매물 신고 처리 상태. MVP 범위에서는 접수(RECEIVED)만 사용하고 자동 처리는 하지 않는다 —
- * 관리자 검토 등 후속 처리 상태는 이후 별도 이슈에서 추가한다.
+ * 매물 신고 처리 상태. 접수(RECEIVED) 후 관리자가 검토해 조치완료(RESOLVED) 또는 반려(REJECTED)로
+ * 전이한다 - RECEIVED에서만 두 상태로 전이 가능하고, 그 외 전이는 허용하지 않는다(PropertyReport 참고).
  */
 public enum PropertyReportStatus {
-    RECEIVED
+    RECEIVED, RESOLVED, REJECTED
 }

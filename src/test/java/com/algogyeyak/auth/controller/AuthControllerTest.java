@@ -309,6 +309,9 @@ class AuthControllerTest {
     @Test
     void updatePasswordRejectsInvalidNewPasswordFormat() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
         mockMvc.perform(patch("/auth/password")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token))
@@ -466,6 +469,9 @@ class AuthControllerTest {
 
     @Test
     void meRejectsWhenUnderlyingUserNoLongerExists() throws Exception {
+        // JwtAuthenticationFilter가 이제 매 요청 User를 다시 조회해 존재/탈퇴/정지 여부를 확인하므로,
+        // 이 경우는 컨트롤러(AuthController.me())까지 도달하지 못하고 필터 단계에서 이미 거부된다 -
+        // 그래서 이전엔 컨트롤러가 던지던 UNAUTHORIZED 대신 필터의 AUTH_TOKEN_INVALID가 응답된다.
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         when(userRepository.findById(eq(1L))).thenReturn(Optional.empty());
 
@@ -473,11 +479,13 @@ class AuthControllerTest {
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
 
     @Test
     void meRejectsWhenUserHasWithdrawn() throws Exception {
+        // 위와 동일한 이유로 필터 단계에서 거부되어 AUTH_TOKEN_INVALID가 된다 (컨트롤러 레벨의
+        // 자체 탈퇴 체크는 이제 이 HTTP 경로에서는 도달하지 않는 defense-in-depth로만 남는다).
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         User user = User.createOAuthUser(
                 "test@example.com", "테스트유저", "https://example.com/avatar.png");
@@ -488,7 +496,23 @@ class AuthControllerTest {
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
+    }
+
+    @Test
+    void meRejectsWhenUserHasBeenSuspended() throws Exception {
+        // 관리자가 정지시킨 유저의 기존 access token도 즉시 차단되어야 한다 - 이번 리뷰에서 새로
+        // 닫은 구멍(정지/권한변경이 기존 토큰에 즉시 반영되지 않던 문제)의 회귀 테스트.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = User.createOAuthUser(
+                "test@example.com", "테스트유저", "https://example.com/avatar.png");
+        user.suspend();
+        when(userRepository.findById(eq(1L))).thenReturn(Optional.of(user));
+
+        mockMvc.perform(get("/auth/me")
+                        .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_INVALID"));
     }
 
     @Test

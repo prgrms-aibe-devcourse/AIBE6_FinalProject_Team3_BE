@@ -22,6 +22,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-h2console")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    // access token blacklist/refresh token 저장소(auth)에 쓰고, 실거래가 비교 결과 캐싱 등 다른
+    // 도메인의 캐싱 연결 준비도 겸한다(그쪽 실제 @Cacheable/캐시 대상 설계는 별도 작업). Lettuce는
+    // 연결이 지연 생성이라 Redis가 안 떠 있어도 앱 기동 자체는 영향받지 않는다.
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-security-oauth2-client")

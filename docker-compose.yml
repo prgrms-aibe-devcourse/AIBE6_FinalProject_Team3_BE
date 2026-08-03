@@ -1,0 +1,11 @@
+# 로컬 개발용. 실제 배포 환경(AWS)의 Redis는 별도로 프로비저닝되며(인프라 담당자 관리),
+# 이 파일은 로컬에서 spring.data.redis 연동을 테스트해보기 위한 용도로만 쓴다.
+#
+# 사용법: docker compose up -d redis
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: algogyeyak-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped

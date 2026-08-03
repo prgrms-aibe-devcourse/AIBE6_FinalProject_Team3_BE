@@ -92,7 +92,7 @@ public class RefreshTokenService {
         }
 
         User user = userRepository.findById(Long.valueOf(userId)).orElse(null);
-        if (user == null || user.isWithdrawn()) {
+        if (user == null || user.isWithdrawn() || user.isSuspended()) {
             deleteByUserKey(userId);
             throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, "존재하지 않거나 탈퇴한 사용자입니다.");
         }

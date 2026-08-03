@@ -40,6 +40,20 @@ class UserServiceTest {
     }
 
     @Test
+    void withdrawThrowsWhenUserIsSuspended() {
+        // getActiveUserOrThrow()가 탈퇴 여부만 확인하고 정지 여부는 놓쳐서, 정지된 유저가 기존
+        // access token으로 이 API들을 계속 쓸 수 있는 구멍이었다 - JwtAuthenticationFilter가 이제
+        // 전역으로 막아주지만, 이 서비스 레이어 자체도 정지 상태를 정확히 인지해야 한다.
+        User suspended = activeUser(1L);
+        suspended.suspend();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(suspended));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> userService.withdraw(1L));
+
+        assertEquals(ErrorCode.NOT_FOUND, exception.getErrorCode());
+    }
+
+    @Test
     void registerProfileThrowsWhenProfileAlreadyExists() {
         // 온보딩(최초 등록)은 한 번만 허용되어야 한다 - 이미 UserPreference 행이 있으면 재등록을
         // 막고, 재확인 없이 500이나 다른 코드로 새는 대신 409로 명확히 알려야 한다.
