@@ -97,7 +97,13 @@
 | 실패 시 재로그인 요청 | ✅ |
 | 실패 사유: 없음/유효하지 않음/만료됨 | ✅ 메시지는 구분되지만, 에러 코드는 전부 `UNAUTHORIZED`로 동일 |
 
-✅ **(2026-07-29 확정)**: 요구사항 문서의 "별도 저장소 없이 서명/만료만 검증"은 "Redis 같은 별도 인메모리 캐시 없음"을 의미했던 것으로 확정. Refresh Token은 계속 **DB 테이블(`refresh_tokens`)**에 저장하는 현재 방식을 그대로 유지하기로 결정함 (즉시 무효화/유저당 1세션/탈퇴 차단 요구사항 때문에 저장소 자체는 불가피 — 아래 설명 참고). (참고: 유저당 1개 세션만 유지하는 방식이라, 이 저장소는 "다중 로그인 방지" 용도도 겸하고 있습니다.)
+🔁 **(2026-08-03 재결정)**: 2026-07-29 결정("DB 유지")을 뒤집고 **Redis로 이전**함. 코드 리뷰에서 access token blacklist/refresh token/유저 role·status 캐시/관리자 통계 캐시를 한 PR에 다 넣으면 장애 원인 분리가 어렵다는 지적이 있었고, 이에 따라 blast radius가 작은 것부터 단계적으로 도입하기로 함 — 1) access token blacklist, 2) refresh token 저장소(이번 범위), 3) 유저 role/status 캐시, 4) 관리자 통계 캐시 순. Refresh Token은 이제 **Redis**(`RefreshTokenService` — `by-hash:{tokenHash}`→userId, `by-user:{userId}`→tokenHash 역인덱스, 두 키 모두 TTL=refresh token 유효기간)에 저장한다. DB `refresh_tokens` 테이블/`RefreshToken`/`RefreshTokenRepository`는 삭제했다. Redis TTL이 만료를 자동으로 처리하므로 더 이상 `expiresAt` 컬럼/수동 만료 검사가 없고, 그 대신 자연 만료와 "애초에 모르는 토큰"이 둘 다 "키 없음"으로만 관측되어 `AUTH_REFRESH_TOKEN_EXPIRED`는 더 이상 던져지지 않는다(전부 `AUTH_REFRESH_TOKEN_INVALID`) — frontend는 애초에 이 둘을 구분하지 않았으므로(`SESSION_INVALID_ERROR_CODES`에 둘 다 없음) 영향 없음. **Redis 장애 시 정책은 fail-closed** — access token blacklist 확인/refresh token 발급·회전·폐기 어느 쪽이든 Redis에 연결할 수 없으면 인증을 통과시키지 않고 명시적으로 실패(blacklist 확인은 401, 그 외는 `AUTH_TOKEN_STORE_UNAVAILABLE`/503)시킨다 — 가용성보다 "무효화된 토큰이 장애 상황에서 재사용되지 않는 것"을 우선한 것.
+
+<details><summary>이전 결정 (2026-07-29, 취소됨)</summary>
+
+✅ **(2026-07-29 확정, 2026-08-03 취소)**: 요구사항 문서의 "별도 저장소 없이 서명/만료만 검증"은 "Redis 같은 별도 인메모리 캐시 없음"을 의미했던 것으로 확정. Refresh Token은 계속 **DB 테이블(`refresh_tokens`)**에 저장하는 현재 방식을 그대로 유지하기로 결정함 (즉시 무효화/유저당 1세션/탈퇴 차단 요구사항 때문에 저장소 자체는 불가피 — 아래 설명 참고). (참고: 유저당 1개 세션만 유지하는 방식이라, 이 저장소는 "다중 로그인 방지" 용도도 겸하고 있습니다.)
+
+</details>
 
 **(2026-07-28) 왜 어떤 형태로든 저장소가 필요한가** — Refresh Token을 "서명/만료만 보고 저장소 조회 없이" 검증하려면, JWT처럼 그 자체로 서명 검증이 가능한 형태여야 한다. 하지만 지금 방식은 로그아웃 시 즉시 무효화(row 삭제), 유저당 1세션 강제(재로그인 시 이전 토큰 자동 무효화), 탈퇴 유저 차단을 전부 만족해야 하는데, 이건 전부 "발급된 토큰 하나하나의 현재 상태"를 서버가 언제든 뒤집을 수 있어야 가능한 요구사항이다 — 서명 검증만으로는 절대 못 만든다(서명은 발급 시점에 고정되고, 이미 서명된 토큰을 나중에 "무효"로 만들 방법이 서명 자체엔 없음). 그래서 "요청/재시작에 걸쳐 공유되는 조회 가능한 저장소"가 사실상 필수이고, Redis와 DB 둘 중 하나를 골라야 하는 문제였지 "아예 안 쓴다"는 선택지는 없었다. 게다가 이 앱은 `User`/`Property`/`Checklist` 등 이미 DB 없이는 동작할 수 없는 서비스라, refresh token만을 위해 저장소를 새로 들이는 것도 아니고 **이미 있는 DB에 테이블 하나(`refresh_tokens`) 더 추가한 것뿐**이다. Redis를 새로 도입했다면 만료 자동 삭제(TTL) 정도의 이점은 있었겠지만, 별도 인프라를 하나 더 운영해야 하는 비용 대비 이 규모에서는 이득이 크지 않다고 판단한 것으로 보임 — "별도 저장소 없음"이 원래 "Redis 같은 새 인프라 없음"을 뜻했을 가능성이 높은 이유이기도 하다.
 
@@ -110,8 +116,8 @@
 
 **(2026-07-28 갱신) jti 블랙리스트 구현 완료** — 위에 남아있던 "Swagger 문서(jti 블랙리스트)와 실제 코드 불일치" 이슈는 해결됨:
 - `JwtProvider.createAccessToken()`이 access token 발급 시 `jti`(UUID) 클레임을 심음
-- 로그아웃 시 `AccessTokenRevocationService.revoke(jti, expiresAt)`가 그 jti를 `revoked_access_tokens` 테이블에 등록(자연 만료 시각까지만 보관, 별도 스케줄러 없이 다음 `revoke()` 호출 시 지연 청소)
-- `JwtAuthenticationFilter`가 매 요청마다 `isRevoked(jti)`를 확인해, 서명/만료가 유효해도 블랙리스트에 있으면 인증 거부
+- 로그아웃 시 `AccessTokenRevocationService.revoke(jti, expiresAt)`가 그 jti를 Redis에 등록(**2026-08-03부터 Redis** — 이전엔 `revoked_access_tokens` DB 테이블. 키 TTL을 만료 시각과 동일하게 맞춰 자연 만료를 Redis가 자동 처리하므로 별도 청소 로직이 없다)
+- `JwtAuthenticationFilter`가 매 요청마다 `isRevoked(jti)`를 확인해, 서명/만료가 유효해도 블랙리스트에 있으면 인증 거부. Redis 장애 시에는 fail-closed로 "무효화된 것으로 간주"해 인증을 거부한다(필터가 예외를 던지지 않는 설계이므로 이 판단만 뒤집는다)
 - 최초 구현 때는 `logout()`이 access token을 `access_token` 쿠키에서만 찾아, `Authorization: Bearer` 헤더로만 인증하는 클라이언트(Swagger/Postman 등)는 로그아웃해도 무효화가 안 되는 버그가 있었음 — `JwtAuthenticationFilter.resolveToken`(헤더 우선, 쿠키 폴백)과 동일한 규칙을 `logout()`도 쓰도록 고쳐서 해결
 - jti는 **토큰 단위** 무효화라 유저 단위가 아님 — 같은 유저가 두 브라우저에서 각각 로그인했다면 한쪽 로그아웃이 다른 쪽 access token까지 무효화하지는 않음(각자 다른 jti)
 - 현재 `fix/auth-access_token&refresh_token` 브랜치에 구현되어 있고, 아직 `dev`에 머지되지 않음
@@ -143,6 +149,6 @@
 2. 카카오 email 스코프 미승인 상태 — **(2026-07-29 확정) 보류/후순위.** 카카오 계정 연동이 사실상 항상 신규 생성되는 현재 동작은 알려진 상태이며, 지금 당장 처리하지 않기로 함.
    **⚠️ 코드 작업이 아님 — 별도 도메인/트랙으로 분리.** 카카오 디벨로퍼스 콘솔에서 앱 소유자 본인인증 → 비즈 앱 전환 → 개인정보(email) 동의항목 심사 신청까지 전부 **카카오 개발자 콘솔 운영 업무**이지 백엔드/프론트 코드 변경이 아니다. `com.algogyeyak.auth`(코드) 관점에서 할 일은 승인이 완료된 뒤 `application.yml`의 `scope: profile_nickname` → `scope: profile_nickname, account_email`로 한 줄 바꾸는 것뿐. 신청 자체는 팀의 운영/기획 쪽에서 여유 있을 때 트래킹하고, 승인 완료 시점에 이 코드 한 줄만 바꾸면 되는 후속 작업으로 남겨둠
 3. ~~신규/기존 사용자 리다이렉트 분기가 백엔드가 아닌 프론트 담당으로 보이는데, 실제로 그렇게 구현되어 있는지~~ — ✅ 2026-07-28 확인 완료. `frontend/app/oauth/callback/route.ts`가 프로필 등록 여부로 분기 처리함(위 소셜 로그인 섹션 참고)
-4. ~~"Refresh Token 별도 저장소 없음"(요구사항) vs 실제 DB 저장 — 원래 의도 확인~~ — ✅ 2026-07-29 확정. "별도 저장소 없음"은 "Redis 같은 새 인프라 없음"을 의미했던 것으로 확정하고, 현재의 DB(`refresh_tokens` 테이블) 저장 방식을 그대로 유지하기로 결정함.
+4. ~~"Refresh Token 별도 저장소 없음"(요구사항) vs 실제 DB 저장 — 원래 의도 확인~~ — ✅ 2026-07-29 DB 유지로 확정했다가, 🔁 2026-08-03 Redis로 재전환(위 "토큰 재발급" 섹션 참고). PR 범위는 access token blacklist + refresh token 저장소까지만 — 유저 role/status 캐시와 관리자 통계 캐시는 별도 단계로 후순위.
 5. ~~`/auth/logout`의 Swagger 설명(jti 블랙리스트)과 실제 코드 불일치~~ — ✅ 2026-07-28 해결. jti 블랙리스트 구현 완료(로그아웃 섹션 참고), `fix/auth-access_token&refresh_token` 브랜치, `dev` 머지 대기 중
 6. ~~토큰 검증 실패 사유가 전부 401로 뭉뚱그려지는 게 의도인지 (요구사항은 사유 구분을 요구함)~~ — ✅ 2026-07-28 3/4 해결. `AUTH_TOKEN_MISSING`/`AUTH_TOKEN_INVALID`/`AUTH_TOKEN_EXPIRED` 구현 완료(토큰 검증 섹션 참고), `fix/auth-access_token&refresh_token` 브랜치, `dev` 머지 대기 중. "비활성 사용자" 구분은 무상태 검증 원칙과 충돌하고 실제 기능도 아직 없어 보류
