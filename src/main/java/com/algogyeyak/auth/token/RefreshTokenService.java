@@ -28,8 +28,9 @@ import java.util.List;
  * by-user:{userId}} → tokenHash(재로그인 시 이전 세션을 즉시 무효화하기 위한 역인덱스). 두 키의 TTL은
  * 항상 refresh token의 남은 유효기간과 같게 맞춰 Redis가 자연 만료를 자동으로 처리하게 한다 — 그래서
  * DB 버전에 있던 {@code expiresAt} 컬럼/수동 만료 검사가 필요 없다. 그 대신, 자연 만료(evict)와
- * "애초에 모르는 토큰"이 둘 다 "키 없음"으로만 관측되어 더 이상 구분되지 않는다 — AUTH_REFRESH_TOKEN_EXPIRED는
- * 이제 던져지지 않고 둘 다 AUTH_REFRESH_TOKEN_INVALID로 처리한다(frontend는 애초에 이 둘을 구분하지 않았다).
+ * "애초에 모르는 토큰"이 둘 다 "키 없음"으로만 관측되어 더 이상 구분되지 않는다 — 만료/무효를 나누던
+ * 전용 에러 코드는 없어졌고 둘 다 {@code AUTH_REFRESH_TOKEN_INVALID}로 처리한다(frontend는 애초에
+ * 이 둘을 구분하지 않았다).
  *
  * <p>두 키를 읽고/지우고/쓰는 시퀀스는 전부 Lua script(EVAL)로 묶어 원자적으로 실행한다 — GET 다음에
  * SET을 별도 명령으로 보내면 그 사이에 다른 요청이 끼어들 수 있다(예: issue()를 동시에 두 번 호출하면
@@ -60,19 +61,26 @@ public class RefreshTokenService {
             return 1
             """.formatted(BY_HASH_KEY_PREFIX, BY_HASH_KEY_PREFIX), Long.class);
 
-    // KEYS[1] = by-hash:{presentedHash}, ARGV[1] = newHash, ARGV[2] = ttlSeconds.
-    // 제시된 토큰의 by-hash를 원자적으로 소비(GET+DEL)하고, 성공했을 때만 새 by-hash/by-user를
-    // 같은 스크립트 안에서 씀 — 소비와 재발급 사이에 다른 요청이 끼어들 틈이 없다.
+    // KEYS[1] = by-hash:{presentedHash}, ARGV[1] = newHash, ARGV[2] = ttlSeconds, ARGV[3] = presentedHash.
+    // 제시된 토큰의 by-hash를 원자적으로 소비(GET+DEL)한 뒤, by-user가 지금도 이 presentedHash를
+    // 가리키고 있을 때만 새 by-hash/by-user를 씀 — 이 비교가 없으면, (issue()의 예전 버그나 운영 중
+    // 장애로) 정방향 키와 역인덱스가 어긋난 고아 by-hash가 남아 있을 때 이미 무효화됐어야 할 오래된
+    // 토큰이 rotate에 성공하면서 최신 by-user를 덮어쓸 수 있다. 불일치해도 소비 자체(GET+DEL)는
+    // 이미 끝난 뒤라 그 고아 항목은 정리된다.
     private static final RedisScript<String> ROTATE_SCRIPT = new DefaultRedisScript<>("""
             local userId = redis.call('GET', KEYS[1])
             if not userId then
               return nil
             end
             redis.call('DEL', KEYS[1])
+            local byUserKey = '%s' .. userId
+            if redis.call('GET', byUserKey) ~= ARGV[3] then
+              return nil
+            end
             redis.call('SET', '%s' .. ARGV[1], userId, 'EX', ARGV[2])
-            redis.call('SET', '%s' .. userId, ARGV[1], 'EX', ARGV[2])
+            redis.call('SET', byUserKey, ARGV[1], 'EX', ARGV[2])
             return userId
-            """.formatted(BY_HASH_KEY_PREFIX, BY_USER_KEY_PREFIX), String.class);
+            """.formatted(BY_USER_KEY_PREFIX, BY_HASH_KEY_PREFIX), String.class);
 
     // KEYS[1] = by-hash:{presentedHash}, ARGV[1] = presentedHash.
     // by-user의 현재 값이 지금 소비한 hash와 같을 때만 지운다 — 이미 회전되어 더 최신 세션을
@@ -132,7 +140,7 @@ public class RefreshTokenService {
             // PESSIMISTIC_WRITE 락과 같은 역할을 한다(같은 raw token으로 동시에 rotate()가 들어와도
             // 정확히 하나만 성공).
             userId = redisTemplate.execute(ROTATE_SCRIPT, List.of(byHashKey(tokenHash)),
-                    newHash, String.valueOf(refreshTokenValiditySeconds));
+                    newHash, String.valueOf(refreshTokenValiditySeconds), tokenHash);
         } catch (DataAccessException e) {
             throw redisUnavailable(e);
         }

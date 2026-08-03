@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -15,6 +16,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Base64;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -25,10 +29,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * {@link RefreshTokenServiceTest}는 Mockito로 rotate/revoke의 호출 순서만 검증한다 — Redis의
- * getAndDelete가 실제로 동시 rotate() 중 정확히 하나만 성공시키는지, TTL이 실제로 자연 만료를
- * 일으키는지는 실제 Redis가 있어야 검증할 수 있다. 이 테스트는 Testcontainers로 띄운 실제 Redis +
- * 실제 {@link RefreshTokenService} 빈으로 그 지점을 직접 확인한다.
+ * {@link RefreshTokenServiceTest}는 Mockito로 스크립트 호출 앞뒤의 자바 분기만 검증한다 — Lua
+ * script가 실제로 동시 issue()/rotate() 중 정확히 하나만 살아남게 하는지, TTL이 실제로 자연 만료를
+ * 일으키는지, by-user와 어긋난 고아 by-hash를 실제로 거부하는지는 실제 Redis가 있어야 검증할 수
+ * 있다. 이 테스트는 Testcontainers로 띄운 실제 Redis + 실제 {@link RefreshTokenService} 빈으로
+ * 그 지점들을 직접 확인한다.
  */
 @SpringBootTest
 @Testcontainers
@@ -50,11 +55,21 @@ class RefreshTokenServiceRedisIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
     private User saveUser(String email) {
         // 닉네임도 유니크 제약이 있으므로, 같은 테스트 클래스 안에서 여러 유저를 만들 때 이메일의
         // local-part로 닉네임을 다르게 만들어 충돌을 피한다.
         String nickname = "테스트유저-" + email.substring(0, email.indexOf('@'));
         return userRepository.saveAndFlush(User.createOAuthUser(email, nickname, "http://img"));
+    }
+
+    // RefreshTokenService.hash()와 동일한 알고리즘 - 서비스 코드를 바꾸지 않고 "이미 by-hash에
+    // 등록된 것처럼 보이는" raw token을 직접 만들기 위해 테스트에서도 같은 해시를 계산한다.
+    private static String hash(String rawToken) throws Exception {
+        byte[] hashed = MessageDigest.getInstance("SHA-256").digest(rawToken.getBytes(StandardCharsets.UTF_8));
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(hashed);
     }
 
     @Test
@@ -129,6 +144,23 @@ class RefreshTokenServiceRedisIntegrationTest {
         } catch (BusinessException e) {
             failureCount.incrementAndGet();
         }
+    }
+
+    // by-user와 by-hash가 어긋난 "고아" by-hash가 남아있는 상황(예전 issue() 동시성 버그의 잔재,
+    // 또는 운영 중 장애로 발생 가능)을 직접 재현한다. ROTATE_SCRIPT가 by-user 일치 확인 없이 소비만
+    // 했다면, 이 오래된 토큰도 rotate()에 성공하며 최신 세션의 by-user를 덮어썼을 것이다.
+    @Test
+    void rotateRejectsAnOrphanedByHashThatNoLongerMatchesTheCurrentSession() throws Exception {
+        User user = saveUser("orphaned-hash@example.com");
+        String legitToken = refreshTokenService.issue(user);
+
+        String orphanRawToken = "manually-orphaned-raw-token";
+        redisTemplate.opsForValue().set("auth:refresh-token:by-hash:" + hash(orphanRawToken), String.valueOf(user.getId()));
+
+        assertThrows(BusinessException.class, () -> refreshTokenService.rotate(orphanRawToken));
+        // 고아 토큰의 rotate 시도가 실패하는 것만으로는 부족하다 - 현재 세션의 by-user를 건드리지
+        // 않았는지(=진짜 세션이 여전히 살아있는지)까지 확인해야 이 수정의 핵심을 검증한 것이다.
+        refreshTokenService.rotate(legitToken);
     }
 
     @Test
