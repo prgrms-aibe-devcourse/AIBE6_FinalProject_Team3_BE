@@ -105,7 +105,7 @@ public class UserService {
 
     private User getActiveUserOrThrow(Long userId) {
         return userRepository.findById(userId)
-                .filter(user -> !user.isWithdrawn())
+                .filter(user -> !user.isWithdrawn() && !user.isSuspended())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
     }
 

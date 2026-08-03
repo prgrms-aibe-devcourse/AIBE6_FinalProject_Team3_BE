@@ -9,9 +9,12 @@ import com.algogyeyak.property.entity.PropertyReport;
 import com.algogyeyak.property.entity.PropertyReportReason;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 매물 신고. 마켓플레이스식 "타인 매물 신고"가 아니라 본인이 등록한 매물을 본인이 직접
@@ -20,7 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
  * 역할이 구분되는 사용자 제보 기반 데이터라 별도 서비스/테이블로 둔다.
  */
 @Service
-@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class PropertyReportService {
 
@@ -30,6 +32,17 @@ public class PropertyReportService {
 
     private final PropertyRepository propertyRepository;
     private final PropertyReportRepository propertyReportRepository;
+    private final TransactionTemplate requiresNewTransactionTemplate;
+
+    public PropertyReportService(
+            PropertyRepository propertyRepository,
+            PropertyReportRepository propertyReportRepository,
+            PlatformTransactionManager transactionManager) {
+        this.propertyRepository = propertyRepository;
+        this.propertyReportRepository = propertyReportRepository;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     @Transactional
     public PropertyReportResponse report(Long userId, Long propertyId, PropertyReportRequest request) {
@@ -70,8 +83,17 @@ public class PropertyReportService {
                 .detail(request.detail())
                 .build();
 
-        PropertyReport saved = propertyReportRepository.save(report);
+        try {
+            // existsByPropertyIdAndReporterId 체크와 실제 insert 사이의 동시 요청 레이스(빠른 중복
+            // 클릭 등)는 위 체크만으로 막을 수 없다 - (property_id, reporter_id) DB 유니크 제약이
+            // 최종 방어선이다. saveAndFlush를 REQUIRES_NEW로 분리하는 이유는 LocalAuthService.signup()과
+            // 동일하다 - 같은 세션에서 유니크 제약 위반 후 그 세션으로 쿼리를 이어가면 Hibernate가
+            // "세션이 예외 이후 flush됨(AssertionFailure)"을 던진다.
+            requiresNewTransactionTemplate.executeWithoutResult(status -> propertyReportRepository.saveAndFlush(report));
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException(ErrorCode.REPORT_DUPLICATE);
+        }
 
-        return PropertyReportResponse.from(saved);
+        return PropertyReportResponse.from(report);
     }
 }
