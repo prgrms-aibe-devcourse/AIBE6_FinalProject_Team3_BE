@@ -107,5 +107,52 @@ class FakeListingSignalServiceTest {
                 );
     }
 
-    // checkAndSave(userId, propertyId) 오버로드는 다음 단계에서 별도로 TDD 진행 예정.
+    @Test
+    @DisplayName("checkAndSave(userId, propertyId)는 본인 매물이면 예외 없이 신호 판정을 수행한다")
+    void checkAndSaveWithOwnerCheckRunsWhenOwned() {
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
+
+        service.checkAndSave(1L, 10L);
+
+        // 예외 없이 끝나면 성공 - 오케스트레이션 자체(탐지기 실행)는 FakeListingSignalService의
+        // 기존 checkAndSave(Property) 책임이라 여기서 다시 검증하지 않는다.
+    }
+
+    @Test
+    @DisplayName("checkAndSave(userId, propertyId)는 존재하지 않는 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void checkAndSaveWithOwnerCheckThrowsWhenPropertyNotFound() {
+        when(propertyRepository.findById(10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.checkAndSave(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("checkAndSave(userId, propertyId)는 본인 소유가 아니면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
+    void checkAndSaveWithOwnerCheckThrowsWhenNotOwner() {
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 999L)));
+
+        assertThatThrownBy(() -> service.checkAndSave(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
+                );
+    }
+
+    @Test
+    @DisplayName("checkAndSave(userId, propertyId)는 삭제된 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void checkAndSaveWithOwnerCheckThrowsWhenPropertyDeleted() {
+        Property deleted = property(10L, 1L);
+        deleted.delete();
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(deleted));
+
+        assertThatThrownBy(() -> service.checkAndSave(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
 }
