@@ -36,6 +36,24 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
     );
 
     /**
+     * risk-analysis의 중복매물 탐지용 - 위 두 메서드와 달리 userId 조건이 없다(다른 계정이 올린
+     * 매물도 잡아야 함). 본인 자신은 idNot으로 제외한다.
+     */
+    boolean existsByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddress(
+            Long id,
+            TransactionType transactionType,
+            PropertyStatus status,
+            String roadAddress
+    );
+
+    boolean existsByIdNotAndTransactionTypeAndStatusAndAddress_JibunAddress(
+            Long id,
+            TransactionType transactionType,
+            PropertyStatus status,
+            String jibunAddress
+    );
+
+    /**
      * 본인이 등록한 매물 목록 조회 (개인 분석 도구 성격상 마켓플레이스식 전체 조회가 아닌 본인 소유 매물만 대상).
      * 지역(주소 부분일치)/면적범위/거래유형/주택유형/보증금범위/월세범위 전부 선택 조건이라, null인
      * 파라미터는 조건 자체를 무시하도록 각 절을 "(:param IS NULL OR ...)" 형태로 구성했다.
