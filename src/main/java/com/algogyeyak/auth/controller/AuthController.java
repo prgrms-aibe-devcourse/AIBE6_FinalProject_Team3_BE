@@ -143,7 +143,7 @@ public class AuthController {
         // Access Token 자체는 유효해도 그 사이 탈퇴했거나 계정이 삭제된 사용자라면 세션을 더 이상
         // 유효하다고 취급하면 안 된다 — 실제 계정 없이 success 응답을 내려주는 것을 방지한다.
         User user = userRepository.findById(principal.userId())
-                .filter(found -> !found.isWithdrawn())
+                .filter(found -> !found.isWithdrawn() && !found.isSuspended())
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
 
         return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
@@ -178,7 +178,7 @@ public class AuthController {
 
         User user = userRepository.findByEmail(EmailNormalizer.normalize(devLoginEmail))
                 .filter(found -> found.getRole() == Role.ADMIN)
-                .filter(found -> !found.isWithdrawn())
+                .filter(found -> !found.isWithdrawn() && !found.isSuspended())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         issueAuthCookies(response, user);
         return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
