@@ -1,6 +1,16 @@
 spring:
   application:
     name: algogyeyak
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # Redis 장애 시 access token blacklist/refresh token 조회가 기본 타임아웃(수 초~무한 대기)까지
+      # 붙잡고 있으면 fail-closed 정책(장애 시 인증 거부)이 "거부"가 아니라 "응답 없음"이 되어버린다 —
+      # 짧게 끊어야 장애가 즉시 401/503으로 드러난다.
+      connect-timeout: 2s
+      timeout: 2s
   security:
     oauth2:
       client:
