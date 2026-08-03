@@ -21,6 +21,8 @@
 
 `application.yml`에 별도 데이터소스 설정이 없어 기본적으로 인메모리 H2로 기동됩니다. MySQL 등 실제 데이터소스 연결은 아직 `application-{dev,prod,test}.yml`에 구성되어 있지 않습니다.
 
+캐싱(Redis) 연동을 로컬에서 테스트해보려면 `docker compose up -d redis`로 로컬 Redis를 띄우면 됩니다(`spring.data.redis.host`/`port`가 기본값 `localhost:6379`를 가리키고 있어 별도 설정 없이 바로 연결됩니다). Redis가 안 떠 있어도 앱 기동 자체엔 영향이 없습니다(Lettuce가 연결을 지연 생성) — 아직 실제 캐싱 로직(어디를 캐싱할지, TTL 등)은 붙어있지 않고, 연결 준비만 되어 있는 상태입니다.
+
 ## Scripts
 
 ```bash
