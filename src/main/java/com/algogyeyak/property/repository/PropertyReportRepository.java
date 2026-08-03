@@ -3,6 +3,7 @@ package com.algogyeyak.property.repository;
 import com.algogyeyak.property.entity.PropertyReport;
 import com.algogyeyak.property.entity.PropertyReportReason;
 import com.algogyeyak.property.entity.PropertyReportStatus;
+import java.time.LocalDateTime;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -30,9 +31,9 @@ public interface PropertyReportRepository extends JpaRepository<PropertyReport, 
             Pageable pageable
     );
 
-    // 관리자 통계 대시보드: 처리 대기(RECEIVED) 신고 수 카드용.
-    long countByStatus(PropertyReportStatus status);
+    // 관리자 통계 대시보드: 처리 대기(RECEIVED) 신고 수 카드용(기간 내 접수).
+    long countByStatusAndCreatedAtBetween(PropertyReportStatus status, LocalDateTime start, LocalDateTime end);
 
-    // 관리자 통계 대시보드: 신고 사유별 분포용.
-    long countByReason(PropertyReportReason reason);
+    // 관리자 통계 대시보드: 신고 사유별 분포용(기간 내 접수).
+    long countByReasonAndCreatedAtBetween(PropertyReportReason reason, LocalDateTime start, LocalDateTime end);
 }

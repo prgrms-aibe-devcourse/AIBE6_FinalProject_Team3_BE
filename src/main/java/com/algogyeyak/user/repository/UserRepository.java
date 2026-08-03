@@ -42,12 +42,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
             Pageable pageable
     );
 
-    // 관리자 통계 대시보드: 역할별 분포 카드용.
-    long countByRole(Role role);
-
     // 관리자 통계 대시보드: 기간별 가입 추이용. DB별 날짜 절삭 함수(FUNCTION('DATE', ...) 등) 차이에
     // 기대지 않기 위해 원본 시각만 가져오고, 일자별 집계는 서비스에서 LocalDateTime::toLocalDate로 한다.
     // end는 배타적 상한(다음날 00:00)으로 넘어온다 - 대상 마지막 날짜를 하루 전체 포함시키기 위함.
     @Query("SELECT u.createdAt FROM User u WHERE u.createdAt >= :start AND u.createdAt < :end")
     List<LocalDateTime> findCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    // 관리자 통계 대시보드: 신규 가입자 수 카드용(기간 내 가입).
+    long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 }

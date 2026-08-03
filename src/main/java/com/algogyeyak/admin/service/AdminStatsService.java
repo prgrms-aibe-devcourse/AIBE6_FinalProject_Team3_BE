@@ -49,7 +49,10 @@ public class AdminStatsService {
         LocalDate resolvedStart = startDate != null ? startDate : resolvedEnd.minusDays(DEFAULT_TREND_DAYS - 1L);
         validateRange(resolvedStart, resolvedEnd);
 
-        return new AdminDashboardStatsResponse(summary(), trends(resolvedStart, resolvedEnd), distributions());
+        return new AdminDashboardStatsResponse(
+                summary(resolvedStart, resolvedEnd),
+                trends(resolvedStart, resolvedEnd),
+                distributions(resolvedStart, resolvedEnd));
     }
 
     private void validateRange(LocalDate start, LocalDate end) {
@@ -61,11 +64,15 @@ public class AdminStatsService {
         }
     }
 
-    private AdminStatsSummaryResponse summary() {
+    // 요약 카드 3개 전부 "선택한 기간 동안 발생한" 건수다(예: 총 회원수 → 기간 내 신규 가입자 수) -
+    // 상단 요약이 아래 추이 차트와 다른 기준(전체 누적)을 쓰면 같은 화면에서 숫자가 서로 안 맞아 보인다.
+    private AdminStatsSummaryResponse summary(LocalDate start, LocalDate end) {
+        LocalDateTime rangeStart = start.atStartOfDay();
+        LocalDateTime rangeEnd = end.plusDays(1).atStartOfDay();
         return new AdminStatsSummaryResponse(
-                userRepository.count(),
-                propertyRepository.countByStatus(PropertyStatus.ACTIVE),
-                propertyReportRepository.countByStatus(PropertyReportStatus.RECEIVED));
+                userRepository.countByCreatedAtBetween(rangeStart, rangeEnd),
+                propertyRepository.countByStatusAndCreatedAtBetween(PropertyStatus.ACTIVE, rangeStart, rangeEnd),
+                propertyReportRepository.countByStatusAndCreatedAtBetween(PropertyReportStatus.RECEIVED, rangeStart, rangeEnd));
     }
 
     private AdminStatsTrendResponse trends(LocalDate start, LocalDate end) {
@@ -89,15 +96,22 @@ public class AdminStatsService {
                 .toList();
     }
 
-    private AdminStatsDistributionResponse distributions() {
-        long registeredCount = propertyRepository.countDistinctUserId();
+    // byPropertyRegistration은 전체 유저를 대상으로, 그중 선택한 기간 동안 매물을 등록한 사람과
+    // 등록하지 않은 사람을 나눈다(가입 시점이 기간 밖이어도 기간 내 등록 활동이 있으면 등록자로 집계) -
+    // byReportReason은 요약 카드와 동일하게 기간 내 접수 건만 집계한다.
+    private AdminStatsDistributionResponse distributions(LocalDate start, LocalDate end) {
+        LocalDateTime rangeStart = start.atStartOfDay();
+        LocalDateTime rangeEnd = end.plusDays(1).atStartOfDay();
+
+        long registeredCount = propertyRepository.countDistinctUserIdByCreatedAtBetween(rangeStart, rangeEnd);
         long unregisteredCount = userRepository.count() - registeredCount;
         List<AdminStatsDistributionResponse.PropertyRegistrationCount> byPropertyRegistration = List.of(
                 new AdminStatsDistributionResponse.PropertyRegistrationCount(true, registeredCount),
                 new AdminStatsDistributionResponse.PropertyRegistrationCount(false, unregisteredCount));
 
         List<AdminStatsDistributionResponse.ReportReasonCount> byReportReason = mapToCounts(
-                PropertyReportReason.values(), propertyReportRepository::countByReason,
+                PropertyReportReason.values(),
+                reason -> propertyReportRepository.countByReasonAndCreatedAtBetween(reason, rangeStart, rangeEnd),
                 AdminStatsDistributionResponse.ReportReasonCount::new);
 
         return new AdminStatsDistributionResponse(byPropertyRegistration, byReportReason);

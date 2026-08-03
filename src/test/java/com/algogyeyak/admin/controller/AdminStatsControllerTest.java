@@ -1,6 +1,7 @@
 package com.algogyeyak.admin.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -82,13 +83,15 @@ class AdminStatsControllerTest {
 
     @Test
     void 관리자_토큰으로_대시보드_통계를_조회한다() throws Exception {
-        when(userRepository.count()).thenReturn(10L);
-        when(propertyRepository.countByStatus(PropertyStatus.ACTIVE)).thenReturn(5L);
-        when(propertyReportRepository.countByStatus(PropertyReportStatus.RECEIVED)).thenReturn(2L);
+        when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(10L);
+        when(userRepository.count()).thenReturn(20L);
+        when(propertyRepository.countByStatusAndCreatedAtBetween(eq(PropertyStatus.ACTIVE), any(), any())).thenReturn(5L);
+        when(propertyReportRepository.countByStatusAndCreatedAtBetween(eq(PropertyReportStatus.RECEIVED), any(), any()))
+                .thenReturn(2L);
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of(LocalDateTime.now()));
         when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
-        when(propertyRepository.countDistinctUserId()).thenReturn(4L);
-        when(propertyReportRepository.countByReason(any())).thenReturn(0L);
+        when(propertyRepository.countDistinctUserIdByCreatedAtBetween(any(), any())).thenReturn(4L);
+        when(propertyReportRepository.countByReasonAndCreatedAtBetween(any(), any(), any())).thenReturn(0L);
 
         mockMvc.perform(get("/admin/stats/dashboard").cookie(adminCookie()))
                 .andExpect(status().isOk())
@@ -96,18 +99,24 @@ class AdminStatsControllerTest {
                 .andExpect(jsonPath("$.data.summary.totalProperties").value(5))
                 .andExpect(jsonPath("$.data.summary.pendingReports").value(2))
                 .andExpect(jsonPath("$.data.trends.signups.length()").value(14))
-                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration.length()").value(2));
+                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration.length()").value(2))
+                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[0].registered").value(true))
+                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[0].count").value(4))
+                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[1].registered").value(false))
+                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[1].count").value(16));
     }
 
     @Test
     void 조회_기간을_직접_지정하면_해당_일수만큼_추이를_반환한다() throws Exception {
-        when(userRepository.count()).thenReturn(10L);
-        when(propertyRepository.countByStatus(PropertyStatus.ACTIVE)).thenReturn(5L);
-        when(propertyReportRepository.countByStatus(PropertyReportStatus.RECEIVED)).thenReturn(2L);
+        when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(10L);
+        when(userRepository.count()).thenReturn(20L);
+        when(propertyRepository.countByStatusAndCreatedAtBetween(eq(PropertyStatus.ACTIVE), any(), any())).thenReturn(5L);
+        when(propertyReportRepository.countByStatusAndCreatedAtBetween(eq(PropertyReportStatus.RECEIVED), any(), any()))
+                .thenReturn(2L);
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
         when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
-        when(propertyRepository.countDistinctUserId()).thenReturn(0L);
-        when(propertyReportRepository.countByReason(any())).thenReturn(0L);
+        when(propertyRepository.countDistinctUserIdByCreatedAtBetween(any(), any())).thenReturn(0L);
+        when(propertyReportRepository.countByReasonAndCreatedAtBetween(any(), any(), any())).thenReturn(0L);
 
         mockMvc.perform(get("/admin/stats/dashboard")
                         .param("startDate", "2026-01-01")
