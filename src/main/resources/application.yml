@@ -86,3 +86,6 @@ risk-policy:
   multi-account-detection-enabled: false
   same-account-threshold-count: 3
   same-account-window-days: 7
+  short-term-relisting-window-days: 30
+  short-term-relisting-price-tolerance-percent: 5
+  short-term-relisting-area-tolerance-percent: 10
