@@ -92,7 +92,11 @@ public enum ErrorCode {
     FILE_TOO_LARGE(HttpStatus.BAD_REQUEST, "FILE_TOO_LARGE", "파일 크기가 허용 범위를 초과했습니다."),
     // confirmUpload() 호출 시점에 해당 key로 S3에 실제 업로드된 객체가 없는 경우 - presigned URL만
     // 발급받고 실제 PUT은 하지 않았거나, URL 만료(5분) 후 뒤늦게 confirm을 호출한 경우다.
-    FILE_UPLOAD_NOT_COMPLETED(HttpStatus.NOT_FOUND, "FILE_UPLOAD_NOT_COMPLETED", "업로드가 완료되지 않았습니다.");
+    FILE_UPLOAD_NOT_COMPLETED(HttpStatus.NOT_FOUND, "FILE_UPLOAD_NOT_COMPLETED", "업로드가 완료되지 않았습니다."),
+    // 클라이언트가 넘긴 key가 본인 소유 prefix(예: profile-images/{본인 userId}/...)가 아닌 경우 -
+    // 다른 사용자나 다른 도메인(property-images/, contract-images/)의 key를 그대로 넘겨 confirm을
+    // 시도하는 것을 막는다.
+    FILE_KEY_ACCESS_DENIED(HttpStatus.FORBIDDEN, "FILE_KEY_ACCESS_DENIED", "본인이 업로드한 파일만 확인할 수 있습니다.");
 
     private final HttpStatus status;
     private final String code;

@@ -4,6 +4,7 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
+import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.TransactionType;
 import com.algogyeyak.user.repository.UserPreferenceRepository;
@@ -23,7 +24,8 @@ class UserServiceTest {
 
     private final UserRepository userRepository = mock(UserRepository.class);
     private final UserPreferenceRepository userPreferenceRepository = mock(UserPreferenceRepository.class);
-    private final UserService userService = new UserService(userRepository, userPreferenceRepository);
+    private final S3PresignService s3PresignService = mock(S3PresignService.class);
+    private final UserService userService = new UserService(userRepository, userPreferenceRepository, s3PresignService);
 
     private User activeUser(Long id) {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");

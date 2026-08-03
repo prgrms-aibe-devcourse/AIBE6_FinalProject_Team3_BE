@@ -11,7 +11,9 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.net.URI;
 import java.time.Duration;
+import java.util.Optional;
 
 @Service
 public class S3PresignService {
@@ -120,7 +122,8 @@ public class S3PresignService {
         return s3Presigner.presignGetObject(presignRequest).url().toString();
     }
 
-    // 계약서 이미지: OCR 처리 후 즉시 삭제용
+    // 계약서 이미지는 OCR 처리 후 즉시 삭제용으로, 프로필/매물 이미지는 새 이미지로 교체된 이전
+    // 이미지를 정리하는 용도로 쓴다.
     public void deleteObject(String key) {
         s3Client.deleteObject(
                 DeleteObjectRequest.builder()
@@ -128,5 +131,31 @@ public class S3PresignService {
                         .key(key)
                         .build()
         );
+    }
+
+    // 저장된 URL(예: User.profileImageUrl)이 우리 버킷의 객체를 가리키는지 확인하고, 맞으면 key만
+    // 뽑아낸다. generateDownloadUrl(public)이 만드는 URL은 virtual-hosted-style
+    // (`https://{bucket}.s3.{region}.amazonaws.com/{key}`)이라 host가 `{bucket}.s3.`로 시작하는지로
+    // 판별한다 - 구글/카카오 같은 외부 OAuth 프로필 사진 URL은 이 패턴과 안 맞으므로 항상 empty를
+    // 반환해, 우리 버킷이 아닌 객체를 절대 삭제 대상으로 착각하지 않게 한다.
+    public Optional<String> extractOwnedKey(String url) {
+        if (url == null) {
+            return Optional.empty();
+        }
+
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+
+        String host = uri.getHost();
+        String path = uri.getPath();
+        if (host == null || !host.startsWith(bucket + ".s3.") || path == null || path.length() <= 1) {
+            return Optional.empty();
+        }
+
+        return Optional.of(path.substring(1));
     }
 }
