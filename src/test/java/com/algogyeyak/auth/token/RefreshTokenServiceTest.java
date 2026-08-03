@@ -3,19 +3,23 @@ package com.algogyeyak.auth.token;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
+import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.transaction.PlatformTransactionManager;
 
-import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,10 +27,12 @@ import static org.mockito.Mockito.when;
 
 class RefreshTokenServiceTest {
 
-    private final RefreshTokenRepository refreshTokenRepository = mock(RefreshTokenRepository.class);
-    private final PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+    private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+    @SuppressWarnings("unchecked")
+    private final ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+    private final UserRepository userRepository = mock(UserRepository.class);
     private final RefreshTokenService refreshTokenService =
-            new RefreshTokenService(refreshTokenRepository, transactionManager);
+            new RefreshTokenService(redisTemplate, userRepository);
 
     private User user(Long id) {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
@@ -37,70 +43,34 @@ class RefreshTokenServiceTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(refreshTokenService, "refreshTokenValiditySeconds", 1209600L);
-        when(refreshTokenRepository.saveAndFlush(any(RefreshToken.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     }
 
     @Test
-    void issueCreatesNewRowWhenUserHasNoExistingSession() {
+    void issueStoresBothForwardAndReverseKeysWithTtl() {
         User user = user(1L);
-        when(refreshTokenRepository.findByUserId(1L)).thenReturn(Optional.empty());
+        when(valueOperations.get("auth:refresh-token:by-user:1")).thenReturn(null);
 
         String rawToken = refreshTokenService.issue(user);
 
         assertEquals(43, rawToken.length()); // base64url(32바이트, 패딩 없음)
-        verify(refreshTokenRepository).saveAndFlush(any(RefreshToken.class));
+        verify(valueOperations).set(eq("auth:refresh-token:by-user:1"), anyString(), any(Duration.class));
+        verify(valueOperations, never()).getAndDelete(anyString());
     }
 
     @Test
-    void issueRecoversWhenConcurrentFirstIssueHitsUniqueConstraint() {
+    void issueInvalidatesThePreviousSessionsByHashEntry() {
         User user = user(1L);
-        RefreshToken winner = RefreshToken.builder()
-                .user(user).tokenHash("winner-hash").expiresAt(LocalDateTime.now().plusDays(1)).build();
-        // 최초 조회 시점엔 아직 행이 없다고 나오지만(레이스), INSERT 시도 시 동시 요청이 먼저 커밋해서
-        // user_id 유니크 제약 위반이 난다 — CustomOAuth2UserService의 동시 최초 로그인 레이스와 동일한 패턴.
-        when(refreshTokenRepository.findByUserId(1L))
-                .thenReturn(Optional.empty())
-                .thenReturn(Optional.of(winner));
-        when(refreshTokenRepository.saveAndFlush(any(RefreshToken.class)))
-                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+        when(valueOperations.get("auth:refresh-token:by-user:1")).thenReturn("old-hash");
 
-        String rawToken = refreshTokenService.issue(user);
+        refreshTokenService.issue(user);
 
-        // 유니크 제약에 걸린 뒤에도 500으로 터지지 않고, 먼저 커밋된 행을 이번 요청의 토큰으로 재회전시켜야 한다.
-        assertNotEquals("winner-hash", winner.getTokenHash());
-        assertEquals(43, rawToken.length());
-    }
-
-    @Test
-    void issueRethrowsOriginalExceptionWhenRecoveryQueryAlsoFindsNothing() {
-        User user = user(1L);
-        DataIntegrityViolationException original = new DataIntegrityViolationException("unique constraint violation");
-        when(refreshTokenRepository.findByUserId(1L)).thenReturn(Optional.empty());
-        when(refreshTokenRepository.saveAndFlush(any(RefreshToken.class))).thenThrow(original);
-
-        DataIntegrityViolationException thrown = assertThrows(DataIntegrityViolationException.class,
-                () -> refreshTokenService.issue(user));
-        assertEquals(original, thrown);
-    }
-
-    @Test
-    void issueRotatesExistingRowInPlaceForSingleSession() {
-        User user = user(1L);
-        RefreshToken existing = RefreshToken.builder()
-                .user(user).tokenHash("old-hash").expiresAt(LocalDateTime.now().plusDays(1)).build();
-        when(refreshTokenRepository.findByUserId(1L)).thenReturn(Optional.of(existing));
-
-        String rawToken = refreshTokenService.issue(user);
-
-        assertNotEquals("old-hash", existing.getTokenHash());
-        verify(refreshTokenRepository, never()).save(any(RefreshToken.class));
+        verify(redisTemplate).delete("auth:refresh-token:by-hash:old-hash");
     }
 
     @Test
     void issueProducesDifferentRawTokenOnEachCall() {
         User user = user(1L);
-        when(refreshTokenRepository.findByUserId(1L)).thenReturn(Optional.empty());
 
         String first = refreshTokenService.issue(user);
         String second = refreshTokenService.issue(user);
@@ -109,90 +79,114 @@ class RefreshTokenServiceTest {
     }
 
     @Test
+    void issueThrowsServiceUnavailableWhenRedisFails() {
+        User user = user(1L);
+        when(valueOperations.get(anyString())).thenThrow(new QueryTimeoutException("redis down"));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> refreshTokenService.issue(user));
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
+    }
+
+    @Test
     void rotateSucceedsAndIssuesNewTokenWhenValid() {
         User user = user(1L);
-        RefreshToken stored = RefreshToken.builder()
-                .user(user).tokenHash("irrelevant").expiresAt(LocalDateTime.now().plusDays(1)).build();
-        // rotate()는 내부적으로 해시를 재계산하므로, 저장된 해시값을 미리 알 필요 없이
-        // findByTokenHash가 호출되는 시점에 이 stored row를 반환하도록만 스텁한다.
-        when(refreshTokenRepository.findByTokenHash(any())).thenReturn(Optional.of(stored));
+        when(valueOperations.getAndDelete("auth:refresh-token:by-hash:" + hash("presented-raw-token"))).thenReturn("1");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
         RefreshTokenService.RotationResult result = refreshTokenService.rotate("presented-raw-token");
 
         assertEquals(user, result.user());
         assertNotEquals("presented-raw-token", result.rawToken());
+        verify(valueOperations).set(eq("auth:refresh-token:by-user:1"), anyString(), any(Duration.class));
     }
 
     @Test
     void rotateThrowsWhenTokenNotFound() {
-        when(refreshTokenRepository.findByTokenHash(any())).thenReturn(Optional.empty());
+        when(valueOperations.getAndDelete(anyString())).thenReturn(null);
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.rotate("unknown-token"));
         assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
     }
 
+    // Redis TTL이 만료를 자동으로 정리하므로, 자연 만료된 토큰도 "찾을 수 없음"(getAndDelete가 null
+    // 반환)과 똑같이 관측된다 — 더 이상 별도의 EXPIRED 분기가 없다.
     @Test
-    void rotateThrowsAndDeletesRowWhenExpired() {
-        User user = user(1L);
-        RefreshToken expired = RefreshToken.builder()
-                .user(user).tokenHash("hash").expiresAt(LocalDateTime.now().minusSeconds(1)).build();
-        when(refreshTokenRepository.findByTokenHash(any())).thenReturn(Optional.of(expired));
+    void rotateThrowsInvalidNotExpiredWhenTokenHasNaturallyExpiredOutOfRedis() {
+        when(valueOperations.getAndDelete(anyString())).thenReturn(null);
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.rotate("expired-token"));
-        assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_EXPIRED, exception.getErrorCode());
-        verify(refreshTokenRepository).delete(expired);
+        assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
     }
 
     @Test
-    void rotateThrowsAndDeletesRowWhenUserWithdrawn() {
+    void rotateThrowsAndCleansUpReverseIndexWhenUserWithdrawn() {
         User user = user(1L);
         user.withdraw();
-        RefreshToken stored = RefreshToken.builder()
-                .user(user).tokenHash("hash").expiresAt(LocalDateTime.now().plusDays(1)).build();
-        when(refreshTokenRepository.findByTokenHash(any())).thenReturn(Optional.of(stored));
+        when(valueOperations.getAndDelete(anyString())).thenReturn("1");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.rotate("token"));
         assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
-        verify(refreshTokenRepository).delete(stored);
+        verify(redisTemplate).delete("auth:refresh-token:by-user:1");
     }
 
     @Test
-    void revokeDeletesMatchingRow() {
-        User user = user(1L);
-        RefreshToken stored = RefreshToken.builder()
-                .user(user).tokenHash("hash").expiresAt(LocalDateTime.now().plusDays(1)).build();
-        when(refreshTokenRepository.findByTokenHash(any())).thenReturn(Optional.of(stored));
+    void rotateThrowsAndCleansUpReverseIndexWhenUserNoLongerExists() {
+        when(valueOperations.getAndDelete(anyString())).thenReturn("1");
+        when(userRepository.findById(1L)).thenReturn(Optional.empty());
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> refreshTokenService.rotate("token"));
+        assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
+        verify(redisTemplate).delete("auth:refresh-token:by-user:1");
+    }
+
+    @Test
+    void rotateThrowsServiceUnavailableWhenRedisFails() {
+        when(valueOperations.getAndDelete(anyString())).thenThrow(new QueryTimeoutException("redis down"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> refreshTokenService.rotate("some-token"));
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
+    }
+
+    @Test
+    void revokeDeletesBothKeysWhenTokenIsKnown() {
+        when(valueOperations.getAndDelete("auth:refresh-token:by-hash:" + hash("some-token"))).thenReturn("1");
 
         refreshTokenService.revoke("some-token");
 
-        verify(refreshTokenRepository).delete(stored);
+        verify(redisTemplate).delete("auth:refresh-token:by-user:1");
     }
 
     @Test
     void revokeIsNoOpWhenTokenUnknown() {
-        when(refreshTokenRepository.findByTokenHash(any())).thenReturn(Optional.empty());
+        when(valueOperations.getAndDelete(anyString())).thenReturn(null);
 
         refreshTokenService.revoke("unknown-token");
 
-        verify(refreshTokenRepository, never()).delete(any());
+        verify(redisTemplate, never()).delete(anyString());
     }
 
     @Test
-    void replayingARotatedOutTokenFailsBecauseTheRowNoLongerMatchesItsHash() {
-        User user = user(1L);
-        RefreshToken stored = RefreshToken.builder()
-                .user(user).tokenHash("placeholder").expiresAt(LocalDateTime.now().plusDays(1)).build();
-        when(refreshTokenRepository.findByTokenHash(any())).thenReturn(Optional.of(stored));
-        String firstRawToken = "first-token";
+    void revokeThrowsServiceUnavailableWhenRedisFails() {
+        when(valueOperations.getAndDelete(anyString())).thenThrow(new QueryTimeoutException("redis down"));
 
-        refreshTokenService.rotate(firstRawToken);
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> refreshTokenService.revoke("some-token"));
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
+    }
 
-        // 단일 세션이므로 회전 후에는 같은 행이 새 해시로 덮어써져 있고, DB에는 이전 토큰의 해시가 남아있지 않다.
-        // 따라서 이전 토큰이 재사용되면 (실제 저장소에서는) findByTokenHash가 더 이상 이 행을 찾지 못해 거부된다.
-        // 이 테스트는 stub이 아니라 rotate()가 실제로 tokenHash를 변경한다는 사실 자체를 검증한다.
-        assertNotEquals("placeholder", stored.getTokenHash());
+    private static String hash(String rawToken) {
+        try {
+            byte[] hashed = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(rawToken.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(hashed);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 }
