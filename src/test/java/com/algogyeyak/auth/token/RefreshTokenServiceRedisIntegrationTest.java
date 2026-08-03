@@ -66,6 +66,31 @@ class RefreshTokenServiceRedisIntegrationTest {
         assertThrows(BusinessException.class, () -> refreshTokenService.rotate(firstToken));
     }
 
+    // issue()가 (구 버전처럼) get→delete→set→set을 별도 명령으로 나눠 보내면, 동시에 두 번 로그인할 때
+    // 둘 다 같은 이전 hash를 읽고 각자 새 by-hash를 남겨 "유저당 1세션" 보장이 깨진다 — 두 raw token
+    // 모두 rotate()에 성공할 수 있다는 뜻이다. ISSUE_SCRIPT가 원자적으로 처리하는지 실제 Redis로 검증한다.
+    @Test
+    @Timeout(15)
+    void concurrentIssueForSameUserLeavesAtMostOneValidToken() throws Exception {
+        User user = saveUser("concurrent-issue@example.com");
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<String> a = executor.submit(() -> refreshTokenService.issue(user));
+        Future<String> b = executor.submit(() -> refreshTokenService.issue(user));
+        String tokenA = a.get(10, TimeUnit.SECONDS);
+        String tokenB = b.get(10, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        AtomicInteger successCount = new AtomicInteger();
+        AtomicInteger failureCount = new AtomicInteger();
+        attemptRotate(tokenA, successCount, failureCount);
+        attemptRotate(tokenB, successCount, failureCount);
+
+        assertEquals(1, successCount.get(),
+                "동시 issue() 두 번 중 최종적으로 유효한 세션은 하나여야 한다 - 둘 다 rotate에 성공하면 안 된다");
+        assertEquals(1, failureCount.get());
+    }
+
     @Test
     void tokenNaturallyExpiresViaRedisTtl() throws InterruptedException {
         User user = saveUser("ttl@example.com");

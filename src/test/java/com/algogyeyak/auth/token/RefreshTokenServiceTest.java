@@ -8,28 +8,33 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.time.Duration;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * issue/rotate/revoke는 이제 각각 하나의 Lua script(EVAL)로 원자적으로 실행된다(동시성 안전성은
+ * {@link RefreshTokenServiceRedisIntegrationTest}가 실제 Redis로 검증) - 여기서는 스크립트 내부의
+ * key 갱신 여부가 아니라, 스크립트 호출 인자 수(issue=3개, rotate=2개, revoke=1개)로 어느 스크립트가
+ * 불렸는지 구분해 그 앞뒤의 자바 레벨 분기(사용자 조회, 예외 매핑, fail-closed)만 검증한다.
+ */
 class RefreshTokenServiceTest {
 
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-    @SuppressWarnings("unchecked")
-    private final ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
     private final UserRepository userRepository = mock(UserRepository.class);
     private final RefreshTokenService refreshTokenService =
             new RefreshTokenService(redisTemplate, userRepository);
@@ -43,34 +48,23 @@ class RefreshTokenServiceTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(refreshTokenService, "refreshTokenValiditySeconds", 1209600L);
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     }
 
     @Test
-    void issueStoresBothForwardAndReverseKeysWithTtl() {
+    void issueReturnsRawTokenAndInvokesIssueScript() {
         User user = user(1L);
-        when(valueOperations.get("auth:refresh-token:by-user:1")).thenReturn(null);
+        doReturn(1L).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
 
         String rawToken = refreshTokenService.issue(user);
 
         assertEquals(43, rawToken.length()); // base64url(32바이트, 패딩 없음)
-        verify(valueOperations).set(eq("auth:refresh-token:by-user:1"), anyString(), any(Duration.class));
-        verify(valueOperations, never()).getAndDelete(anyString());
-    }
-
-    @Test
-    void issueInvalidatesThePreviousSessionsByHashEntry() {
-        User user = user(1L);
-        when(valueOperations.get("auth:refresh-token:by-user:1")).thenReturn("old-hash");
-
-        refreshTokenService.issue(user);
-
-        verify(redisTemplate).delete("auth:refresh-token:by-hash:old-hash");
+        verify(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
     }
 
     @Test
     void issueProducesDifferentRawTokenOnEachCall() {
         User user = user(1L);
+        doReturn(1L).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
 
         String first = refreshTokenService.issue(user);
         String second = refreshTokenService.issue(user);
@@ -81,7 +75,8 @@ class RefreshTokenServiceTest {
     @Test
     void issueThrowsServiceUnavailableWhenRedisFails() {
         User user = user(1L);
-        when(valueOperations.get(anyString())).thenThrow(new QueryTimeoutException("redis down"));
+        doThrow(new QueryTimeoutException("redis down"))
+                .when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
 
         BusinessException exception = assertThrows(BusinessException.class, () -> refreshTokenService.issue(user));
         assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
@@ -90,30 +85,29 @@ class RefreshTokenServiceTest {
     @Test
     void rotateSucceedsAndIssuesNewTokenWhenValid() {
         User user = user(1L);
-        when(valueOperations.getAndDelete("auth:refresh-token:by-hash:" + hash("presented-raw-token"))).thenReturn("1");
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any());
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
         RefreshTokenService.RotationResult result = refreshTokenService.rotate("presented-raw-token");
 
         assertEquals(user, result.user());
         assertNotEquals("presented-raw-token", result.rawToken());
-        verify(valueOperations).set(eq("auth:refresh-token:by-user:1"), anyString(), any(Duration.class));
     }
 
     @Test
     void rotateThrowsWhenTokenNotFound() {
-        when(valueOperations.getAndDelete(anyString())).thenReturn(null);
+        doReturn(null).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any());
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.rotate("unknown-token"));
         assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
     }
 
-    // Redis TTL이 만료를 자동으로 정리하므로, 자연 만료된 토큰도 "찾을 수 없음"(getAndDelete가 null
-    // 반환)과 똑같이 관측된다 — 더 이상 별도의 EXPIRED 분기가 없다.
+    // Redis TTL이 만료를 자동으로 정리하므로, 자연 만료된 토큰도 "찾을 수 없음"(스크립트가 nil 반환)과
+    // 똑같이 관측된다 — 더 이상 별도의 EXPIRED 분기가 없다.
     @Test
     void rotateThrowsInvalidNotExpiredWhenTokenHasNaturallyExpiredOutOfRedis() {
-        when(valueOperations.getAndDelete(anyString())).thenReturn(null);
+        doReturn(null).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any());
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.rotate("expired-token"));
@@ -124,7 +118,7 @@ class RefreshTokenServiceTest {
     void rotateThrowsAndCleansUpReverseIndexWhenUserWithdrawn() {
         User user = user(1L);
         user.withdraw();
-        when(valueOperations.getAndDelete(anyString())).thenReturn("1");
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any());
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
         BusinessException exception = assertThrows(BusinessException.class,
@@ -135,7 +129,7 @@ class RefreshTokenServiceTest {
 
     @Test
     void rotateThrowsAndCleansUpReverseIndexWhenUserNoLongerExists() {
-        when(valueOperations.getAndDelete(anyString())).thenReturn("1");
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any());
         when(userRepository.findById(1L)).thenReturn(Optional.empty());
 
         BusinessException exception = assertThrows(BusinessException.class,
@@ -146,7 +140,8 @@ class RefreshTokenServiceTest {
 
     @Test
     void rotateThrowsServiceUnavailableWhenRedisFails() {
-        when(valueOperations.getAndDelete(anyString())).thenThrow(new QueryTimeoutException("redis down"));
+        doThrow(new QueryTimeoutException("redis down"))
+                .when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any());
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.rotate("some-token"));
@@ -154,17 +149,18 @@ class RefreshTokenServiceTest {
     }
 
     @Test
-    void revokeDeletesBothKeysWhenTokenIsKnown() {
-        when(valueOperations.getAndDelete("auth:refresh-token:by-hash:" + hash("some-token"))).thenReturn("1");
+    void revokeInvokesRevokeScriptWithThePresentedTokensHash() {
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), anyString());
 
         refreshTokenService.revoke("some-token");
 
-        verify(redisTemplate).delete("auth:refresh-token:by-user:1");
+        verify(redisTemplate).execute(any(RedisScript.class), anyList(), anyString());
+        verify(redisTemplate, never()).delete(anyString());
     }
 
     @Test
     void revokeIsNoOpWhenTokenUnknown() {
-        when(valueOperations.getAndDelete(anyString())).thenReturn(null);
+        doReturn(null).when(redisTemplate).execute(any(RedisScript.class), anyList(), anyString());
 
         refreshTokenService.revoke("unknown-token");
 
@@ -173,20 +169,11 @@ class RefreshTokenServiceTest {
 
     @Test
     void revokeThrowsServiceUnavailableWhenRedisFails() {
-        when(valueOperations.getAndDelete(anyString())).thenThrow(new QueryTimeoutException("redis down"));
+        doThrow(new QueryTimeoutException("redis down"))
+                .when(redisTemplate).execute(any(RedisScript.class), anyList(), anyString());
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.revoke("some-token"));
         assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
-    }
-
-    private static String hash(String rawToken) {
-        try {
-            byte[] hashed = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(rawToken.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(hashed);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
     }
 }
