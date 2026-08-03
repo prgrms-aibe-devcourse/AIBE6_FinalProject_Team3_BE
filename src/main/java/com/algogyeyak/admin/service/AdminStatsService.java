@@ -9,7 +9,6 @@ import com.algogyeyak.property.entity.PropertyReportStatus;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.property.repository.PropertyReportRepository;
-import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -70,13 +69,17 @@ public class AdminStatsService {
     }
 
     private AdminStatsDistributionResponse distributions() {
-        List<AdminStatsDistributionResponse.RoleCount> byRole = mapToCounts(
-                Role.values(), userRepository::countByRole, AdminStatsDistributionResponse.RoleCount::new);
+        long registeredCount = propertyRepository.countDistinctUserId();
+        long unregisteredCount = userRepository.count() - registeredCount;
+        List<AdminStatsDistributionResponse.PropertyRegistrationCount> byPropertyRegistration = List.of(
+                new AdminStatsDistributionResponse.PropertyRegistrationCount(true, registeredCount),
+                new AdminStatsDistributionResponse.PropertyRegistrationCount(false, unregisteredCount));
+
         List<AdminStatsDistributionResponse.ReportReasonCount> byReportReason = mapToCounts(
                 PropertyReportReason.values(), propertyReportRepository::countByReason,
                 AdminStatsDistributionResponse.ReportReasonCount::new);
 
-        return new AdminStatsDistributionResponse(byRole, byReportReason);
+        return new AdminStatsDistributionResponse(byPropertyRegistration, byReportReason);
     }
 
     private <E, R> List<R> mapToCounts(E[] values, Function<E, Long> counter, BiFunction<E, Long, R> toResult) {

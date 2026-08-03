@@ -87,8 +87,7 @@ class AdminStatsControllerTest {
         when(propertyReportRepository.countByStatus(PropertyReportStatus.RECEIVED)).thenReturn(2L);
         when(userRepository.findCreatedAtSince(any())).thenReturn(List.of(LocalDateTime.now()));
         when(propertyRepository.findCreatedAtSince(any())).thenReturn(List.of());
-        when(userRepository.countByRole(Role.USER)).thenReturn(9L);
-        when(userRepository.countByRole(Role.ADMIN)).thenReturn(1L);
+        when(propertyRepository.countDistinctUserId()).thenReturn(4L);
         when(propertyReportRepository.countByReason(any())).thenReturn(0L);
 
         mockMvc.perform(get("/admin/stats/dashboard").cookie(adminCookie()))
@@ -97,6 +96,6 @@ class AdminStatsControllerTest {
                 .andExpect(jsonPath("$.data.summary.totalProperties").value(5))
                 .andExpect(jsonPath("$.data.summary.pendingReports").value(2))
                 .andExpect(jsonPath("$.data.trends.signups.length()").value(14))
-                .andExpect(jsonPath("$.data.distributions.byRole.length()").value(2));
+                .andExpect(jsonPath("$.data.distributions.byPropertyRegistration.length()").value(2));
     }
 }

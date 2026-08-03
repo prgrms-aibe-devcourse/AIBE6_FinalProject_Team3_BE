@@ -91,4 +91,9 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
     // "발생" 자체는 그대로 집계에 포함되어야 하므로 status로 필터링하지 않는다.
     @Query("SELECT p.createdAt FROM Property p WHERE p.createdAt >= :since")
     List<LocalDateTime> findCreatedAtSince(@Param("since") LocalDateTime since);
+
+    // 관리자 통계 대시보드: 매물 등록자/미등록자 분포용. 삭제 여부와 무관하게 "등록한 적이 있는지"를
+    // 기준으로 삼으므로 status로 필터링하지 않는다.
+    @Query("SELECT COUNT(DISTINCT p.userId) FROM Property p")
+    long countDistinctUserId();
 }
