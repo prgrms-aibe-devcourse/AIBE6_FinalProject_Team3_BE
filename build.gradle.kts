@@ -51,8 +51,9 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.mockito:mockito-core")
     testImplementation("org.mockito:mockito-junit-jupiter")
-    // 로컬/CI에서 실제 Redis 컨테이너로 rotate/revoke의 원자성(getAndDelete) 등 실제 동작을 검증하기 위함
-    // — RefreshTokenServiceTest(Mockito)는 호출 순서만 보고, 실제 TTL 만료/동시성은 검증하지 못한다.
+    // 로컬/CI에서 실제 Redis 컨테이너로 issue/rotate/revoke Lua script의 원자성 등 실제 동작을
+    // 검증하기 위함 — RefreshTokenServiceTest(Mockito)는 스크립트 앞뒤 자바 분기만 보고, 실제
+    // TTL 만료/동시성은 검증하지 못한다.
     testImplementation(platform("org.testcontainers:testcontainers-bom:1.20.4"))
     testImplementation("org.testcontainers:testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
