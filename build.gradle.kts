@@ -1,3 +1,5 @@
+import org.gradle.kotlin.dsl.implementation
+
 plugins {
     java
     id("org.springframework.boot") version "4.1.0"
@@ -58,6 +60,10 @@ dependencies {
     implementation("io.jsonwebtoken:jjwt-api:0.12.6")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
+
+    // S3
+    implementation(platform("software.amazon.awssdk:bom:2.25.0"))
+    implementation("software.amazon.awssdk:s3")
 }
 
 tasks.withType<Test> {
