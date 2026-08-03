@@ -4,6 +4,8 @@ import com.algogyeyak.admin.dto.AdminDashboardStatsResponse;
 import com.algogyeyak.admin.dto.AdminStatsDistributionResponse;
 import com.algogyeyak.admin.dto.AdminStatsSummaryResponse;
 import com.algogyeyak.admin.dto.AdminStatsTrendResponse;
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.entity.PropertyReportReason;
 import com.algogyeyak.property.entity.PropertyReportStatus;
 import com.algogyeyak.property.entity.PropertyStatus;
@@ -12,6 +14,7 @@ import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.user.repository.UserRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -31,14 +34,31 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class AdminStatsService {
 
-    private static final int TREND_DAYS = 14;
+    private static final int DEFAULT_TREND_DAYS = 14;
+
+    // 하루씩 채워 넣는 toDailyCounts 특성상 기간이 너무 길면 응답 포인트 수가 과도해진다 - 관리자가
+    // 조회 기간을 직접 고를 수 있게 된 만큼 상한을 둔다.
+    private static final int MAX_TREND_DAYS = 90;
 
     private final UserRepository userRepository;
     private final PropertyRepository propertyRepository;
     private final PropertyReportRepository propertyReportRepository;
 
-    public AdminDashboardStatsResponse getDashboard() {
-        return new AdminDashboardStatsResponse(summary(), trends(), distributions());
+    public AdminDashboardStatsResponse getDashboard(LocalDate startDate, LocalDate endDate) {
+        LocalDate resolvedEnd = endDate != null ? endDate : LocalDate.now();
+        LocalDate resolvedStart = startDate != null ? startDate : resolvedEnd.minusDays(DEFAULT_TREND_DAYS - 1L);
+        validateRange(resolvedStart, resolvedEnd);
+
+        return new AdminDashboardStatsResponse(summary(), trends(resolvedStart, resolvedEnd), distributions());
+    }
+
+    private void validateRange(LocalDate start, LocalDate end) {
+        if (start.isAfter(end)) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_DATE_RANGE, "조회 시작일은 종료일보다 이후일 수 없습니다.");
+        }
+        if (ChronoUnit.DAYS.between(start, end) + 1 > MAX_TREND_DAYS) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_DATE_RANGE, "조회 기간은 최대 " + MAX_TREND_DAYS + "일까지 가능합니다.");
+        }
     }
 
     private AdminStatsSummaryResponse summary() {
@@ -48,21 +68,22 @@ public class AdminStatsService {
                 propertyReportRepository.countByStatus(PropertyReportStatus.RECEIVED));
     }
 
-    private AdminStatsTrendResponse trends() {
-        LocalDateTime since = LocalDate.now().minusDays(TREND_DAYS - 1L).atStartOfDay();
+    private AdminStatsTrendResponse trends(LocalDate start, LocalDate end) {
+        LocalDateTime rangeStart = start.atStartOfDay();
+        LocalDateTime rangeEnd = end.plusDays(1).atStartOfDay();
         return new AdminStatsTrendResponse(
-                toDailyCounts(userRepository.findCreatedAtSince(since)),
-                toDailyCounts(propertyRepository.findCreatedAtSince(since)));
+                toDailyCounts(userRepository.findCreatedAtBetween(rangeStart, rangeEnd), start, end),
+                toDailyCounts(propertyRepository.findCreatedAtBetween(rangeStart, rangeEnd), start, end));
     }
 
-    // 최근 TREND_DAYS일을 하루도 빠짐없이 채운다 - 특정 날짜에 가입/등록이 0건이어도 프론트 차트가
-    // 그 날짜를 건너뛰지 않고 0으로 그릴 수 있어야 하기 때문이다.
-    private List<AdminStatsTrendResponse.Point> toDailyCounts(List<LocalDateTime> timestamps) {
+    // 조회 기간을 하루도 빠짐없이 채운다 - 특정 날짜에 가입/등록이 0건이어도 프론트 차트가 그 날짜를
+    // 건너뛰지 않고 0으로 그릴 수 있어야 하기 때문이다.
+    private List<AdminStatsTrendResponse.Point> toDailyCounts(List<LocalDateTime> timestamps, LocalDate start, LocalDate end) {
         Map<LocalDate, Long> counts = timestamps.stream()
                 .collect(Collectors.groupingBy(LocalDateTime::toLocalDate, Collectors.counting()));
 
-        LocalDate start = LocalDate.now().minusDays(TREND_DAYS - 1L);
-        return IntStream.range(0, TREND_DAYS)
+        long days = ChronoUnit.DAYS.between(start, end) + 1;
+        return IntStream.range(0, (int) days)
                 .mapToObj(start::plusDays)
                 .map(date -> new AdminStatsTrendResponse.Point(date, counts.getOrDefault(date, 0L)))
                 .toList();

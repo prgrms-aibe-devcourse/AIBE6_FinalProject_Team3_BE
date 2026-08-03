@@ -85,8 +85,8 @@ class AdminStatsControllerTest {
         when(userRepository.count()).thenReturn(10L);
         when(propertyRepository.countByStatus(PropertyStatus.ACTIVE)).thenReturn(5L);
         when(propertyReportRepository.countByStatus(PropertyReportStatus.RECEIVED)).thenReturn(2L);
-        when(userRepository.findCreatedAtSince(any())).thenReturn(List.of(LocalDateTime.now()));
-        when(propertyRepository.findCreatedAtSince(any())).thenReturn(List.of());
+        when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of(LocalDateTime.now()));
+        when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
         when(propertyRepository.countDistinctUserId()).thenReturn(4L);
         when(propertyReportRepository.countByReason(any())).thenReturn(0L);
 
@@ -97,5 +97,45 @@ class AdminStatsControllerTest {
                 .andExpect(jsonPath("$.data.summary.pendingReports").value(2))
                 .andExpect(jsonPath("$.data.trends.signups.length()").value(14))
                 .andExpect(jsonPath("$.data.distributions.byPropertyRegistration.length()").value(2));
+    }
+
+    @Test
+    void 조회_기간을_직접_지정하면_해당_일수만큼_추이를_반환한다() throws Exception {
+        when(userRepository.count()).thenReturn(10L);
+        when(propertyRepository.countByStatus(PropertyStatus.ACTIVE)).thenReturn(5L);
+        when(propertyReportRepository.countByStatus(PropertyReportStatus.RECEIVED)).thenReturn(2L);
+        when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
+        when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
+        when(propertyRepository.countDistinctUserId()).thenReturn(0L);
+        when(propertyReportRepository.countByReason(any())).thenReturn(0L);
+
+        mockMvc.perform(get("/admin/stats/dashboard")
+                        .param("startDate", "2026-01-01")
+                        .param("endDate", "2026-01-05")
+                        .cookie(adminCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.trends.signups.length()").value(5))
+                .andExpect(jsonPath("$.data.trends.signups[0].date").value("2026-01-01"))
+                .andExpect(jsonPath("$.data.trends.signups[4].date").value("2026-01-05"));
+    }
+
+    @Test
+    void 시작일이_종료일보다_늦으면_400이다() throws Exception {
+        mockMvc.perform(get("/admin/stats/dashboard")
+                        .param("startDate", "2026-01-10")
+                        .param("endDate", "2026-01-01")
+                        .cookie(adminCookie()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_INVALID_DATE_RANGE"));
+    }
+
+    @Test
+    void 조회_기간이_90일을_초과하면_400이다() throws Exception {
+        mockMvc.perform(get("/admin/stats/dashboard")
+                        .param("startDate", "2026-01-01")
+                        .param("endDate", "2026-04-15")
+                        .cookie(adminCookie()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_INVALID_DATE_RANGE"));
     }
 }

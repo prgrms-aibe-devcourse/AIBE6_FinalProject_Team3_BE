@@ -86,11 +86,11 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
     // 관리자 통계 대시보드: 활성 매물 수 카드용.
     long countByStatus(PropertyStatus status);
 
-    // 관리자 통계 대시보드: 최근 N일 등록 추이용. UserRepository.findCreatedAtSince와 동일한 이유로
+    // 관리자 통계 대시보드: 기간별 등록 추이용. UserRepository.findCreatedAtBetween과 동일한 이유로
     // DB별 날짜 절삭 함수 대신 원본 시각만 가져와 서비스에서 집계한다. 이후 삭제된 매물도 등록
     // "발생" 자체는 그대로 집계에 포함되어야 하므로 status로 필터링하지 않는다.
-    @Query("SELECT p.createdAt FROM Property p WHERE p.createdAt >= :since")
-    List<LocalDateTime> findCreatedAtSince(@Param("since") LocalDateTime since);
+    @Query("SELECT p.createdAt FROM Property p WHERE p.createdAt >= :start AND p.createdAt < :end")
+    List<LocalDateTime> findCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
     // 관리자 통계 대시보드: 매물 등록자/미등록자 분포용. 삭제 여부와 무관하게 "등록한 적이 있는지"를
     // 기준으로 삼으므로 status로 필터링하지 않는다.
