@@ -106,15 +106,30 @@ class RefreshTokenServiceRedisIntegrationTest {
         assertEquals(1, failureCount.get());
     }
 
+    // 고정 sleep(예: TTL 1초 + sleep 1500ms)은 느린 CI/컨테이너 warm-up 등으로 TTL 만료보다 먼저
+    // 깨어날 수 있어 드물게 흔들린다 - "얼마나 기다릴지"를 추측하는 대신, 키가 실제로 사라졌는지를
+    // 짧은 간격으로 직접 확인(polling)해 진짜 만료를 기다린다.
     @Test
-    void tokenNaturallyExpiresViaRedisTtl() throws InterruptedException {
+    @Timeout(15)
+    void tokenNaturallyExpiresViaRedisTtl() throws Exception {
         User user = saveUser("ttl@example.com");
         ReflectionTestUtils.setField(refreshTokenService, "refreshTokenValiditySeconds", 1L);
 
         String rawToken = refreshTokenService.issue(user);
-        Thread.sleep(1500);
+        awaitKeyAbsence("auth:refresh-token:by-hash:" + hash(rawToken));
 
         assertThrows(BusinessException.class, () -> refreshTokenService.rotate(rawToken));
+    }
+
+    private void awaitKeyAbsence(String key) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+        while (System.currentTimeMillis() < deadline) {
+            if (!Boolean.TRUE.equals(redisTemplate.hasKey(key))) {
+                return;
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("키가 TTL로 자연 만료되지 않았다: " + key);
     }
 
     @Test
