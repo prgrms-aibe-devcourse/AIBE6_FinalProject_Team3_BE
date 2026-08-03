@@ -4,6 +4,7 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -51,6 +52,15 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
             TransactionType transactionType,
             PropertyStatus status,
             String jibunAddress
+    );
+
+    /**
+     * risk-analysis의 동일계정 다수등록 탐지용 - 특정 유저가 기준 시각 이후 등록한 활성 매물 전체.
+     */
+    List<Property> findAllByUserIdAndStatusAndCreatedAtAfter(
+            Long userId,
+            PropertyStatus status,
+            LocalDateTime after
     );
 
     /**
