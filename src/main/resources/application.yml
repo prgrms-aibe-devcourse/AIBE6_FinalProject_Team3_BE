@@ -96,6 +96,7 @@ market-data:
 risk-policy:
   version: v1.0
   price-anomaly-percent: 10
+  jeonse-ratio-caution-from: 80
   jeonse-ratio-warn-from: 100
   jeonse-ratio-warn-to: 150
   jeonse-ratio-alert-over: 150
