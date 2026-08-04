@@ -116,7 +116,7 @@ class UserServiceTest {
         UserProfileResponse response = userService.resetProfileImage(1L);
 
         assertNull(response.getProfileImageUrl());
-        verify(s3PresignService).deleteObject("profile-images/1/old.jpg");
+        verify(s3PresignService).deleteReplacedObject("profile-images/1/old.jpg");
     }
 
     @Test
@@ -129,6 +129,6 @@ class UserServiceTest {
         UserProfileResponse response = userService.resetProfileImage(1L);
 
         assertNull(response.getProfileImageUrl());
-        verify(s3PresignService, never()).deleteObject(any());
+        verify(s3PresignService, never()).deleteReplacedObject(any());
     }
 }

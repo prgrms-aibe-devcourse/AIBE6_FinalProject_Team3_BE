@@ -124,7 +124,7 @@ public class UserService {
                 .filter(oldKey -> S3KeyGenerator.isProfileImageOwnedBy(userId, oldKey))
                 .ifPresent(oldKey -> {
                     try {
-                        s3PresignService.deleteObject(oldKey);
+                        s3PresignService.deleteReplacedObject(oldKey);
                     } catch (RuntimeException e) {
                         log.warn("이전 프로필 이미지 삭제 실패 - userId={}, key={}", userId, oldKey, e);
                     }

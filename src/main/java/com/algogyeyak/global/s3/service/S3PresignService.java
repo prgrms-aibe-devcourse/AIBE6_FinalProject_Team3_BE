@@ -3,6 +3,8 @@ package com.algogyeyak.global.s3.service;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.s3.util.S3ImagePurpose;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -18,12 +20,17 @@ import java.util.Optional;
 @Service
 public class S3PresignService {
 
+    private static final Logger log = LoggerFactory.getLogger(S3PresignService.class);
+
+    private static final String PENDING_TAG_KEY = "status";
+    private static final String PENDING_TAG_VALUE = "pending";
+
     // 업로드용 presigned URL을 발급할 때 이 태그를 서명에 포함시켜 객체에 걸어둔다. 버킷 Lifecycle
     // 규칙이 이 태그(status=pending)가 붙은 객체를 일정 기간(예: 1일) 뒤 자동 삭제하도록 설정돼 있어
     // (AWS 콘솔에서 별도 설정, 2026-08-04) - presign만 받고 confirm을 호출하지 않은 채 이탈한 경우
     // S3에 영구히 남는 고아 객체를 우리 서버가 직접 정리하지 않아도 자동으로 청소된다. confirmUpload()가
     // 성공하면 이 태그를 지워 Lifecycle 대상에서 제외시킨다.
-    public static final String PENDING_UPLOAD_TAG = "status=pending";
+    public static final String PENDING_UPLOAD_TAG = PENDING_TAG_KEY + "=" + PENDING_TAG_VALUE;
 
     private final S3Presigner s3Presigner;
     private final S3Client s3Client;
@@ -151,6 +158,33 @@ public class S3PresignService {
                         .key(key)
                         .build()
         );
+    }
+
+    // 새 이미지로 교체돼 정리 대상이 된 "이미 confirm까지 끝난" 이전 이미지 전용 삭제 메서드다 -
+    // confirmUpload()에서 막 지운 PENDING_UPLOAD_TAG가 이미 없는 상태이므로, deleteObject()만 믿고
+    // 있다가 그 호출이 권한/네트워크 등으로 실패하면 이 객체는 태그도 없이 영영 고아로 남는다(버킷
+    // Lifecycle 규칙이 이 태그가 있는 객체만 보기 때문). 그래서 즉시 삭제를 시도하기 전에 먼저 다시
+    // PENDING_UPLOAD_TAG를 걸어둬서, 즉시 삭제가 실패해도 Lifecycle 규칙이 나중에 대신 정리해줄 수
+    // 있게 한다. 태깅 자체가 실패해도(기존 동작과 동일하게) 즉시 삭제 시도는 그대로 진행하고, 호출부가
+    // deleteObject()와 동일하게 그 실패를 처리하도록 예외를 그대로 전파한다.
+    public void deleteReplacedObject(String key) {
+        try {
+            tagAsPending(key);
+        } catch (RuntimeException e) {
+            log.warn("교체된 이전 이미지에 정리용 태그를 걸지 못함 - key={}", key, e);
+        }
+
+        deleteObject(key);
+    }
+
+    private void tagAsPending(String key) {
+        s3Client.putObjectTagging(PutObjectTaggingRequest.builder()
+                .bucket(bucket)
+                .key(key)
+                .tagging(Tagging.builder()
+                        .tagSet(Tag.builder().key(PENDING_TAG_KEY).value(PENDING_TAG_VALUE).build())
+                        .build())
+                .build());
     }
 
     // 저장된 URL(예: User.profileImageUrl)이 우리 버킷의 객체를 가리키는지 확인하고, 맞으면 key만
