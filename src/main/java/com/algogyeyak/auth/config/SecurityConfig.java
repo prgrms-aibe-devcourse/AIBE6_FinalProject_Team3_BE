@@ -34,6 +34,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Configuration
 @EnableWebSecurity
@@ -63,7 +64,7 @@ public class SecurityConfig {
                 // 아직 Access-Control-Allow-Origin 등을 응답에 붙이기 전이라, 브라우저가 그 403 응답을
                 // CORS 위반으로 취급해 JS에서 아예 "Failed to fetch"로만 보이고 실제 403/에러 바디를
                 // 읽을 수 없게 된다(실제 배포에서 원인 진단이 어려워짐 - 차단 자체는 어느 순서든 동일).
-                .addFilterAfter(new CsrfHeaderFilter(Arrays.asList(allowedOrigins.split(","))),
+                .addFilterAfter(new CsrfHeaderFilter(parseAllowedOrigins()),
                         org.springframework.web.filter.CorsFilter.class)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
@@ -132,7 +133,7 @@ public class SecurityConfig {
 
     private CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+        configuration.setAllowedOrigins(parseAllowedOrigins());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
@@ -140,5 +141,17 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
+    }
+
+    // CORS(corsConfigurationSource)와 CsrfHeaderFilter의 Origin 폴백이 같은 origin 목록을 봐야
+    // 하는데, 예전엔 각자 allowedOrigins.split(",")를 따로 처리해서 trim 여부가 어긋났다 -
+    // "https://a.com, https://b.com"처럼 콤마 뒤에 공백을 넣는 흔한 표기에서, 한쪽은 " https://b.com"
+    // (공백 포함, 매칭 안 됨)으로 등록되고 다른 쪽은 trim된 값으로 등록되는 식으로 갈라질 수 있었다.
+    // 파싱을 여기 한 곳으로 모아 둘 다 항상 같은 리스트를 쓰게 한다.
+    private List<String> parseAllowedOrigins() {
+        return Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .collect(Collectors.toUnmodifiableList());
     }
 }
