@@ -2,7 +2,7 @@
 
 ## 배경 / 성격
 
-다른 문서들과 같은 방식의 **회고성(retroactive) 문서**입니다. 이전 버전에서는 "코드 자체가 전혀 없음"으로 정리했지만, 이후 `com.algogyeyak.riskanalysis` 패키지에 **골격(스켈레톤) 코드**가 추가되었고, **(2026-08-04 갱신)** 신호 탐지기 4종 + `RiskAnalysisController` + market-data 어댑터(전세)에 이어 `DepositSafetyCheckService`(전세가율 계산)와 매매 실거래가 연동까지 전부 구현 완료됐습니다 — risk-analysis 도메인의 API 4개(`POST /risk-analysis`, `GET /risk-signals`, `GET /deposit-safety`, `POST /deposit-safety/recalculate`)가 모두 실제로 동작합니다. 남은 건 `RiskRecalculationService`(매물 수정 시 자동 재계산 트리거)와 checklist 연계 보조 신호뿐입니다.
+다른 문서들과 같은 방식의 **회고성(retroactive) 문서**입니다. 이전 버전에서는 "코드 자체가 전혀 없음"으로 정리했지만, 이후 `com.algogyeyak.riskanalysis` 패키지에 **골격(스켈레톤) 코드**가 추가되었고, **(2026-08-04 완료)** 신호 탐지기 4종 + `RiskAnalysisController` + market-data 어댑터(전세)에 이어 `DepositSafetyCheckService`(전세가율 계산), 매매 실거래가 연동, checklist 연계 보조 신호, 매물 수정 시 자동 재계산 트리거까지 전부 구현 완료됐습니다 — risk-analysis 도메인의 API 4개(`POST /risk-analysis`, `GET /risk-signals`, `GET /deposit-safety`, `POST /deposit-safety/recalculate`)가 모두 실제로 동작하고, 완전 미해결 이슈는 더 이상 없습니다. 남은 건 "동일 계정 다수 등록 탐지"를 실제로 켤지(팀 결정 대기, 로직은 이미 완성)와 "선순위보증금 입력을 어느 화면에 배치할지"(FE/UX 결정) 두 가지뿐이며, 둘 다 코드 작업이 아니라 결정만 남은 상태입니다.
 
 ## 실제 구현 현황: risk-analysis 4개 API 전부 완료 (2026-08-04 갱신)
 
@@ -23,8 +23,7 @@
 
 ### 여전히 비어 있는 것
 
-- **`RiskRecalculationService`** — 여전히 빈 스텁. 매물 수정 시 신호/전세가율을 자동으로 다시 계산하는 트리거가 없음(수동 트리거인 `POST /risk-analysis`/`POST /deposit-safety/recalculate`는 이미 있음). property 도메인 담당자와 협의가 필요한 공통 훅 — 혹은 FE가 매물 수정 성공 직후 `POST /risk-analysis`를 이어서 호출하는 방식으로 대체될 수도 있음(아래 "남은 이슈" 참고).
-- checklist 연계 보조 신호("최근 소유권 변경 + 높은 전세가율") — 실제 연동 코드 없음(아래 "남은 이슈" 참고).
+**(2026-08-04 기준) 코드로 채워야 할 빈 부분은 더 이상 없습니다.** 예전엔 이 섹션에 `RiskRecalculationService`(빈 스텁)와 checklist 연계 보조 신호가 있었는데, 둘 다 구현 완료됐습니다(아래 "남은 이슈" 4번/8번 참고). 남은 두 항목("동일 계정 다수 등록" 활성화 여부, 선순위보증금 입력 화면 배치)은 코드가 아니라 팀/FE 결정만 남은 상태입니다.
 
 ### market-data 도메인 연동 — 전세 완료(2026-08-03), 매매 완료(2026-08-04)
 
@@ -53,7 +52,7 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 ## 다른 도메인에 남아있는 연계 흔적
 
 - `property` 도메인의 매물 상세조회(`PropertyDetailResponse`)엔 위험 신호·안전성 정보를 담을 필드가 아직 없음(`property-design.md` 확인 필요 항목 #3과 동일 사안). **(2026-08-03 갱신)** `RiskAnalysisController`(`GET /properties/{propertyId}/risk-signals`)는 이제 생겼으니 데이터 소스 자체는 있음 — 다만 `PropertyDetailResponse`가 이 별도 엔드포인트를 호출/포함하도록 연동하는 코드는 아직 없음.
-- `checklist` 도메인의 `ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE`(소유권 취득일 문항)에 "risk-analysis 전세가율과 연계되는 보조 신호용"이라는 주석이 남아있음. **(2026-08-04 갱신)** `DepositSafetyCheckService`는 이제 구현됐지만, checklist의 소유권 취득일 값을 읽어와 "최근 소유권 변경 + 높은 전세가율" 조합을 판단하는 코드는 여전히 없음 — checklist 조회 API를 호출할지 직접 쿼리할지 설계 필요(아래 "남은 이슈" 참고).
+- **(2026-08-04 해결)** `checklist` 도메인의 `ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE`(소유권 취득일 문항)에 남아있던 "risk-analysis 전세가율과 연계되는 보조 신호용" 주석이 실제 코드로 이어짐 — `ChecklistItemRepository`에 문항 단건 조회 쿼리를 추가해 `DepositSafetyCheckService`가 직접 읽어온다(아래 "남은 이슈" 4번 참고).
 - **(2026-08-03 해결)** `property`의 매물 삭제는 논리 삭제(soft delete, `PropertyStatus.DELETED`)라 삭제된 매물 데이터가 DB에 남아있음 — `ShortTermRelistingDetector`가 이 재료(삭제 이력)를 실제로 활용해 구현 완료됨. 별도 `deletedAt` 컬럼이 없어 `updatedAt`을 삭제 시각 대용으로 사용.
 - **(2026-08-03 해결)** `property`의 등록 시 중복 검사(`PROPERTY_DUPLICATE`)는 "동일 사용자가 동일 주소·거래유형으로 재등록"할 때만 걸리는 검사라, `DuplicateListingDetector`가 요구하는 "서비스 전체에서 동일 주소·유사 조건으로 등록된 다른 매물(다른 사용자 포함)" 탐지와는 성격이 달라 재사용이 어려웠음 — `PropertyRepository`에 `existsByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddress`/`_JibunAddress`(userId 조건 없이 본인 자신만 제외) 신규 쿼리를 추가해 해결.
 
@@ -67,10 +66,10 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 | 짧은 주기 재등록 탐지                             | ✅ **(2026-08-03 구현)** `ShortTermRelistingDetector` — 동일 계정이 삭제한 매물과 동일 주소로, `shortTermRelistingWindowDays`(잠정 30일) 이내 + 가격·면적이 각각 허용 오차(잠정 5%/10%) 이내면 신호                                                                                           |
 | 전세가율 계산(기본/선순위보증금 반영/근저당 채권최고액 반영)       | ✅ **(2026-08-04 구현)** `DepositSafetyCheckService.calculate()` — `(내 보증금 [+선순위보증금] [+근저당 채권최고액]) / 매매시세`, percent 정수로 반올림. 근저당 채권최고액은 요구사항대로 별도 할인 없이 그대로 합산. `GET /deposit-safety`(기본 조회)와 `POST /deposit-safety/recalculate`(선순위보증금 반영 재계산)로 노출 |
 | 선순위보증금 검증(100~150% 강조 안내, 150% 초과 경고)    | ✅ **(2026-08-04 구현)** `DepositSafetyCheckService.buildExplanation()` — `RiskPolicyConfig`의 `jeonseRatioWarnFrom/To`(100~150, 위험 강조)·`jeonseRatioAlertOver`(150, 입력값 재확인 안내) 소비. 계산 자체는 막지 않고 설명 문구로만 경고 |
-| "최근 소유권 변경 + 높은 전세가율" 보조 신호              | ❌ 미구현 — `checklist` 쪽 연계 의도 주석만 있음(위 참고), `DepositSafetyCheckService` 자체는 구현됐지만 checklist 조회 연동이 없음                                                                                                                            |
+| "최근 소유권 변경 + 높은 전세가율" 보조 신호              | ✅ **(2026-08-04 구현)** `DepositSafetyCheckResponse.recentOwnershipChangeWarning` — 전세가율 위험 구간(100%↑) AND 소유권 취득일 최근(6개월↓) 둘 다 만족해야 true                                                                                                                            |
 | 성공/판정불가/실패 3단계 응답 구조                     | ✅ **(2026-08-03 완료)** `PropertyRiskCheck.status`(`RiskCheckStatus`)를 신호 4종마다 독립적으로 관리(`(property_id, signal_type)` unique)해서, 신호 하나가 판정불가/실패여도 나머지 신호 결과에 영향 없음. **(2026-08-04 갱신)** `GET /properties/{propertyId}/risk-signals`가 `RiskSignalListResponse`(propertyId/signalCount/signals/disclaimer)로 클라이언트에 내려주고, `signals` 안에 신호 4종 전부 실제 값을 채움. `POST /properties/{propertyId}/risk-analysis`는 `RiskAnalysisSummaryResponse`(signalCount/policyVersion/calculatedAt)로 요약만 반환 — 이전엔 빈 응답만 줘서 클라이언트가 다시 GET을 호출해야 했던 걸 이번에 고침 |
 | 정책 버전 기록                                 | ⚠️ 부분 구현 — `PropertyRiskCheck.policyVersion`에 체크 시점의 `RiskPolicyConfig.version` 문자열을 스냅샷으로 남기지만, 버전별 임계값 이력을 DB에 남기는 기능은 없음                                         |
-| 위험 신호 재계산(매물 수정 시 트리거)                   | ❌ 미구현 — `RiskRecalculationService` 빈 스텁, `property` 수정(`PATCH /properties/{id}`)에도 트리거 지점 없음. 다만 market-data는 캐싱 없이 매번 즉시 재계산하므로 이 문제가 없어졌고(위 참고), risk-analysis는 결과를 DB에 스냅샷으로 저장하는 구조라 여전히 별도 트리거가 필요함           |
+| 위험 신호 재계산(매물 수정 시 트리거)                   | ✅ **(2026-08-04 구현)** `PropertyService.update()` → `PropertyUpdatedEvent` 발행 → `RiskRecalculationService`(`@TransactionalEventListener(AFTER_COMMIT)`)가 구독해 자동 재계산. 이벤트 기반이라 property는 risk-analysis를 모름           |
 
 ## 비기능 요구사항 — 대조
 
@@ -79,7 +78,7 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 | 동일 입력·동일 정책 버전이면 동일 결과 보장 | ✅ **(2026-08-03 완료)** 탐지기 4종 전부 순수 함수적 판정(DB 조회 + 정책값 비교) — 결정적(deterministic). `PriceAnomalyDetector`도 같은 `MarketComparison` 입력이면 항상 같은 결과 |
 | 위험도 계산 실패가 매물 상세 조회 전체 실패로 이어지지 않음 | ⚠️ `FakeListingSignalService`는 market-data 실패/판정불가를 예외 없이 상태값으로 흡수하지만, `PropertyService.getProperty()` 쪽에 이 결과를 읽어오는 연동 지점 자체가 없어 실제 조회 흐름에서 검증 불가(위 "다른 도메인에 남아있는 연계 흔적" 참고) |
 | 실거래가 조회 실패와 위험도 계산 실패 구분 | ⚠️ 모델 수준에서는 `RiskCheckReason.DATA_FETCH_FAILURE`(FAILED)와 `NO_COMPARABLE_TRANSACTION`(UNDETERMINABLE)로 구분되지만, 실제 market-data 구현(`MolitRentClientImpl`)이 외부 API 실패를 예외로 던지지 않고 빈 리스트로 삼켜버려 "실패"와 "판정불가"가 원천 데이터부터 구분되지 않음 — `MarketDataClientImpl` 어댑터도 이 한계를 그대로 물려받아 항상 `UNDETERMINABLE`로만 매핑함(위 'market-data 도메인 연동' 참고). market-data 쪽에서 API 실패를 예외로 구분해 던지는 선행 작업이 있어야 완전히 해결됨 |
-| 매물 정보/시세 변경 시에만 재계산(불필요한 재계산 방지) | ❌ 미구현 — 재계산을 트리거할 지점(`property` 수정 API, `RiskRecalculationService`) 모두 없음 |
+| 매물 정보/시세 변경 시에만 재계산(불필요한 재계산 방지) | ✅ **(2026-08-04 구현)** `PropertyUpdatedEvent`가 매물 수정 시에만 발행되므로, 조회만으로는 재계산이 트리거되지 않음 |
 | 동일계정 다수등록 탐지를 정책 플래그로 켜고 끌 수 있게 | ✅ **(2026-08-03 구현)** `SameAccountMultipleDetector.isEnabled()`가 `RiskPolicyConfig.multiAccountDetectionEnabled`를 그대로 반환 — 탐지 로직 자체는 완성됐고 플래그로만 켜고 끔(기본값 `false`) |
 | 서비스 대상 범위(전세+월세)와 안전성 체크 적용 범위(전세만) 화면 안내 구분 | ⚠️ **(2026-08-04 갱신)** 백엔드는 월세 매물에 `DepositSafetyStatus.UNAVAILABLE`+`TRANSACTION_TYPE_UNSUPPORTED` 사유를 정확히 내려줌(안내에 필요한 데이터는 있음) — 다만 이 사유를 화면에 실제로 안내 문구로 보여주는 건 FE 몫이라 백엔드만으로는 완결되지 않음 |
 
@@ -88,10 +87,10 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 1. **(2026-08-03 완전 해결)** 신호 탐지 로직 4종(`PriceAnomalyDetector`, `DuplicateListingDetector`, `SameAccountMultipleDetector`, `ShortTermRelistingDetector`) 전부 구현 완료.
 2. **(2026-08-03 해결, 2026-08-04 응답 구조 갱신)** `RiskAnalysisController` — `POST /properties/{propertyId}/risk-analysis`(실행/재계산), `GET /properties/{propertyId}/risk-signals`(조회) 구현 완료. **(2026-08-04)** API 명세서 초안을 기준으로 응답 구조를 다시 맞춤 — POST는 빈 응답 대신 `RiskAnalysisSummaryResponse`(signalCount/policyVersion/calculatedAt)를, GET은 배열 대신 `RiskSignalListResponse`(propertyId/signalCount/signals/disclaimer)를 반환. 애초 구현이 자체 판단으로 작성된 것이라 명세서와 어긋나 있던 걸 바로잡은 것.
 3. **(2026-08-03 완전 해결)** market-data 연동 — `MarketComparisonResponse`에 구조화된 `MarketComparisonUnavailableReason` enum 추가 + `MarketDataClientImpl` 어댑터 구현 완료(`TemporaryMarketDataClient`는 삭제). 상태 모델(2단계→3단계)·메서드 시그니처·필드 타입 변환 전부 처리됨. 다만 "API 실패"와 "표본 부족" 구분은 market-data 원천 데이터 자체가 못 하고 있어 여전히 못 함(둘 다 `UNDETERMINABLE`로 뭉뚱그려짐) — 진짜 `FAILED` 판정을 원하면 market-data 쪽에 추가 선행 작업 필요.
-4. `checklist` 도메인에 남아있는 "전세가율 연계" 주석 외에는 실제 연동 코드가 없음 — checklist의 소유권 취득일 값을 어떻게 읽어올지(체크리스트 조회 API 호출? 직접 쿼리?) 설계 필요. **(2026-08-04 갱신)** `DepositSafetyCheckService`가 이제 실제로 전세가율을 계산하므로("최근 소유권 변경 + 높은 전세가율" 조합 판단에 필요한 값 자체는 생김), 이 연동 로직을 추가할 준비는 됐음 — 다만 여전히 설계·구현 안 됨.
+4. **(2026-08-04 완전 해결)** `checklist` 연계 보조 신호("최근 소유권 변경 + 높은 전세가율") 구현 완료. `ChecklistItemRepository.findByChecklist_Property_IdAndCode()`(체크리스트 전체가 아니라 문항 하나만 가볍게 조회하는 신규 쿼리, 매물당 체크리스트가 최대 1개라 `Optional` 단건으로 충분 — `uk_checklist_user_property` 유니크 제약으로 보장됨)로 `OWNERSHIP_ACQUISITION_DATE` 값을 읽어와, 전세가율이 위험 구간(`jeonseRatioWarnFrom`, 100% 이상)이고 소유권 취득일이 최근(`ownershipRecentChangeMonths`, 잠정 6개월) 이내면 `DepositSafetyCheckResponse.recentOwnershipChangeWarning`을 `true`로 반환한다. 두 조건이 모두 참이어야 하고(AND), 체크리스트 문항에 응답이 없으면(값 `null`) 조용히 `false` 처리한다 — 이 경고는 부가 정보라 판정 불가로 전체 응답을 막을 이유가 없기 때문.
 5. **(2026-08-03 해결)** `property`의 기존 중복 등록 검사(동일 사용자 한정)와 `DuplicateListingDetector`가 요구하는 신호(다른 사용자 포함 가능)는 서로 다른 메커니즘이었으나, `PropertyRepository`에 별도 쿼리(`existsByIdNotAnd...`)를 추가해 해결.
-6. "동일 계정 다수 등록 탐지"는 요구사항 문서 자체가 🔶 논의중이라고 표시한 항목 — **(2026-08-03 갱신)** 로직 자체는 구현 완료했고 `multiAccountDetectionEnabled` 플래그(기본 `false`)로 게이트만 걸어둔 상태. Property 도메인이 "임대인이 아닌 일반 사용자가 검토용으로 등록"하는 구조라는 점 때문에 이 신호가 원래 의도(임대인/중개사 어뷰징 탐지)대로 작동하지 않을 수 있다는 점은 여전히 팀 결정 대기 — 결정 나면 정확한 임계값(현재 잠정값: 3개/7일/지역 2곳 이상)을 확정하고 플래그만 켜면 됨.
+6. "동일 계정 다수 등록 탐지"는 요구사항 문서 자체가 🔶 논의중이라고 표시한 항목 — **(2026-08-03 갱신)** 로직 자체는 구현 완료했고 `multiAccountDetectionEnabled` 플래그(기본 `false`)로 게이트만 걸어둔 상태. Property 도메인이 "임대인이 아닌 일반 사용자가 검토용으로 등록"하는 구조라는 점 때문에 이 신호가 원래 의도(임대인/중개사 어뷰징 탐지)대로 작동하지 않을 수 있다는 점은 여전히 팀 결정 대기 — 결정 나면 정확한 임계값(현재 잠정값: 3개/7일/지역 2곳 이상)을 확정하고 플래그만 켜면 됨. **(2026-08-04 방침)** 바로 켤지 말지 결정하기보다, 전반적인 서비스 사용 흐름을 지켜보면서(실사용 데이터로 이 신호가 실제로 유의미하게 작동하는지) 테스트해본 뒤 적용 여부를 판단하기로 함.
 7. **(2026-08-04 일부 해소)** "선순위보증금을 매물 등록 시점에 받을지, 임장 체크리스트의 서류·행정 카테고리에서 받을지" 화면 흐름 — `POST /deposit-safety/recalculate`가 매물 등록/수정과 완전히 분리된 별도 엔드포인트로 구현돼서, 사용자가 언제든(등록 직후든, 체크리스트 진행 중이든) 선순위보증금을 입력해 재계산을 호출할 수 있게 됨. 다만 "어느 화면에서 이 입력을 유도할지"는 여전히 FE/UX 결정 필요.
-8. 위험 신호 재계산을 트리거할 지점(매물 수정 시)이 `property` 도메인에도, risk-analysis 쪽(`RiskRecalculationService`)에도 아직 없음 — market-data 쪽과 함께 설계해야 하는 공통 훅. `RiskAnalysisController`의 `POST .../risk-analysis`는 클라이언트가 명시적으로 호출해야만 재계산되는 수동 트리거라, 이 자동 트리거 문제를 대체하지 않음. **(2026-08-04 논의)** 백엔드에 공통 훅을 새로 만드는 대신, FE가 "매물 수정 성공 → 이어서 `POST /risk-analysis` 호출" 순서로 처리하면 이 문제 자체가 없어질 수 있다는 대안이 나옴 — 아직 팀 결정 전.
+8. **(2026-08-04 완전 해결)** 매물 수정 시 자동 재계산 트리거 구현 완료 — property 담당자와 협의 후 **이벤트 기반**으로 구현하기로 결정(FE 시퀀싱 대안 대신 백엔드 훅으로 확정). `property.event.PropertyUpdatedEvent`(propertyId만 담는 도메인 이벤트)를 `PropertyService.update()`가 발행하고, risk-analysis의 `RiskRecalculationService`(빈 스텁 → 구현)가 `@TransactionalEventListener(phase = AFTER_COMMIT)`로 구독해 `FakeListingSignalService.checkAndSave()`를 실행한다. 직접 서비스 주입 대신 이벤트를 택한 이유 둘: (1) `checkAndSave()`도 `@Transactional`이라 매물 수정과 같은 트랜잭션에 물리면 재계산 실패 시 예외를 잡아도 스프링이 트랜잭션을 이미 rollback-only로 표시해버려 매물 수정 자체가 롤백될 위험이 있음(AFTER_COMMIT은 커밋 후 별도 트랜잭션이라 이 문제가 없음) — "위험도 계산 실패가 매물 상세 조회 전체 실패로 이어지지 않음" 요구사항과 직결. (2) `property` 패키지가 risk-analysis를 import하지 않아도 되어 market-data처럼 어댑터로 참조하는 기존 방향성과도 맞음. 재계산 중 예외는 잡아서 로그만 남기고 밖으로 던지지 않는다.
 9. **(2026-08-03 해결)** `risk-policy` 설정값(`price-anomaly-percent`, `same-account-*`, `short-term-relisting-*`) 전부 이제 실제 판정 로직이 소비함 — 더 이상 죽은 설정값 없음. 다만 `price-anomaly-percent` 외 값들은 전부 명세서에 정확한 기준이 없어 정한 잠정값이라, 실제 운영하면서 튜닝 필요.
 10. **(2026-08-04 신규 이슈, 완전 해결)** 원래 9개 목록엔 없었던 항목 — `DepositSafetyCheckService`(전세가율 계산) + 매매 실거래가 연동(`MolitTradeClientImpl`/`MarketSaleComparisonService`) + `GET /deposit-safety`/`POST /deposit-safety/recalculate` 컨트롤러까지 전부 구현 완료. `POST /risk-analysis`에도 연결돼 신호 4종과 전세가율이 한 번의 호출로 같이 계산됨.
