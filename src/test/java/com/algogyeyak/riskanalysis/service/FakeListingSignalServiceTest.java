@@ -27,6 +27,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @DisplayName("FakeListingSignalService")
@@ -36,10 +37,11 @@ class FakeListingSignalServiceTest {
     private final PropertyRiskCheckRepository riskCheckRepository = mock(PropertyRiskCheckRepository.class);
     private final PropertyRiskRepository riskRepository = mock(PropertyRiskRepository.class);
     private final MarketDataClient marketDataClient = mock(MarketDataClient.class);
+    private final DepositSafetyCheckService depositSafetyCheckService = mock(DepositSafetyCheckService.class);
     private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
     private final FakeListingSignalService service = new FakeListingSignalService(
             List.of(mock(SignalDetector.class)), marketDataClient, riskCheckRepository, riskRepository,
-            propertyRepository, policyConfig);
+            propertyRepository, depositSafetyCheckService, policyConfig);
 
     private Property property(Long id, Long ownerId) {
         Property property = Property.builder()
@@ -122,6 +124,17 @@ class FakeListingSignalServiceTest {
 
         // 예외 없이 끝나면 성공 - 오케스트레이션 자체(탐지기 실행)는 FakeListingSignalService의
         // 기존 checkAndSave(Property) 책임이라 여기서 다시 검증하지 않는다.
+    }
+
+    @Test
+    @DisplayName("checkAndSave(Property)는 신호 탐지와 함께 보증금 안전성 체크도 실행한다")
+    void checkAndSaveAlsoRunsDepositSafetyCheck() {
+        Property property = property(10L, 1L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+
+        service.checkAndSave(1L, 10L);
+
+        verify(depositSafetyCheckService).checkAndSave(property);
     }
 
     @Test

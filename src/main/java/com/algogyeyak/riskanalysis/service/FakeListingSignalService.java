@@ -37,6 +37,7 @@ public class FakeListingSignalService {
     private final PropertyRiskCheckRepository riskCheckRepository;
     private final PropertyRiskRepository riskRepository;
     private final PropertyRepository propertyRepository;
+    private final DepositSafetyCheckService depositSafetyCheckService;
     private final RiskPolicyConfig policyConfig;
 
     /**
@@ -111,6 +112,8 @@ public class FakeListingSignalService {
         detectors.stream()
                 .filter(SignalDetector::isEnabled)
                 .forEach(detector -> checkAndSaveSignal(property, comparison, detector));
+
+        depositSafetyCheckService.checkAndSave(property);
     }
 
     private void checkAndSaveSignal(Property property, MarketComparison comparison, SignalDetector detector) {
