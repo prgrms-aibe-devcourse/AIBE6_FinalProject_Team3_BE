@@ -1,9 +1,13 @@
 package com.algogyeyak.riskanalysis.service;
 
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketSaleDataClient;
+import com.algogyeyak.riskanalysis.dto.DepositSafetyCheckResponse;
 import com.algogyeyak.riskanalysis.dto.MarketSalePrice;
 import com.algogyeyak.riskanalysis.entity.DepositSafetyCheck;
 import com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason;
@@ -19,6 +23,7 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -29,9 +34,10 @@ class DepositSafetyCheckServiceTest {
 
     private final DepositSafetyCheckRepository depositSafetyCheckRepository = mock(DepositSafetyCheckRepository.class);
     private final MarketSaleDataClient marketSaleDataClient = mock(MarketSaleDataClient.class);
+    private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
     private final DepositSafetyCheckService service =
-            new DepositSafetyCheckService(depositSafetyCheckRepository, marketSaleDataClient, policyConfig);
+            new DepositSafetyCheckService(depositSafetyCheckRepository, marketSaleDataClient, propertyRepository, policyConfig);
 
     private Property property(Long id, TransactionType transactionType, Long deposit) {
         Property property = Property.builder()
@@ -167,5 +173,79 @@ class DepositSafetyCheckServiceTest {
 
     private void verifyNoMarketLookup() {
         org.mockito.Mockito.verifyNoInteractions(marketSaleDataClient);
+    }
+
+    @Test
+    @DisplayName("get()은 본인 매물의 저장된 보증금 안전성 결과를 조회한다")
+    void getReturnsSavedCheckForOwnedProperty() {
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        DepositSafetyCheck check = DepositSafetyCheck.calculated(
+                property, BigDecimal.valueOf(82), null, null, LocalDate.of(2026, 7, 31), "설명", "v1.0");
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
+
+        DepositSafetyCheckResponse response = service.get(1L, 10L);
+
+        assertThat(response.propertyId()).isEqualTo(10L);
+        assertThat(response.status()).isEqualTo(DepositSafetyStatus.CALCULATED);
+        assertThat(response.jeonseRatio()).isEqualTo(82);
+    }
+
+    @Test
+    @DisplayName("get()은 아직 체크 결과가 없으면 status가 null인 응답을 반환한다")
+    void getReturnsNullStatusWhenNeverChecked() {
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
+
+        DepositSafetyCheckResponse response = service.get(1L, 10L);
+
+        assertThat(response.status()).isNull();
+    }
+
+    @Test
+    @DisplayName("get()은 존재하지 않는 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void getThrowsWhenPropertyNotFound() {
+        when(propertyRepository.findById(10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.get(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("get()은 본인 소유가 아니면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
+    void getThrowsWhenNotOwner() {
+        Property property = Property.builder()
+                .userId(999L)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(200_000_000L)
+                .area(20.0)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 10L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+
+        assertThatThrownBy(() -> service.get(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
+                );
+    }
+
+    @Test
+    @DisplayName("get()은 삭제된 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void getThrowsWhenPropertyDeleted() {
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        property.delete();
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+
+        assertThatThrownBy(() -> service.get(1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
     }
 }

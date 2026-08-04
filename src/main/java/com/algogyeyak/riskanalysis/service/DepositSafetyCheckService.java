@@ -1,8 +1,12 @@
 package com.algogyeyak.riskanalysis.service;
 
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketSaleDataClient;
+import com.algogyeyak.riskanalysis.dto.DepositSafetyCheckResponse;
 import com.algogyeyak.riskanalysis.dto.MarketSalePrice;
 import com.algogyeyak.riskanalysis.entity.DepositSafetyCheck;
 import com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason;
@@ -29,7 +33,27 @@ public class DepositSafetyCheckService {
 
     private final DepositSafetyCheckRepository depositSafetyCheckRepository;
     private final MarketSaleDataClient marketSaleDataClient;
+    private final PropertyRepository propertyRepository;
     private final RiskPolicyConfig policyConfig;
+
+    /**
+     * 매물의 보증금 안전성 체크 결과를 조회한다. checklist/risk-signals와 동일한 패턴으로 매물
+     * 존재/삭제/소유권을 확인한 뒤, 아직 한 번도 계산된 적 없으면(check == null) status가 null인
+     * 응답을 그대로 반환한다 - 이 메서드는 조회 전용이라 계산을 트리거하지 않는다.
+     */
+    public DepositSafetyCheckResponse get(Long userId, Long propertyId) {
+        Property property = propertyRepository.findById(propertyId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
+        if (property.isDeleted()) {
+            throw new BusinessException(ErrorCode.PROPERTY_NOT_FOUND);
+        }
+        if (!property.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
+        }
+
+        DepositSafetyCheck check = depositSafetyCheckRepository.findByPropertyId(propertyId).orElse(null);
+        return DepositSafetyCheckResponse.from(propertyId, check);
+    }
 
     @Transactional
     public void checkAndSave(Property property) {
