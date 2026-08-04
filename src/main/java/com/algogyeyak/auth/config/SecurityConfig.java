@@ -63,7 +63,8 @@ public class SecurityConfig {
                 // 아직 Access-Control-Allow-Origin 등을 응답에 붙이기 전이라, 브라우저가 그 403 응답을
                 // CORS 위반으로 취급해 JS에서 아예 "Failed to fetch"로만 보이고 실제 403/에러 바디를
                 // 읽을 수 없게 된다(실제 배포에서 원인 진단이 어려워짐 - 차단 자체는 어느 순서든 동일).
-                .addFilterAfter(new CsrfHeaderFilter(), org.springframework.web.filter.CorsFilter.class)
+                .addFilterAfter(new CsrfHeaderFilter(Arrays.asList(allowedOrigins.split(","))),
+                        org.springframework.web.filter.CorsFilter.class)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(

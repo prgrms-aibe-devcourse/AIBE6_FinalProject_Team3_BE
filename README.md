@@ -94,7 +94,7 @@ dotenv는 원래 JVM의 working directory 기준으로 `.env`를 찾습니다. �
 
 시나리오 A/B는 둘 다 `SameSite=Lax`로 충분하고, `SameSite=None`은 시나리오 C에서만, 그것도 부분적으로만 문제를 해결합니다.
 
-**(2026-08-04 확정)** AWS 배포는 시나리오 C(프론트 Vercel, 백엔드 EC2 — 도메인 공유 없음)로 결정되어, `application-prod.yml` 기본값을 `COOKIE_SAME_SITE=None`으로 바꿔뒀습니다(`COOKIE_SECURE`는 이미 `true`가 기본값). `CookieUtils`는 기동 시점에 `same-site=None`인데 `secure=false`면 즉시 실패하도록 막아둬서, `COOKIE_SECURE`를 켜지 않은 채 조용히 뜨는 상황(브라우저가 쿠키를 버려 로그인이 전부 깨지는데 원인이 안 보임)을 방지합니다.
+**(2026-08-04 확정)** AWS 배포는 시나리오 C(프론트 Vercel, 백엔드 EC2 — 도메인 공유 없음)로 결정됐습니다. 다만 `application-prod.yml`의 `COOKIE_SAME_SITE` 기본값은 보수적으로 `Lax`를 유지합니다 — 시나리오 A/B로 배포하는 경우까지 기본값이 조용히 `None`으로 느슨해지는 걸 막기 위함입니다. **실제(시나리오 C) 배포 시에는 `COOKIE_SAME_SITE=None` 환경변수를 반드시 명시**하세요. `CookieUtils`는 기동 시점에 `same-site=None`인데 `secure=false`면 즉시 실패하도록 막아둬서, `COOKIE_SECURE`를 켜지 않은 채 조용히 뜨는 상황(브라우저가 쿠키를 버려 로그인이 전부 깨지는데 원인이 안 보임)을 방지합니다.
 
 **(2026-08-04 완료)** 프론트 쪽도 이 시나리오에 맞춰 전환 완료했습니다. `proxy.ts`의 쿠키 기반 게이트, `(main)/layout.tsx`, 그리고 로그인 상태가 필요한 나머지 보호 페이지·OAuth 콜백·랜딩 페이지까지 전부 서버에서 쿠키를 포워딩하는 방식 대신 브라우저가 직접 `credentials:'include'`로 백엔드 `/auth/me` 등을 호출해 확인하는 방식으로 바뀌었습니다(`NEXT_PUBLIC_CROSS_ORIGIN_AUTH=true` 필요 — frontend/README.md 참고). 로컬/서브도메인 공유 배포(시나리오 A/B)는 이 플래그 없이 기존 서버측 게이트를 그대로 씁니다.
 
