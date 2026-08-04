@@ -20,4 +20,5 @@ public class RiskPolicyConfig {
     private int shortTermRelistingWindowDays;              // 짧은 주기 재등록 판단 기간(일) (예: 30)
     private int shortTermRelistingPriceTolerancePercent;   // 재등록 판단 시 가격 유사도 허용 오차(%) (예: 5)
     private int shortTermRelistingAreaTolerancePercent;    // 재등록 판단 시 면적 유사도 허용 오차(%) (예: 10)
+    private int ownershipRecentChangeMonths;               // "최근 소유권 변경" 판단 기준(개월) (예: 6)
 }

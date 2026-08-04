@@ -1,12 +1,21 @@
 package com.algogyeyak.checklist.repository;
 
 import com.algogyeyak.checklist.entity.ChecklistItem;
+import com.algogyeyak.checklist.entity.ChecklistItemCode;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface ChecklistItemRepository extends JpaRepository<ChecklistItem, Long> {
+
+    /**
+     * risk-analysis가 "최근 소유권 변경 + 높은 전세가율" 보조 신호를 만들 때, 문항 하나(예:
+     * OWNERSHIP_ACQUISITION_DATE)의 값만 가볍게 조회하기 위한 단건 쿼리. 매물당 체크리스트가
+     * 최대 1개라(uk_checklist_user_property) Optional 단건으로 충분하다.
+     */
+    Optional<ChecklistItem> findByChecklist_Property_IdAndCode(Long propertyId, ChecklistItemCode code);
 
     /**
      * 매물 목록 카드에 체크리스트 진행률(%)을 붙이기 위한 집계 조회. 유저가 가진 체크리스트를
