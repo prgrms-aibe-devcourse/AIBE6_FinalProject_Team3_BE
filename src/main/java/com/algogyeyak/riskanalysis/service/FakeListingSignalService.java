@@ -6,6 +6,7 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
 import com.algogyeyak.riskanalysis.dto.MarketComparison;
+import com.algogyeyak.riskanalysis.dto.RiskAnalysisSummaryResponse;
 import com.algogyeyak.riskanalysis.dto.RiskSignalResponse;
 import com.algogyeyak.riskanalysis.dto.SignalCheckResult;
 import com.algogyeyak.riskanalysis.entity.PropertyRisk;
@@ -21,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -77,6 +79,19 @@ public class FakeListingSignalService {
         }
 
         checkAndSave(property);
+    }
+
+    /**
+     * checkAndSave(userId, propertyId)를 실행한 뒤, 상세 목록(GET /risk-signals가 담당) 대신
+     * "리스크가 실제로 발견된 신호가 몇 건인지" 요약만 반환한다 - POST 응답이 너무 무거워지지 않게
+     * 상세는 별도 GET 호출로 분리하는 설계.
+     */
+    @Transactional
+    public RiskAnalysisSummaryResponse checkAndSummarize(Long userId, Long propertyId) {
+        checkAndSave(userId, propertyId);
+        List<RiskSignalResponse> signals = getSignals(userId, propertyId);
+        int signalCount = (int) signals.stream().filter(signal -> signal.description() != null).count();
+        return new RiskAnalysisSummaryResponse(signalCount, policyConfig.getVersion(), LocalDateTime.now());
     }
 
     /**
