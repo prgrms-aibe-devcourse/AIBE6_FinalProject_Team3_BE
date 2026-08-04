@@ -104,6 +104,38 @@ public class ChecklistItemTemplate {
         if (applicablePropertyTypes == null) {
             return true;
         }
-        return Arrays.asList(applicablePropertyTypes.split(",")).contains(propertyType.name());
+        // 관리자 페이지에서 자유 입력으로 들어올 수 있어(예: "OFFICETEL, MULTI_FAMILY"), 토큰마다
+        // 앞뒤 공백을 제거한 뒤 비교해야 공백 때문에 매칭이 조용히 실패하는 걸 막을 수 있다.
+        return Arrays.stream(applicablePropertyTypes.split(","))
+                .map(String::trim)
+                .anyMatch(token -> token.equals(propertyType.name()));
+    }
+
+    /**
+     * 관리자 페이지에서 문항 내용을 수정한다. version은 여기서 바꾸지 않는다 - 단순 문구/순서 수정과
+     * "새 템플릿 버전을 낸다"는 서로 다른 작업이고, 이미 생성된 체크리스트는 스냅샷이라 어차피 영향받지 않는다.
+     */
+    public void update(
+            ChecklistCategory category,
+            String content,
+            String guideText,
+            String helperText,
+            ChecklistImportance importance,
+            ChecklistItemType itemType,
+            ChecklistItemCode code,
+            int displayOrder,
+            String applicablePropertyTypes,
+            boolean active
+    ) {
+        this.category = category;
+        this.content = content;
+        this.guideText = guideText;
+        this.helperText = helperText;
+        this.importance = importance;
+        this.itemType = itemType;
+        this.code = code;
+        this.displayOrder = displayOrder;
+        this.applicablePropertyTypes = applicablePropertyTypes;
+        this.active = active;
     }
 }
