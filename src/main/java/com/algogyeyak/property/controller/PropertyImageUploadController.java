@@ -46,7 +46,8 @@ public class PropertyImageUploadController {
                 key, request.contentType(), request.fileSize(), S3ImagePurpose.PROPERTY
         );
 
-        return ResponseEntity.ok(ApiResponse.success(new PropertyImageUploadUrlResponse(uploadUrl, key)));
+        return ResponseEntity.ok(ApiResponse.success(
+                new PropertyImageUploadUrlResponse(uploadUrl, key, S3PresignService.PENDING_UPLOAD_TAG)));
     }
 
     @PostMapping("/confirm")

@@ -71,7 +71,8 @@ class PropertyImageUploadControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.uploadUrl").value("https://s3.example.com/presigned-put-url"))
-                .andExpect(jsonPath("$.data.key").value(org.hamcrest.Matchers.startsWith("property-images/" + USER_ID + "/")));
+                .andExpect(jsonPath("$.data.key").value(org.hamcrest.Matchers.startsWith("property-images/" + USER_ID + "/")))
+                .andExpect(jsonPath("$.data.tagging").value(S3PresignService.PENDING_UPLOAD_TAG));
     }
 
     @Test
