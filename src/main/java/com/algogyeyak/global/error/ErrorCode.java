@@ -91,6 +91,10 @@ public enum ErrorCode {
     ADMIN_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "ADMIN_INVALID_STATUS_TRANSITION", "허용되지 않는 상태 변경입니다."),
     ADMIN_PROPERTY_REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_PROPERTY_REPORT_NOT_FOUND", "존재하지 않는 신고입니다."),
     ADMIN_INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "ADMIN_INVALID_DATE_RANGE", "조회 기간이 올바르지 않습니다."),
+    ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND", "존재하지 않는 체크리스트 문항입니다."),
+    ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE(HttpStatus.BAD_REQUEST, "ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE", "이 코드는 선택한 응답 방식과 맞지 않습니다."),
+    ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE", "이미 다른 활성 문항이 같은 코드를 사용하고 있습니다."),
+    ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM", "마지막 문항은 삭제할 수 없습니다. 노출 여부를 꺼서 숨겨주세요."),
 
     // 파일 업로드(S3) 공통 - profile/property/contract 이미지 업로드가 전부 이 코드를 공유한다.
     FILE_EXTENSION_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "FILE_EXTENSION_NOT_ALLOWED", "허용되지 않는 파일 확장자입니다."),
@@ -98,7 +102,11 @@ public enum ErrorCode {
     FILE_TOO_LARGE(HttpStatus.BAD_REQUEST, "FILE_TOO_LARGE", "파일 크기가 허용 범위를 초과했습니다."),
     // confirmUpload() 호출 시점에 해당 key로 S3에 실제 업로드된 객체가 없는 경우 - presigned URL만
     // 발급받고 실제 PUT은 하지 않았거나, URL 만료(5분) 후 뒤늦게 confirm을 호출한 경우다.
-    FILE_UPLOAD_NOT_COMPLETED(HttpStatus.NOT_FOUND, "FILE_UPLOAD_NOT_COMPLETED", "업로드가 완료되지 않았습니다.");
+    FILE_UPLOAD_NOT_COMPLETED(HttpStatus.NOT_FOUND, "FILE_UPLOAD_NOT_COMPLETED", "업로드가 완료되지 않았습니다."),
+    // 클라이언트가 넘긴 key가 본인 소유 prefix(예: profile-images/{본인 userId}/...)가 아닌 경우 -
+    // 다른 사용자나 다른 도메인(property-images/, contract-images/)의 key를 그대로 넘겨 confirm을
+    // 시도하는 것을 막는다.
+    FILE_KEY_ACCESS_DENIED(HttpStatus.FORBIDDEN, "FILE_KEY_ACCESS_DENIED", "본인이 업로드한 파일만 확인할 수 있습니다.");
 
     private final HttpStatus status;
     private final String code;

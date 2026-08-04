@@ -1,5 +1,8 @@
 package com.algogyeyak.riskanalysis.service;
 
+import com.algogyeyak.checklist.entity.ChecklistItem;
+import com.algogyeyak.checklist.entity.ChecklistItemCode;
+import com.algogyeyak.checklist.repository.ChecklistItemRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.entity.Property;
@@ -35,6 +38,7 @@ public class DepositSafetyCheckService {
     private final DepositSafetyCheckRepository depositSafetyCheckRepository;
     private final MarketSaleDataClient marketSaleDataClient;
     private final PropertyRepository propertyRepository;
+    private final ChecklistItemRepository checklistItemRepository;
     private final RiskPolicyConfig policyConfig;
 
     /**
@@ -45,7 +49,7 @@ public class DepositSafetyCheckService {
     public DepositSafetyCheckResponse get(Long userId, Long propertyId) {
         Property property = findOwnedProperty(userId, propertyId);
         DepositSafetyCheck check = depositSafetyCheckRepository.findByPropertyId(propertyId).orElse(null);
-        return DepositSafetyCheckResponse.from(propertyId, check);
+        return DepositSafetyCheckResponse.from(propertyId, check, isRecentOwnershipChangeWarning(propertyId, check));
     }
 
     @Transactional
@@ -65,7 +69,37 @@ public class DepositSafetyCheckService {
                 seniorDeposit != null ? BigDecimal.valueOf(seniorDeposit) : null,
                 maxClaimAmount != null ? BigDecimal.valueOf(maxClaimAmount) : null);
 
-        return DepositSafetyCheckResponse.from(propertyId, check);
+        return DepositSafetyCheckResponse.from(propertyId, check, isRecentOwnershipChangeWarning(propertyId, check));
+    }
+
+    /**
+     * "최근 소유권 변경 + 높은 전세가율" 보조 신호. 전세가율이 위험 구간(jeonseRatioWarnFrom 이상)이고,
+     * checklist에 기록된 소유권 취득일이 최근(ownershipRecentChangeMonths 이내)이면 true.
+     * 체크리스트 문항에 아직 응답이 없거나(value == null) 날짜 형식이 아니면 판단 근거가 없으니
+     * 조용히 false로 처리한다 - 이 경고는 부가 정보라 판정 불가로 전체 응답을 막을 이유가 없다.
+     */
+    private boolean isRecentOwnershipChangeWarning(Long propertyId, DepositSafetyCheck check) {
+        if (check == null || check.getStatus() != DepositSafetyStatus.CALCULATED) {
+            return false;
+        }
+        if (check.getJeonseRatio().intValue() < policyConfig.getJeonseRatioWarnFrom()) {
+            return false;
+        }
+
+        String rawAcquisitionDate = checklistItemRepository
+                .findByChecklist_Property_IdAndCode(propertyId, ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE)
+                .map(ChecklistItem::getValue)
+                .orElse(null);
+        if (rawAcquisitionDate == null) {
+            return false;
+        }
+
+        try {
+            LocalDate acquisitionDate = LocalDate.parse(rawAcquisitionDate);
+            return acquisitionDate.isAfter(LocalDate.now().minusMonths(policyConfig.getOwnershipRecentChangeMonths()));
+        } catch (java.time.format.DateTimeParseException e) {
+            return false;
+        }
     }
 
     private Property findOwnedProperty(Long userId, Long propertyId) {
