@@ -21,7 +21,9 @@
 
 `application.yml`에 별도 데이터소스 설정이 없어 기본적으로 인메모리 H2로 기동됩니다. MySQL 등 실제 데이터소스 연결은 아직 `application-{dev,prod,test}.yml`에 구성되어 있지 않습니다.
 
-캐싱(Redis) 연동을 로컬에서 테스트해보려면 `docker compose up -d redis`로 로컬 Redis를 띄우면 됩니다(`spring.data.redis.host`/`port`가 기본값 `localhost:6379`를 가리키고 있어 별도 설정 없이 바로 연결됩니다). Redis가 안 떠 있어도 앱 기동 자체엔 영향이 없습니다(Lettuce가 연결을 지연 생성) — 아직 실제 캐싱 로직(어디를 캐싱할지, TTL 등)은 붙어있지 않고, 연결 준비만 되어 있는 상태입니다.
+Redis는 두 가지 용도로 쓰입니다. 1) **access token blacklist/refresh token 저장소**(`com.algogyeyak.auth` — 아래 "Current state" 참고)는 이미 실제로 Redis를 사용하며, Redis가 없으면 로그인/토큰 재발급이 fail-closed로 거부됩니다(아래 문단 참고). 2) 그 외 도메인(실거래가 비교 등)의 **캐싱**은 아직 연결 준비만 되어 있고 실제 캐시 로직(`@Cacheable` 대상/TTL 설계)은 붙어있지 않습니다 — 이쪽은 Redis가 없어도 영향받지 않습니다(Lettuce가 연결을 지연 생성).
+
+로컬에서 Redis를 띄우려면 `docker compose up -d redis`를 실행하면 됩니다(`spring.data.redis.host`/`port`가 기본값 `localhost:6379`를 가리키고 있어 별도 설정 없이 바로 연결됩니다).
 
 ## Scripts
 
@@ -49,7 +51,15 @@ Windows 환경이므로 `gradlew.bat`을 사용합니다.
 
 ## Current state
 
-구글/카카오 OAuth2 로그인과 로컬 이메일/비밀번호 로그인 모두 Refresh Token과 함께 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(Access Token 발급/검증/필터), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.service.LocalAuthService`(이메일/비밀번호 가입·로그인 — 비밀번호는 BCrypt로 해시, 이메일은 trim+lowercase로 정규화해 저장/조회), `com.algogyeyak.auth.token`(`RefreshTokenService`/`RefreshTokenRepository` — Redis 없이 DB로 관리, 유저당 1개 세션만 유지하며 재로그인/재발급 시 기존 행을 덮어씀), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 Access/Refresh Token을 httpOnly 쿠키로 전달, 둘 다 path `/` — 프론트 미들웨어가 보호 페이지 요청에서도 Refresh 쿠키를 읽어야 해서 path를 좁히지 않음), `com.algogyeyak.auth.controller.AuthController`(`GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`, `POST /auth/signup`, `POST /auth/login`). 회원가입/로컬 로그인도 소셜 로그인과 동일하게 성공 시 즉시 쿠키를 발급해 자동 로그인 상태로 만듭니다.
+구글/카카오 OAuth2 로그인과 로컬 이메일/비밀번호 로그인 모두 Refresh Token과 함께 구현되어 있습니다: `com.algogyeyak.user`(엔티티/리포지토리), `com.algogyeyak.auth.jwt`(Access Token 발급/검증/필터 — 로그아웃된 access token의 jti 블랙리스트는 Redis로 관리), `com.algogyeyak.auth.oauth`(구글/카카오 속성 파싱, 커스텀 OAuth2 유저 서비스), `com.algogyeyak.auth.service.LocalAuthService`(이메일/비밀번호 가입·로그인 — 비밀번호는 BCrypt로 해시, 이메일은 trim+lowercase로 정규화해 저장/조회), `com.algogyeyak.auth.token`(`RefreshTokenService` — **Redis**로 관리, 유저당 1개 세션만 유지하며 재로그인/재발급 시 이전 토큰을 즉시 무효화), `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig`(로그인 성공 시 Access/Refresh Token을 httpOnly 쿠키로 전달, 둘 다 path `/` — 프론트 미들웨어가 보호 페이지 요청에서도 Refresh 쿠키를 읽어야 해서 path를 좁히지 않음), `com.algogyeyak.auth.controller.AuthController`(`GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`, `POST /auth/signup`, `POST /auth/login`). 회원가입/로컬 로그인도 소셜 로그인과 동일하게 성공 시 즉시 쿠키를 발급해 자동 로그인 상태로 만듭니다.
+
+Access token blacklist와 refresh token 저장소는 Redis가 있어야 동작합니다 (`REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`, 로컬 기본값은 `localhost:6379`/비밀번호 없음). 로컬에서 가장 간단한 실행 방법:
+
+```bash
+docker run --name algogyeyak-redis -p 6379:6379 -d redis:7-alpine
+```
+
+Redis 연결에 실패하면 **fail-closed**로 처리됩니다 — access token 인증은 거부되고(401), refresh token 발급/재발급/로그아웃은 503(`AUTH_TOKEN_STORE_UNAVAILABLE`)으로 실패합니다. 가용성보다 "장애 중 무효화된 토큰이 재사용되지 않는 것"을 우선한 결정입니다.
 
 로컬 비밀번호 정책은 영문+숫자를 포함한 8~72자의 ASCII 출력 가능 문자(공백 제외)입니다 — BCrypt가 72바이트를 넘는 부분을 조용히 잘라버리는 문제 때문에 멀티바이트 문자를 막아 문자 수와 바이트 수를 일치시켰습니다 (`SignupRequest`의 `@Pattern` 참고).
 
@@ -68,6 +78,7 @@ dotenv는 원래 JVM의 working directory 기준으로 `.env`를 찾습니다. �
 | `COOKIE_SECURE` | `access_token` 등 쿠키의 Secure 속성 (dev 기본값 `false`, prod 기본값 `true`) |
 | `COOKIE_SAME_SITE` | 쿠키의 SameSite 속성 (기본값 `Lax`) |
 | `COOKIE_DOMAIN` | 쿠키의 Domain 속성 — 커스텀 서브도메인 배포 시에만 `.example.com`처럼 지정 (dev/prod 기본값 모두 비어있음=host-only) |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | access token blacklist/refresh token 저장소용 Redis 연결 정보 (dev 기본값 `localhost:6379`/비밀번호 없음, prod는 기본값 없이 fail-fast) |
 
 로컬은 프론트/백엔드 모두 `http://localhost:3000` / `http://localhost:8080`을 그대로 씁니다. 한때 `app.localhost`/`api.localhost` + `Domain=.localhost`로 커스텀 서브도메인 배포 구조를 로컬에서부터 검증해보려 했으나, **크롬이 `localhost`를 public-suffix처럼 취급해 서브도메인이 `Domain=.localhost` 쿠키를 설정하는 것 자체를 거부**한다는 걸 확인해 되돌렸습니다 (`api.localhost`에서 심은 OAuth2 state 쿠키를 콜백 때 못 찾아 `authorization_request_not_found`로 로그인 자체가 실패했음). 커스텀 서브도메인 + 공유 쿠키가 실제로 동작하는지는 진짜 도메인이 생기거나 `lvh.me`/`nip.io` 같은 실제 등록된 서브도메인 지원 도메인을 쓸 때 검증하면 됩니다.
 

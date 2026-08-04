@@ -6,6 +6,8 @@ import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CookieUtils;
 import com.algogyeyak.auth.oauth.CustomOAuth2User;
 import com.algogyeyak.auth.token.RefreshTokenService;
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
 import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -104,5 +107,26 @@ class OAuth2AuthenticationSuccessHandlerTest {
         // Access Token과 동일하게 "/"로 발급한다 (4-인자 addCookie는 CookieUtils에서 path="/"로 기본 처리).
         verify(cookieUtils).addCookie(eq(response), eq(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME),
                 eq("raw-refresh-token"), eq(1209600));
+    }
+
+    // refreshTokenService.issue()가 Redis 장애로 AUTH_TOKEN_STORE_UNAVAILABLE을 던지는 경우 -
+    // 이 핸들러는 Spring Security 필터 체인 안에서 호출돼 GlobalExceptionHandler가 못 잡으므로,
+    // 그대로 던지지 않고 로그인 실패와 동일하게 프론트로 에러 리다이렉트해야 한다.
+    @Test
+    void redirectsToFailureUrlWhenTokenIssuanceFailsDueToRedisOutage() throws Exception {
+        ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login/success");
+        when(refreshTokenService.issue(any(User.class)))
+                .thenThrow(new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        handler.onAuthenticationSuccess(request, response, authenticationFor(1L));
+
+        verify(authorizationRequestRepository).removeAuthorizationRequest(request, response);
+        assertTrue(response.getRedirectedUrl().startsWith("https://example.com/login/success"));
+        assertTrue(response.getRedirectedUrl().contains("error=token_issue_failed"));
+        // access token 쿠키는 이미 심어졌지만, refresh token 없이 반쪼가리 로그인 상태로 두면
+        // 안 되므로 실패 처리하는 이 경로에서 지워야 한다.
+        verify(cookieUtils).deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
     }
 }

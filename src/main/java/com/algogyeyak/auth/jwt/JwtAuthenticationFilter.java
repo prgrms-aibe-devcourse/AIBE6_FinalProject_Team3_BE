@@ -88,8 +88,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // 토큰의 email/role 클레임은 발급 시점 스냅샷이라, 그 이후 관리자가 계정을 정지시키거나
         // 권한을 바꿔도(관리자 페이지) 토큰이 자연 만료되기 전까지는 반영되지 않는 문제가 있었다.
-        // isRevoked()가 이미 매 요청 DB 조회이므로 같은 비용으로 User를 다시 조회해 최신 상태/권한을
-        // 신뢰의 원천으로 삼는다 - AuthController.me()가 매 요청 User를 다시 읽어오는 것과 같은 이유다.
+        // isRevoked()가 이미 매 요청 Redis 블랙리스트 조회를 하므로, 그 비용에 얹어 User를 DB에서
+        // 다시 조회해 최신 상태/권한을 신뢰의 원천으로 삼는다 - AuthController.me()가 매 요청 User를
+        // 다시 읽어오는 것과 같은 이유다.
         User user = userRepository.findById(userId).orElse(null);
         if (user == null || user.isWithdrawn() || user.isSuspended()) {
             request.setAttribute(AUTH_FAILURE_REASON_ATTRIBUTE, ErrorCode.AUTH_TOKEN_INVALID);
