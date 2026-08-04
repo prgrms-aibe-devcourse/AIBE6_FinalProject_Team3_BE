@@ -59,6 +59,11 @@ public class SecurityConfig {
         http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                // CorsFilter *뒤에* 둬야 한다 - 앞에 두면 이 필터가 403으로 요청을 끊을 때 CorsFilter가
+                // 아직 Access-Control-Allow-Origin 등을 응답에 붙이기 전이라, 브라우저가 그 403 응답을
+                // CORS 위반으로 취급해 JS에서 아예 "Failed to fetch"로만 보이고 실제 403/에러 바디를
+                // 읽을 수 없게 된다(실제 배포에서 원인 진단이 어려워짐 - 차단 자체는 어느 순서든 동일).
+                .addFilterAfter(new CsrfHeaderFilter(), org.springframework.web.filter.CorsFilter.class)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
