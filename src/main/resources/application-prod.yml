@@ -1,6 +1,13 @@
 spring:
   application:
     name: algogyeyak
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+      connect-timeout: 2s
+      timeout: 2s
   security:
     oauth2:
       client:

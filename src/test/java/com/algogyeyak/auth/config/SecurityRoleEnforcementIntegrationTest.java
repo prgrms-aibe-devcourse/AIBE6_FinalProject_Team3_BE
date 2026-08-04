@@ -16,6 +16,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
 /**
  * /admin/** hasRole("ADMIN") 검사가 인증은 됐지만 권한이 부족한 요청을 실제로 403으로 막는지
@@ -25,9 +31,22 @@ import org.springframework.http.ResponseEntity;
  * 그래서 이 테스트만 예외적으로 실제 임베디드 서버 + 진짜 HTTP 클라이언트(RANDOM_PORT +
  * TestRestTemplate)로 검증한다.
  */
+// 실제 임베디드 서버로 필터 체인 전체를 태우므로 AccessTokenRevocationService(→Redis)도 mock 없이
+// 진짜로 동작해야 한다 - AuthControllerTest의 accessTokenIsRejectedAfterLogout*()과 동일한 이유.
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
+@Testcontainers
 class SecurityRoleEnforcementIntegrationTest {
+
+    @Container
+    static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+            .withExposedPorts(6379);
+
+    @DynamicPropertySource
+    static void redisProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
+    }
 
     @Autowired
     private TestRestTemplate restTemplate;

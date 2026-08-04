@@ -8,6 +8,7 @@ import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.Authentication;
@@ -26,9 +27,9 @@ class JwtAuthenticationFilterTest {
 
     private final JwtProvider jwtProvider =
             new JwtProvider("test-secret-key-must-be-at-least-32-bytes-long", 3600);
-    private final RevokedAccessTokenRepository revokedAccessTokenRepository = mock(RevokedAccessTokenRepository.class);
+    private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     private final AccessTokenRevocationService accessTokenRevocationService =
-            new AccessTokenRevocationService(revokedAccessTokenRepository);
+            new AccessTokenRevocationService(redisTemplate);
     private final UserRepository userRepository = mock(UserRepository.class);
     private final JwtAuthenticationFilter filter =
             new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository);
@@ -213,7 +214,7 @@ class JwtAuthenticationFilterTest {
     void doesNotSetAuthenticationWhenTokenJtiIsRevoked() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         Claims claims = jwtProvider.parseClaims(token);
-        when(revokedAccessTokenRepository.existsById(claims.getId())).thenReturn(true);
+        when(redisTemplate.hasKey("auth:revoked-access-token:" + claims.getId())).thenReturn(true);
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));

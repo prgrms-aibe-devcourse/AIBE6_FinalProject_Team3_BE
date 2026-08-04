@@ -89,7 +89,9 @@ public class User {
     }
 
     // 개발용 admin 시드 계정(AdminAccountSeeder)에서만 사용한다. 일반 가입 경로(createOAuthUser/
-    // createLocalUser)는 항상 Role.USER로 생성되며, 이 메서드 외에는 ADMIN으로 승격할 방법이 없다.
+    // createLocalUser)는 항상 Role.USER로 생성된다 - 가입 시점에 스스로 ADMIN이 될 방법은 이
+    // 메서드 하나뿐이다. (가입 이후에는 이미 ADMIN인 다른 관리자가 changeRole()로 승격시켜줄 수
+    // 있다 - 관리자 페이지의 일반 권한 변경 액션, AdminUserService.updateRole 참고.)
     public void grantAdminRole() {
         this.role = Role.ADMIN;
     }

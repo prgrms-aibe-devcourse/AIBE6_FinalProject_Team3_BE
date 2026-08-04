@@ -19,6 +19,7 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
+import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
@@ -93,7 +94,7 @@ class PropertyControllerTest {
                         37.4995539438207,
                         127.031393491745
                 ),
-                MarketComparisonResponse.unavailable("stub"),
+                MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
                 null
         );
 
@@ -229,7 +230,7 @@ class PropertyControllerTest {
                         127.031393491745
                 ),
                 List.of("https://cdn.algogyeyak.com/img/abc.jpg"),
-                MarketComparisonResponse.unavailable("stub"),
+                MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
                 false,
                 false,
                 "ACTIVE",
@@ -289,7 +290,7 @@ class PropertyControllerTest {
                         127.031393491745
                 ),
                 List.of(),
-                MarketComparisonResponse.unavailable("stub"),
+                MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
                 false,
                 false,
                 "ACTIVE",

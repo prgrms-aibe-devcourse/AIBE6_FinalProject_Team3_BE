@@ -4,6 +4,7 @@ import com.algogyeyak.marketdata.client.MolitRentClient;
 import com.algogyeyak.marketdata.client.RentTransactionSample;
 import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
+import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.marketdata.util.GeoDistanceCalculator;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
@@ -65,11 +66,13 @@ public class MarketComparisonService {
     @Cacheable(cacheNames = "marketComparison", key = "#property.id")
     public MarketComparisonResponse compare(Property property) {
         if (property.getTransactionType() == TransactionType.MONTHLY_RENT) {
-            return MarketComparisonResponse.unavailable("월세는 시세 비교 대상이 아니에요.");
+            return MarketComparisonResponse.unavailable(
+                    MarketComparisonUnavailableReason.TRANSACTION_TYPE_UNSUPPORTED, "월세는 시세 비교 대상이 아니에요.");
         }
 
         if (property.getPropertyType() == PropertyType.DETACHED_HOUSE) {
             return MarketComparisonResponse.unavailable(
+                    MarketComparisonUnavailableReason.PROPERTY_TYPE_UNSUPPORTED,
                     "단독/다가구는 실거래 상세 위치가 비공개라 반경 비교가 어려워요. "
                             + "정확한 시세는 인근 공인중개사에 문의해보세요."
             );
@@ -77,12 +80,14 @@ public class MarketComparisonService {
 
         PropertyAddress address = property.getAddress();
         if (address == null || address.getLatitude() == null || address.getLongitude() == null) {
-            return MarketComparisonResponse.unavailable("매물 좌표 정보가 없어 시세 비교가 어려워요.");
+            return MarketComparisonResponse.unavailable(
+                    MarketComparisonUnavailableReason.ADDRESS_INFO_MISSING, "매물 좌표 정보가 없어 시세 비교가 어려워요.");
         }
 
         RegionCodeResult regionCode = kakaoRegionCodeClient.resolve(address.getLatitude(), address.getLongitude());
         if (!regionCode.isResolved()) {
-            return MarketComparisonResponse.unavailable("지역 정보를 확인하지 못해 시세 비교가 어려워요.");
+            return MarketComparisonResponse.unavailable(
+                    MarketComparisonUnavailableReason.ADDRESS_INFO_MISSING, "지역 정보를 확인하지 못해 시세 비교가 어려워요.");
         }
 
         String sggPrefix = extractSggPrefix(regionCode.getRegionName());
@@ -104,7 +109,8 @@ public class MarketComparisonService {
             if (withinFar.size() >= properties.minSampleCount()) {
                 used = withinFar;
             } else {
-                return MarketComparisonResponse.unavailable("인근 실거래 데이터가 부족해 시세 비교가 어려워요.");
+                return MarketComparisonResponse.unavailable(
+                        MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "인근 실거래 데이터가 부족해 시세 비교가 어려워요.");
             }
         }
 
