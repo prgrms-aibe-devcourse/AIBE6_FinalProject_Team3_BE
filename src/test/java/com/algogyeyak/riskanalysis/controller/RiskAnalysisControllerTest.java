@@ -4,6 +4,7 @@ import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.riskanalysis.dto.RiskAnalysisSummaryResponse;
+import com.algogyeyak.riskanalysis.dto.RiskSignalListResponse;
 import com.algogyeyak.riskanalysis.dto.RiskSignalResponse;
 import com.algogyeyak.riskanalysis.enums.RiskCheckStatus;
 import com.algogyeyak.riskanalysis.enums.RiskSignalType;
@@ -94,13 +95,18 @@ class RiskAnalysisControllerTest {
         RiskSignalResponse signal = new RiskSignalResponse(
                 RiskSignalType.DUPLICATE_LISTING, RiskCheckStatus.SUCCESS, null,
                 "동일 주소로 등록된 다른 매물이 있어요", LocalDateTime.now());
-        when(fakeListingSignalService.getSignals(1L, 10L)).thenReturn(List.of(signal));
+        RiskSignalListResponse signalList = new RiskSignalListResponse(
+                10L, 1, List.of(signal), RiskSignalListResponse.DISCLAIMER);
+        when(fakeListingSignalService.getSignals(1L, 10L)).thenReturn(signalList);
 
         mockMvc.perform(get("/properties/10/risk-signals")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data[0].signalType").value("DUPLICATE_LISTING"))
-                .andExpect(jsonPath("$.data[0].description").value("동일 주소로 등록된 다른 매물이 있어요"));
+                .andExpect(jsonPath("$.data.propertyId").value(10))
+                .andExpect(jsonPath("$.data.signalCount").value(1))
+                .andExpect(jsonPath("$.data.signals[0].signalType").value("DUPLICATE_LISTING"))
+                .andExpect(jsonPath("$.data.signals[0].description").value("동일 주소로 등록된 다른 매물이 있어요"))
+                .andExpect(jsonPath("$.data.disclaimer").value(RiskSignalListResponse.DISCLAIMER));
     }
 }

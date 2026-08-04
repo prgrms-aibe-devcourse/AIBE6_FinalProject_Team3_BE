@@ -3,7 +3,7 @@ package com.algogyeyak.riskanalysis.controller;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.response.ApiResponse;
 import com.algogyeyak.riskanalysis.dto.RiskAnalysisSummaryResponse;
-import com.algogyeyak.riskanalysis.dto.RiskSignalResponse;
+import com.algogyeyak.riskanalysis.dto.RiskSignalListResponse;
 import com.algogyeyak.riskanalysis.service.FakeListingSignalService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -11,8 +11,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -37,7 +35,7 @@ public class RiskAnalysisController {
      * 매물의 신호 4종 현재 상태를 조회한다.
      */
     @GetMapping("/properties/{propertyId}/risk-signals")
-    public ApiResponse<List<RiskSignalResponse>> getRiskSignals(
+    public ApiResponse<RiskSignalListResponse> getRiskSignals(
             @AuthenticationPrincipal JwtUserPrincipal userDetails,
             @PathVariable Long propertyId
     ) {

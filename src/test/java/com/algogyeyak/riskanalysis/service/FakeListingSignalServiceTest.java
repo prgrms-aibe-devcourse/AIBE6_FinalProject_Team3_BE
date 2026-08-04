@@ -7,6 +7,7 @@ import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
+import com.algogyeyak.riskanalysis.dto.RiskSignalListResponse;
 import com.algogyeyak.riskanalysis.dto.RiskSignalResponse;
 import com.algogyeyak.riskanalysis.entity.PropertyRisk;
 import com.algogyeyak.riskanalysis.entity.PropertyRiskCheck;
@@ -63,11 +64,14 @@ class FakeListingSignalServiceTest {
         when(riskCheckRepository.findAllByPropertyId(10L)).thenReturn(List.of(check));
         when(riskRepository.findAllByPropertyId(10L)).thenReturn(List.of(risk));
 
-        List<RiskSignalResponse> result = service.getSignals(1L, 10L);
+        RiskSignalListResponse result = service.getSignals(1L, 10L);
 
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).signalType()).isEqualTo(RiskSignalType.DUPLICATE_LISTING);
-        assertThat(result.get(0).description()).isEqualTo("동일 주소로 등록된 다른 매물이 있어요");
+        assertThat(result.propertyId()).isEqualTo(10L);
+        assertThat(result.signalCount()).isEqualTo(1);
+        assertThat(result.signals()).hasSize(1);
+        assertThat(result.signals().get(0).signalType()).isEqualTo(RiskSignalType.DUPLICATE_LISTING);
+        assertThat(result.signals().get(0).description()).isEqualTo("동일 주소로 등록된 다른 매물이 있어요");
+        assertThat(result.disclaimer()).isEqualTo(RiskSignalListResponse.DISCLAIMER);
     }
 
     @Test
