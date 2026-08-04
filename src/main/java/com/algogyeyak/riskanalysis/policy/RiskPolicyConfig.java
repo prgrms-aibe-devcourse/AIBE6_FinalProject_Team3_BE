@@ -10,6 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class RiskPolicyConfig {
     private String version;              // 예: "v1.0"
     private int priceAnomalyPercent;     // 10
+    private int jeonseRatioCautionFrom;   // 80 (안전/주의 경계)
     private int jeonseRatioWarnFrom;      // 100
     private int jeonseRatioWarnTo;        // 150
     private int jeonseRatioAlertOver;     // 150

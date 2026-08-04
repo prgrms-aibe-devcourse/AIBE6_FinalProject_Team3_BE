@@ -10,6 +10,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -35,6 +36,9 @@ public class DepositSafetyCheck {
     @Column(name = "max_claim_amount", precision = 15, scale = 0)
     private BigDecimal maxClaimAmount; // 근저당 채권최고액, 선택 입력, KRW
 
+    @Column(name = "reference_date")
+    private LocalDate referenceDate; // 계산에 사용한 매매 실거래가 표본 중 최신 계약일. status=CALCULATED일 때만 존재
+
     @Column(columnDefinition = "TEXT")
     private String explanation;
 
@@ -54,12 +58,14 @@ public class DepositSafetyCheck {
 
     @Builder
     private DepositSafetyCheck(Property property, BigDecimal jeonseRatio, BigDecimal seniorDeposit,
-                               BigDecimal maxClaimAmount, String explanation, DepositSafetyCheckReason reason,
-                               String policyVersion, DepositSafetyStatus status, LocalDateTime calculatedAt) {
+                               BigDecimal maxClaimAmount, LocalDate referenceDate, String explanation,
+                               DepositSafetyCheckReason reason, String policyVersion, DepositSafetyStatus status,
+                               LocalDateTime calculatedAt) {
         this.property = property;
         this.jeonseRatio = jeonseRatio;
         this.seniorDeposit = seniorDeposit;
         this.maxClaimAmount = maxClaimAmount;
+        this.referenceDate = referenceDate;
         this.explanation = explanation;
         this.reason = reason;
         this.policyVersion = policyVersion;
@@ -68,12 +74,14 @@ public class DepositSafetyCheck {
     }
 
     public static DepositSafetyCheck calculated(Property property, BigDecimal jeonseRatio, BigDecimal seniorDeposit,
-                                                 BigDecimal maxClaimAmount, String explanation, String policyVersion) {
+                                                 BigDecimal maxClaimAmount, LocalDate referenceDate,
+                                                 String explanation, String policyVersion) {
         return DepositSafetyCheck.builder()
                 .property(property)
                 .jeonseRatio(jeonseRatio)
                 .seniorDeposit(seniorDeposit)
                 .maxClaimAmount(maxClaimAmount)
+                .referenceDate(referenceDate)
                 .explanation(explanation)
                 .reason(null)
                 .policyVersion(policyVersion)
@@ -110,11 +118,12 @@ public class DepositSafetyCheck {
 
     /** 덮어쓰기 갱신 (재계산 시 사용) */
     public void overwrite(BigDecimal jeonseRatio, BigDecimal seniorDeposit, BigDecimal maxClaimAmount,
-                          String explanation, DepositSafetyCheckReason reason, String policyVersion,
-                          DepositSafetyStatus status) {
+                          LocalDate referenceDate, String explanation, DepositSafetyCheckReason reason,
+                          String policyVersion, DepositSafetyStatus status) {
         this.jeonseRatio = jeonseRatio;
         this.seniorDeposit = seniorDeposit;
         this.maxClaimAmount = maxClaimAmount;
+        this.referenceDate = referenceDate;
         this.explanation = explanation;
         this.reason = reason;
         this.policyVersion = policyVersion;
