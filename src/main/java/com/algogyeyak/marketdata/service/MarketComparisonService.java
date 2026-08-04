@@ -16,6 +16,8 @@ import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -40,6 +42,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *    하버사인 거리로 300m 이내 표본이 3건 이상이면 그걸 사용하고, 부족하면 600m로 확장한다.
  * 5. 같은 법정동 내에서도 600m 이내 3건을 못 채우면 인접 법정동으로 넘어가지 않고
  *    UNAVAILABLE 처리한다 (v1 한계, 부정확한 "인근" 비교보다 안전한 쪽을 택함).
+ *
+ * compare()의 결과는 propertyId를 키로 Redis에 캐싱된다(cacheNames = "marketComparison",
+ * TTL은 market-data.comparison.cache-ttl-minutes) - 매물 상세조회를 반복할 때마다 국토부/카카오
+ * API를 다시 호출하지 않기 위함. 매물 가격/면적이 바뀌면 결과가 달라지므로,
+ * PropertyService.update()가 재계산 직전에 evictCache()로 해당 매물의 캐시를 명시적으로 비운다.
  */
 @Slf4j
 @Service
@@ -52,8 +59,11 @@ public class MarketComparisonService {
     private final MarketComparisonProperties properties;
 
     // 지번주소 -> 지오코딩 결과 캐시. 같은 건물에서 여러 건 거래된 경우가 많아 캐시 효과가 크다.
+    // (Redis가 아니라 이 빈의 인메모리 필드 - 프로세스 재시작 시 초기화됨. Redis 캐싱 대상은
+    // compare()의 최종 결과뿐이다.)
     private final Map<String, AddressResolutionResult> geocodeCache = new ConcurrentHashMap<>();
 
+    @Cacheable(cacheNames = "marketComparison", key = "#property.id")
     public MarketComparisonResponse compare(Property property) {
         if (property.getTransactionType() == TransactionType.MONTHLY_RENT) {
             return MarketComparisonResponse.unavailable(
@@ -176,6 +186,16 @@ public class MarketComparisonService {
                         address.getLatitude(), address.getLongitude(), g.latitude(), g.longitude()
                 ) <= radiusMeters)
                 .toList();
+    }
+
+    /**
+     * 매물 수정으로 가격/면적이 바뀌어 기존 캐시된 비교 결과가 더 이상 유효하지 않을 때 호출한다.
+     * PropertyService.update()가 compare()를 다시 호출하기 직전에 사용 - 그렇지 않으면 캐시가
+     * 그대로 남아 있어 수정 직후에도 예전 시세비교 결과가 반환된다.
+     */
+    @CacheEvict(cacheNames = "marketComparison", key = "#propertyId")
+    public void evictCache(Long propertyId) {
+        // 캐시 삭제는 어노테이션이 처리 - 메서드 본문은 필요 없음.
     }
 
     private long median(List<Long> sortedValues) {
