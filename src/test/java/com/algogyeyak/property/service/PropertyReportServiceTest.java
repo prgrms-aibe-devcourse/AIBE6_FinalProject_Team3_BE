@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
 
 @ExtendWith(MockitoExtension.class)
 class PropertyReportServiceTest {
@@ -38,7 +39,8 @@ class PropertyReportServiceTest {
 
     @BeforeEach
     void setUp() {
-        propertyReportService = new PropertyReportService(propertyRepository, propertyReportRepository);
+        propertyReportService = new PropertyReportService(
+                propertyRepository, propertyReportRepository, org.mockito.Mockito.mock(PlatformTransactionManager.class));
     }
 
     private Property ownedProperty(Long userId) {
@@ -58,7 +60,7 @@ class PropertyReportServiceTest {
         Property property = ownedProperty(USER_ID);
         when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(property));
         when(propertyReportRepository.existsByPropertyIdAndReporterId(PROPERTY_ID, USER_ID)).thenReturn(false);
-        when(propertyReportRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(propertyReportRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         PropertyReportRequest request = new PropertyReportRequest(PropertyReportReason.PRICE_MISMATCH, null);
 
@@ -75,7 +77,7 @@ class PropertyReportServiceTest {
         Property property = ownedProperty(USER_ID);
         when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(property));
         when(propertyReportRepository.existsByPropertyIdAndReporterId(PROPERTY_ID, USER_ID)).thenReturn(false);
-        when(propertyReportRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(propertyReportRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         PropertyReportRequest request = new PropertyReportRequest(PropertyReportReason.ETC, "사진과 실제 구조가 달라요");
 
@@ -90,7 +92,7 @@ class PropertyReportServiceTest {
         Property property = ownedProperty(USER_ID);
         when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(property));
         when(propertyReportRepository.existsByPropertyIdAndReporterId(PROPERTY_ID, USER_ID)).thenReturn(false);
-        when(propertyReportRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(propertyReportRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         PropertyReportRequest request = new PropertyReportRequest(PropertyReportReason.DUPLICATE, "무시되어야 할 값");
 
@@ -183,7 +185,7 @@ class PropertyReportServiceTest {
         Property property = ownedProperty(USER_ID);
         when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(property));
         when(propertyReportRepository.existsByPropertyIdAndReporterId(PROPERTY_ID, USER_ID)).thenReturn(false);
-        when(propertyReportRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(propertyReportRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         // 어차피 엔티티 생성 시 null로 버려지는 값이라 길이 제한에 안 걸려야 한다.
         String tooLong = "가".repeat(501);
@@ -192,6 +194,25 @@ class PropertyReportServiceTest {
         PropertyReportResponse response = propertyReportService.report(USER_ID, PROPERTY_ID, request);
 
         assertThat(response.detail()).isNull();
+    }
+
+    @Test
+    void 동시요청으로_유니크제약에_걸리면_중복신고_예외로_변환된다() {
+        // existsByPropertyIdAndReporterId 체크 이후, 실제 insert 시점에 동시 요청이 먼저 커밋되어
+        // (property_id, reporter_id) 유니크 제약에 걸리는 레이스를 재현한다 - 이 경우도 원시
+        // DataIntegrityViolationException이 그대로 500으로 새지 않고 REPORT_DUPLICATE(409)로 변환되어야 한다.
+        Property property = ownedProperty(USER_ID);
+        when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(property));
+        when(propertyReportRepository.existsByPropertyIdAndReporterId(PROPERTY_ID, USER_ID)).thenReturn(false);
+        when(propertyReportRepository.saveAndFlush(any()))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("unique constraint violation"));
+
+        PropertyReportRequest request = new PropertyReportRequest(PropertyReportReason.PRICE_MISMATCH, null);
+
+        assertThatThrownBy(() -> propertyReportService.report(USER_ID, PROPERTY_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.REPORT_DUPLICATE);
     }
 
     @Test

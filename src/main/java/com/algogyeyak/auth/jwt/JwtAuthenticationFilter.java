@@ -1,7 +1,8 @@
 package com.algogyeyak.auth.jwt;
 
 import com.algogyeyak.global.error.ErrorCode;
-import com.algogyeyak.user.enums.Role;
+import com.algogyeyak.user.entity.User;
+import com.algogyeyak.user.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -32,10 +33,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtProvider jwtProvider;
     private final AccessTokenRevocationService accessTokenRevocationService;
+    private final UserRepository userRepository;
 
-    public JwtAuthenticationFilter(JwtProvider jwtProvider, AccessTokenRevocationService accessTokenRevocationService) {
+    public JwtAuthenticationFilter(
+            JwtProvider jwtProvider,
+            AccessTokenRevocationService accessTokenRevocationService,
+            UserRepository userRepository) {
         this.jwtProvider = jwtProvider;
         this.accessTokenRevocationService = accessTokenRevocationService;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -72,27 +78,32 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 서명 검증(parseClaims)은 통과했더라도 클레임 값 자체가 지금 코드 기준으로 더 이상
-        // 유효하지 않을 수 있다 - 예를 들어 Role enum 상수가 배포 중 이름이 바뀌거나 제거되면,
-        // 그 전에 발급된(서명은 멀쩡한) 토큰의 role 클레임이 Role.valueOf()에서 IllegalArgumentException을
-        // 던진다. 이 필터는 예외를 던지지 않고 실패 사유만 남기는 게 설계 의도이므로, 이 파싱도 같은
-        // catch 안에 넣어 컨테이너 기본 500으로 새지 않고 AUTH_TOKEN_INVALID(401)로 일관되게 처리한다.
         Long userId;
-        String email;
-        Role role;
         try {
             userId = Long.valueOf(claims.getSubject());
-            email = claims.get("email", String.class);
-            role = Role.valueOf(claims.get("role", String.class));
         } catch (IllegalArgumentException | NullPointerException e) {
             request.setAttribute(AUTH_FAILURE_REASON_ATTRIBUTE, ErrorCode.AUTH_TOKEN_INVALID);
             return;
         }
-        JwtUserPrincipal principal = new JwtUserPrincipal(userId, email, role);
 
-        List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
+        // 토큰의 email/role 클레임은 발급 시점 스냅샷이라, 그 이후 관리자가 계정을 정지시키거나
+        // 권한을 바꿔도(관리자 페이지) 토큰이 자연 만료되기 전까지는 반영되지 않는 문제가 있었다.
+        // isRevoked()가 이미 매 요청 Redis 블랙리스트 조회를 하므로, 그 비용에 얹어 User를 DB에서
+        // 다시 조회해 최신 상태/권한을 신뢰의 원천으로 삼는다 - AuthController.me()가 매 요청 User를
+        // 다시 읽어오는 것과 같은 이유다.
+        User user = userRepository.findById(userId).orElse(null);
+        if (user == null || user.isWithdrawn() || user.isSuspended()) {
+            request.setAttribute(AUTH_FAILURE_REASON_ATTRIBUTE, ErrorCode.AUTH_TOKEN_INVALID);
+            return;
+        }
+
+        JwtUserPrincipal principal = new JwtUserPrincipal(userId, user.getEmail(), user.getRole());
+
+        List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()));
         var authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);
-        SecurityContextHolder.getContext().setAuthentication(authentication);
+        var context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(authentication);
+        SecurityContextHolder.setContext(context);
     }
 
     // public static: AuthController.logout()도 정확히 이 규칙(헤더 우선, 쿠키 폴백)으로 access

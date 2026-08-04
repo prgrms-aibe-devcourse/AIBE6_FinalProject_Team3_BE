@@ -33,8 +33,14 @@ public enum ErrorCode {
     AUTH_REFRESH_TOKEN_MISSING(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_MISSING", "Refresh Token이 없습니다."),
     // 탈퇴한 사용자의 refresh token도 이 코드로 처리한다 - 클라이언트 입장에서 "재로그인이 필요하다"는
     // 결론은 동일하고, 계정 존재 여부를 굳이 구분해 알려줄 필요가 없다.
+    // Redis TTL이 만료 판단의 유일한 소스가 된 이후로는(RefreshTokenService 참고), 자연 만료도
+    // "찾을 수 없음"으로 Redis에서 evict되어 이 코드와 구분이 불가능해졌다 - 그래서 EXPIRED 전용
+    // 코드는 만들지 않고 둘 다 여기로 처리한다.
     AUTH_REFRESH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_INVALID", "유효하지 않은 Refresh Token입니다."),
-    AUTH_REFRESH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_REFRESH_TOKEN_EXPIRED", "만료된 Refresh Token입니다."),
+    // Redis(access token blacklist/refresh token 저장소) 장애 시 fail-closed 정책 — "이 토큰이
+    // 유효한지 확신할 수 없다"를 "유효하다"로 오인하지 않기 위해, 인증을 통과시키는 대신 503으로
+    // 명시적으로 실패시킨다. 재시도하면 복구될 수 있는 일시 장애라는 걸 알리기 위해 401이 아닌 503을 쓴다.
+    AUTH_TOKEN_STORE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AUTH_TOKEN_STORE_UNAVAILABLE", "인증 저장소에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해주세요."),
 
     // User 도메인
     USER_PROFILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_PROFILE_ALREADY_EXISTS", "이미 프로필이 등록되어 있습니다."),
@@ -78,7 +84,21 @@ public enum ErrorCode {
     CONTRACT_ANALYSIS_MASKING_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "CONTRACT_ANALYSIS_MASKING_FAILED", "마스킹 처리 중 오류가 발생했습니다."),
     CONTRACT_ANALYSIS_AI_RESPONSE_INVALID(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_RESPONSE_INVALID", "AI 응답 형식이 올바르지 않습니다."),
     CONTRACT_ANALYSIS_AI_HALLUCINATION(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_HALLUCINATION", "AI가 입력에 없는 내용을 생성했습니다."),
-    CONTRACT_ANALYSIS_AI_API_ERROR(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_API_ERROR", "AI 분석 서비스 연동 중 오류가 발생했습니다.");
+    CONTRACT_ANALYSIS_AI_API_ERROR(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_API_ERROR", "AI 분석 서비스 연동 중 오류가 발생했습니다."),
+
+    // Admin 도메인
+    ADMIN_USER_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_USER_NOT_FOUND", "존재하지 않는 사용자입니다."),
+    ADMIN_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "ADMIN_INVALID_STATUS_TRANSITION", "허용되지 않는 상태 변경입니다."),
+    ADMIN_PROPERTY_REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_PROPERTY_REPORT_NOT_FOUND", "존재하지 않는 신고입니다."),
+    ADMIN_INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "ADMIN_INVALID_DATE_RANGE", "조회 기간이 올바르지 않습니다."),
+
+    // 파일 업로드(S3) 공통 - profile/property/contract 이미지 업로드가 전부 이 코드를 공유한다.
+    FILE_EXTENSION_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "FILE_EXTENSION_NOT_ALLOWED", "허용되지 않는 파일 확장자입니다."),
+    FILE_CONTENT_TYPE_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "FILE_CONTENT_TYPE_NOT_ALLOWED", "허용되지 않는 파일 형식입니다."),
+    FILE_TOO_LARGE(HttpStatus.BAD_REQUEST, "FILE_TOO_LARGE", "파일 크기가 허용 범위를 초과했습니다."),
+    // confirmUpload() 호출 시점에 해당 key로 S3에 실제 업로드된 객체가 없는 경우 - presigned URL만
+    // 발급받고 실제 PUT은 하지 않았거나, URL 만료(5분) 후 뒤늦게 confirm을 호출한 경우다.
+    FILE_UPLOAD_NOT_COMPLETED(HttpStatus.NOT_FOUND, "FILE_UPLOAD_NOT_COMPLETED", "업로드가 완료되지 않았습니다.");
 
     private final HttpStatus status;
     private final String code;

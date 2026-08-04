@@ -1,5 +1,7 @@
 package com.algogyeyak.property.entity;
 
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
@@ -9,6 +11,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -24,7 +27,8 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
  * DUPLICATE 사유도 자동탐지 결과와 통합하지 않고 독립적으로 기록한다.
  */
 @Entity
-@Table(name = "property_report")
+@Table(name = "property_report",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"property_id", "reporter_id"}))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)
@@ -51,6 +55,16 @@ public class PropertyReport {
     @Column(nullable = false, length = 20)
     private PropertyReportStatus status;
 
+    // 관리자 검토 결과 - RECEIVED 상태에서만 채워진다(resolve/reject 참고).
+    @Column(name = "reviewer_id")
+    private Long reviewerId;
+
+    @Column(name = "reviewed_at")
+    private LocalDateTime reviewedAt;
+
+    @Column(name = "review_memo", length = 500)
+    private String reviewMemo;
+
     @CreatedDate
     @Column(updatable = false)
     private LocalDateTime createdAt;
@@ -64,5 +78,25 @@ public class PropertyReport {
         // 요청값이 무엇이든 서버 쪽에서 확정 짓기 위함.
         this.detail = reason == PropertyReportReason.ETC ? detail : null;
         this.status = PropertyReportStatus.RECEIVED;
+    }
+
+    // 관리자 페이지 전용. RECEIVED에서만 RESOLVED/REJECTED로 전이할 수 있다 - 이미 검토된
+    // 신고를 다시 검토하려는 시도(중복 클릭 등)는 상태 전이 오류로 거부한다.
+    public void resolve(Long reviewerId, String memo) {
+        transitionTo(PropertyReportStatus.RESOLVED, reviewerId, memo);
+    }
+
+    public void reject(Long reviewerId, String memo) {
+        transitionTo(PropertyReportStatus.REJECTED, reviewerId, memo);
+    }
+
+    private void transitionTo(PropertyReportStatus target, Long reviewerId, String memo) {
+        if (this.status != PropertyReportStatus.RECEIVED) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "이미 검토가 완료된 신고입니다.");
+        }
+        this.status = target;
+        this.reviewerId = reviewerId;
+        this.reviewedAt = LocalDateTime.now();
+        this.reviewMemo = memo;
     }
 }

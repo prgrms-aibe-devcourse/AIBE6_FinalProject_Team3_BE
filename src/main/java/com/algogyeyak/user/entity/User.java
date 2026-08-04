@@ -89,13 +89,39 @@ public class User {
     }
 
     // 개발용 admin 시드 계정(AdminAccountSeeder)에서만 사용한다. 일반 가입 경로(createOAuthUser/
-    // createLocalUser)는 항상 Role.USER로 생성되며, 이 메서드 외에는 ADMIN으로 승격할 방법이 없다.
+    // createLocalUser)는 항상 Role.USER로 생성된다 - 가입 시점에 스스로 ADMIN이 될 방법은 이
+    // 메서드 하나뿐이다. (가입 이후에는 이미 ADMIN인 다른 관리자가 changeRole()로 승격시켜줄 수
+    // 있다 - 관리자 페이지의 일반 권한 변경 액션, AdminUserService.updateRole 참고.)
     public void grantAdminRole() {
         this.role = Role.ADMIN;
     }
 
     public boolean isWithdrawn() {
         return this.status == UserStatus.WITHDRAWN;
+    }
+
+    public boolean isSuspended() {
+        return this.status == UserStatus.SUSPENDED;
+    }
+
+    // 관리자 페이지 전용. 탈퇴한 사용자는 이미 익명화되어 되돌릴 수 없는 상태라 정지/활성화 대상에서 제외한다.
+    public void suspend() {
+        if (isWithdrawn()) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "탈퇴한 사용자는 정지할 수 없습니다.");
+        }
+        this.status = UserStatus.SUSPENDED;
+    }
+
+    public void activate() {
+        if (isWithdrawn()) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "탈퇴한 사용자는 활성화할 수 없습니다.");
+        }
+        this.status = UserStatus.ACTIVE;
+    }
+
+    // grantAdminRole()과 달리 ADMIN->USER 강등도 허용한다 (관리자 페이지의 일반 권한 변경 액션).
+    public void changeRole(Role role) {
+        this.role = role;
     }
 
     /**

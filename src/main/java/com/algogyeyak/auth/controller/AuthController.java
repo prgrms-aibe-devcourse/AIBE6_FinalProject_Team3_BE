@@ -143,7 +143,7 @@ public class AuthController {
         // Access Token 자체는 유효해도 그 사이 탈퇴했거나 계정이 삭제된 사용자라면 세션을 더 이상
         // 유효하다고 취급하면 안 된다 — 실제 계정 없이 success 응답을 내려주는 것을 방지한다.
         User user = userRepository.findById(principal.userId())
-                .filter(found -> !found.isWithdrawn())
+                .filter(found -> !found.isWithdrawn() && !found.isSuspended())
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
 
         return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
@@ -178,7 +178,7 @@ public class AuthController {
 
         User user = userRepository.findByEmail(EmailNormalizer.normalize(devLoginEmail))
                 .filter(found -> found.getRole() == Role.ADMIN)
-                .filter(found -> !found.isWithdrawn())
+                .filter(found -> !found.isWithdrawn() && !found.isSuspended())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         issueAuthCookies(response, user);
         return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
@@ -186,6 +186,7 @@ public class AuthController {
 
     @Operation(summary = "로그아웃", description = "refresh_token 쿠키가 있으면 서버에서 즉시 무효화(revoke)하고, access token(access_token 쿠키 또는 Authorization: Bearer 헤더)이 있으면 그 jti를 만료 시각까지 블랙리스트에 등록해 남은 유효기간 동안에도 즉시 무효화한다. 이후 access/refresh 쿠키를 삭제한다. 아무것도 없어도(이미 만료/삭제된 경우 등) 항상 200으로 성공 처리되므로 필수 인증 요구사항으로 문서화하지 않는다.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "로그아웃 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Redis 장애로 blacklist/refresh token 저장소에 연결할 수 없어 무효화를 보장할 수 없음 (AUTH_TOKEN_STORE_UNAVAILABLE) — 쿠키 삭제도 진행되지 않으므로 재시도가 필요하다")
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest request, HttpServletResponse response) {
         CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
@@ -223,7 +224,8 @@ public class AuthController {
     @Operation(summary = "토큰 재발급", description = "refresh token 쿠키를 검증해 access/refresh 토큰을 재발급(로테이션)한 뒤 쿠키로 내려준다. 토큰은 응답 body가 아닌 Set-Cookie로 전달된다.")
     @SecurityRequirement(name = "refresh_token")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "재발급 성공")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "refresh token이 없거나 유효하지 않거나 만료됨 (AUTH_REFRESH_TOKEN_MISSING / AUTH_REFRESH_TOKEN_INVALID / AUTH_REFRESH_TOKEN_EXPIRED)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "refresh token이 없거나 유효하지 않음 (AUTH_REFRESH_TOKEN_MISSING / AUTH_REFRESH_TOKEN_INVALID — Redis TTL로 자연 만료된 토큰도 후자로 응답됨)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Redis 장애로 refresh token 저장소에 연결할 수 없음 (AUTH_TOKEN_STORE_UNAVAILABLE)")
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<Void>> refresh(HttpServletRequest request, HttpServletResponse response) {
         String rawRefreshToken = CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
