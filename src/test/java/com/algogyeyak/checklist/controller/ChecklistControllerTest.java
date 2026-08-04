@@ -1,5 +1,6 @@
 package com.algogyeyak.checklist.controller;
 
+import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.checklist.dto.ChecklistItemUpdateRequest;
@@ -58,6 +59,11 @@ class ChecklistControllerTest {
 
     @MockitoBean
     private ChecklistService checklistService;
+
+    // 이 테스트는 checklist 도메인 동작만 검증하고 blacklist 자체는 다루지 않으므로, 실제 Redis 대신
+    // mock으로 대체한다(mock 기본값 false = "블랙리스트에 없음"이라 정상 인증 흐름을 그대로 탄다).
+    @MockitoBean
+    private AccessTokenRevocationService accessTokenRevocationService;
 
     @MockitoBean
     private UserRepository userRepository;

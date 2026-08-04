@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.algogyeyak.checklist.repository.ChecklistItemRepository;
@@ -16,6 +17,7 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
+import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
@@ -107,7 +109,7 @@ class PropertyServiceTest {
                 eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
         )).thenReturn(false);
         when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
         PropertyRegisterResponse response = propertyService.register(USER_ID, request);
 
@@ -216,7 +218,7 @@ class PropertyServiceTest {
                 eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
         )).thenReturn(false);
         when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
         PropertyRegisterResponse response = propertyService.register(USER_ID, request);
 
@@ -527,7 +529,7 @@ class PropertyServiceTest {
         property.assignAddress(resolvedPropertyAddress());
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
         when(checklistRepository.findByPropertyId(1L)).thenReturn(Optional.empty());
         when(propertyReportRepository.existsByPropertyIdAndReporterId(1L, USER_ID)).thenReturn(false);
 
@@ -554,7 +556,7 @@ class PropertyServiceTest {
         property.assignAddress(resolvedPropertyAddress());
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
         when(checklistRepository.findByPropertyId(1L))
                 .thenReturn(Optional.of(com.algogyeyak.checklist.entity.Checklist.builder().build()));
         when(propertyReportRepository.existsByPropertyIdAndReporterId(1L, USER_ID)).thenReturn(true);
@@ -607,7 +609,7 @@ class PropertyServiceTest {
         property.assignAddress(resolvedPropertyAddress());
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
         PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, "수정된 설명");
 
@@ -616,6 +618,9 @@ class PropertyServiceTest {
         assertThat(response.deposit()).isEqualTo(35_000_000L);
         assertThat(response.area()).isEqualTo(25.0);
         assertThat(response.description()).isEqualTo("수정된 설명");
+        // 가격/면적이 바뀌었으니 예전 시세비교 결과 캐시를 비우고 재계산해야 한다 - 안 비우면
+        // 캐시 히트로 수정 전 결과가 그대로 반환된다.
+        verify(marketComparisonService).evictCache(1L);
     }
 
     @Test

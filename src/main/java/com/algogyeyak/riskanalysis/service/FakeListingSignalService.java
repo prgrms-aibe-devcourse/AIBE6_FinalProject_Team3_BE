@@ -1,8 +1,14 @@
 package com.algogyeyak.riskanalysis.service;
 
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
 import com.algogyeyak.riskanalysis.dto.MarketComparison;
+import com.algogyeyak.riskanalysis.dto.RiskAnalysisSummaryResponse;
+import com.algogyeyak.riskanalysis.dto.RiskSignalListResponse;
+import com.algogyeyak.riskanalysis.dto.RiskSignalResponse;
 import com.algogyeyak.riskanalysis.dto.SignalCheckResult;
 import com.algogyeyak.riskanalysis.entity.PropertyRisk;
 import com.algogyeyak.riskanalysis.entity.PropertyRiskCheck;
@@ -17,7 +23,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -26,7 +36,66 @@ public class FakeListingSignalService {
     private final MarketDataClient marketDataClient;
     private final PropertyRiskCheckRepository riskCheckRepository;
     private final PropertyRiskRepository riskRepository;
+    private final PropertyRepository propertyRepository;
     private final RiskPolicyConfig policyConfig;
+
+    /**
+     * 매물의 신호 4종 현재 상태를 조회한다. checklist 도메인과 동일한 패턴으로 매물 존재/삭제/소유권을
+     * 확인한 뒤, PropertyRiskCheck(신호별 상태)와 PropertyRisk(리스크 발견 시 설명)를 signalType
+     * 기준으로 묶어 응답한다.
+     */
+    public RiskSignalListResponse getSignals(Long userId, Long propertyId) {
+        Property property = propertyRepository.findById(propertyId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
+        if (property.isDeleted()) {
+            throw new BusinessException(ErrorCode.PROPERTY_NOT_FOUND);
+        }
+        if (!property.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
+        }
+
+        Map<RiskSignalType, PropertyRisk> risksByType = riskRepository.findAllByPropertyId(propertyId).stream()
+                .collect(Collectors.toMap(PropertyRisk::getSignalType, Function.identity()));
+
+        List<RiskSignalResponse> signals = riskCheckRepository.findAllByPropertyId(propertyId).stream()
+                .map(check -> RiskSignalResponse.from(check, risksByType.get(check.getSignalType())))
+                .toList();
+        int signalCount = (int) signals.stream().filter(signal -> signal.description() != null).count();
+
+        return new RiskSignalListResponse(propertyId, signalCount, signals, RiskSignalListResponse.DISCLAIMER);
+    }
+
+    /**
+     * checkAndSave(Property)와 동일하지만, 컨트롤러에서 호출하기 위해 매물 존재/삭제/소유권을 먼저
+     * 확인한다(getSignals()와 동일한 패턴) - 최초 실행과 재계산 모두 이 메서드 하나로 처리된다
+     * (checkAndSave(Property)가 이미 upsert 구조라 있으면 덮어쓰고 없으면 새로 만들기 때문에
+     * "최초 실행"과 "재계산"을 구분할 이유가 없다).
+     */
+    @Transactional
+    public void checkAndSave(Long userId, Long propertyId) {
+        Property property = propertyRepository.findById(propertyId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
+        if (property.isDeleted()) {
+            throw new BusinessException(ErrorCode.PROPERTY_NOT_FOUND);
+        }
+        if (!property.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
+        }
+
+        checkAndSave(property);
+    }
+
+    /**
+     * checkAndSave(userId, propertyId)를 실행한 뒤, 상세 목록(GET /risk-signals가 담당) 대신
+     * "리스크가 실제로 발견된 신호가 몇 건인지" 요약만 반환한다 - POST 응답이 너무 무거워지지 않게
+     * 상세는 별도 GET 호출로 분리하는 설계.
+     */
+    @Transactional
+    public RiskAnalysisSummaryResponse checkAndSummarize(Long userId, Long propertyId) {
+        checkAndSave(userId, propertyId);
+        RiskSignalListResponse signals = getSignals(userId, propertyId);
+        return new RiskAnalysisSummaryResponse(signals.signalCount(), policyConfig.getVersion(), LocalDateTime.now());
+    }
 
     /**
      * 신호 4종을 각각 독립적으로 판정·저장한다. 시세비교(comparison)를 한 번만 조회해 각 탐지기에

@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.property.entity.PropertyReportStatus;
@@ -53,6 +54,11 @@ class AdminStatsControllerTest {
 
     @MockitoBean
     private PropertyReportRepository propertyReportRepository;
+
+    // 이 테스트는 통계 집계 로직만 검증하고 blacklist 자체는 다루지 않으므로, 실제 Redis 대신
+    // mock으로 대체한다(mock 기본값 false = "블랙리스트에 없음"이라 정상 인증 흐름을 그대로 탄다).
+    @MockitoBean
+    private AccessTokenRevocationService accessTokenRevocationService;
 
     private Cookie adminCookie() {
         String token = jwtProvider.createAccessToken(ADMIN_ID, "admin@example.com", Role.ADMIN);

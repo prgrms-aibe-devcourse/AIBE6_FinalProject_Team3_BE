@@ -13,6 +13,7 @@ import com.algogyeyak.marketdata.client.MolitRentClient;
 import com.algogyeyak.marketdata.client.RentTransactionSample;
 import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
+import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
 import com.algogyeyak.property.client.KakaoRegionCodeClient;
@@ -49,7 +50,7 @@ class MarketComparisonServiceTest {
 
     // application.yml의 market-data.comparison.* 기본값과 동일하게 맞춰둔다.
     private static final MarketComparisonProperties PROPERTIES =
-            new MarketComparisonProperties(300, 600, 3, 0.2, 6);
+            new MarketComparisonProperties(300, 600, 3, 0.2, 6, 30);
 
     private void init() {
         service = new MarketComparisonService(kakaoRegionCodeClient, kakaoAddressClient, molitRentClient, PROPERTIES);
@@ -132,6 +133,7 @@ class MarketComparisonServiceTest {
 
         assertThat(response.status()).isEqualTo("UNAVAILABLE");
         assertThat(response.message()).contains("월세");
+        assertThat(response.reason()).isEqualTo(MarketComparisonUnavailableReason.TRANSACTION_TYPE_UNSUPPORTED);
         verifyNoInteractions(kakaoRegionCodeClient, kakaoAddressClient, molitRentClient);
     }
 
@@ -155,6 +157,7 @@ class MarketComparisonServiceTest {
 
         assertThat(response.status()).isEqualTo("UNAVAILABLE");
         assertThat(response.message()).contains("공인중개사");
+        assertThat(response.reason()).isEqualTo(MarketComparisonUnavailableReason.PROPERTY_TYPE_UNSUPPORTED);
         verifyNoInteractions(kakaoRegionCodeClient, kakaoAddressClient, molitRentClient);
     }
 
@@ -173,6 +176,7 @@ class MarketComparisonServiceTest {
         MarketComparisonResponse response = service.compare(property);
 
         assertThat(response.status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.reason()).isEqualTo(MarketComparisonUnavailableReason.ADDRESS_INFO_MISSING);
         verifyNoInteractions(kakaoRegionCodeClient, molitRentClient);
     }
 
@@ -185,6 +189,7 @@ class MarketComparisonServiceTest {
         MarketComparisonResponse response = service.compare(property);
 
         assertThat(response.status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.reason()).isEqualTo(MarketComparisonUnavailableReason.ADDRESS_INFO_MISSING);
         verifyNoInteractions(molitRentClient);
     }
 
@@ -211,6 +216,7 @@ class MarketComparisonServiceTest {
         assertThat(response.referencePrice()).isEqualTo(200_000_000L);
         assertThat(response.differenceRate()).isEqualTo(0.0);
         assertThat(response.radiusMeters()).isEqualTo(300);
+        assertThat(response.reason()).isNull();
     }
 
     @Test
@@ -259,6 +265,7 @@ class MarketComparisonServiceTest {
 
         assertThat(response.status()).isEqualTo("UNAVAILABLE");
         assertThat(response.message()).contains("부족");
+        assertThat(response.reason()).isEqualTo(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE);
     }
 
     @Test

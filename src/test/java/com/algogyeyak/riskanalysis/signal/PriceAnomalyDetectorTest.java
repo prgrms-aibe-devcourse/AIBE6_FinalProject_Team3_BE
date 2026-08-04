@@ -1,0 +1,139 @@
+package com.algogyeyak.riskanalysis.signal;
+
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyType;
+import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.riskanalysis.dto.MarketComparison;
+import com.algogyeyak.riskanalysis.dto.SignalCheckResult;
+import com.algogyeyak.riskanalysis.enums.MarketComparisonStatus;
+import com.algogyeyak.riskanalysis.enums.MarketUnavailableReason;
+import com.algogyeyak.riskanalysis.enums.RiskCheckReason;
+import com.algogyeyak.riskanalysis.enums.RiskCheckStatus;
+import com.algogyeyak.riskanalysis.enums.RiskSignalType;
+import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.math.BigDecimal;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@DisplayName("PriceAnomalyDetector")
+class PriceAnomalyDetectorTest {
+
+    private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
+    private final PriceAnomalyDetector detector = new PriceAnomalyDetector(policyConfig);
+
+    private Property property() {
+        return Property.builder()
+                .userId(1L)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(180_000_000L)
+                .area(20.0)
+                .build();
+    }
+
+    private MarketComparison success(double differenceRate) {
+        return new MarketComparison(10L, BigDecimal.valueOf(200_000_000L), BigDecimal.valueOf(180_000_000L),
+                BigDecimal.valueOf(differenceRate), 3, null, 300, null, MarketComparisonStatus.SUCCESS);
+    }
+
+    private MarketComparison undeterminable(MarketUnavailableReason reason) {
+        return new MarketComparison(10L, null, null, null, 0, null, null, reason, MarketComparisonStatus.UNDETERMINABLE);
+    }
+
+    private MarketComparison failed(MarketUnavailableReason reason) {
+        return new MarketComparison(10L, null, null, null, 0, null, null, reason, MarketComparisonStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("type()은 PRICE_ANOMALY를 반환한다")
+    void typeReturnsPriceAnomaly() {
+        assertThat(detector.type()).isEqualTo(RiskSignalType.PRICE_ANOMALY);
+    }
+
+    @Test
+    @DisplayName("isEnabled()는 true를 반환한다")
+    void isEnabledReturnsTrue() {
+        assertThat(detector.isEnabled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("comparison이 없으면(null) 판정 불가(NO_COMPARABLE_TRANSACTION)를 반환한다")
+    void detectReturnsUndeterminableWhenComparisonIsNull() {
+        SignalCheckResult result = detector.detect(property(), null);
+
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.UNDETERMINABLE);
+        assertThat(result.reason()).isEqualTo(RiskCheckReason.NO_COMPARABLE_TRANSACTION);
+    }
+
+    @Test
+    @DisplayName("시세비교가 표본부족으로 판정불가면 NO_COMPARABLE_TRANSACTION으로 매핑한다")
+    void detectMapsInsufficientSampleToNoComparableTransaction() {
+        SignalCheckResult result = detector.detect(property(), undeterminable(MarketUnavailableReason.INSUFFICIENT_SAMPLE));
+
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.UNDETERMINABLE);
+        assertThat(result.reason()).isEqualTo(RiskCheckReason.NO_COMPARABLE_TRANSACTION);
+    }
+
+    @Test
+    @DisplayName("시세비교가 주소정보부족으로 판정불가면 ADDRESS_INFO_MISSING으로 매핑한다")
+    void detectMapsAddressInfoMissing() {
+        SignalCheckResult result = detector.detect(property(), undeterminable(MarketUnavailableReason.ADDRESS_INFO_MISSING));
+
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.UNDETERMINABLE);
+        assertThat(result.reason()).isEqualTo(RiskCheckReason.ADDRESS_INFO_MISSING);
+    }
+
+    @Test
+    @DisplayName("시세비교가 실패(FAILED)면 DATA_FETCH_FAILURE로 매핑해 FAILED를 반환한다")
+    void detectMapsFailedComparisonToDataFetchFailure() {
+        SignalCheckResult result = detector.detect(property(), failed(MarketUnavailableReason.EXTERNAL_API_FAILURE));
+
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.FAILED);
+        assertThat(result.reason()).isEqualTo(RiskCheckReason.DATA_FETCH_FAILURE);
+    }
+
+    @Test
+    @DisplayName("시세 대비 10% 이상 저렴하면(임계값) SUCCESS와 설명을 반환한다")
+    void detectReturnsSuccessWithDescriptionAtThreshold() {
+        ReflectionTestUtils.setField(policyConfig, "priceAnomalyPercent", 10);
+
+        SignalCheckResult result = detector.detect(property(), success(-0.10));
+
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.SUCCESS);
+        assertThat(result.description()).isEqualTo("시세보다 10% 낮은 가격이에요 — 왜 이렇게 저렴한지 확인해보세요");
+    }
+
+    @Test
+    @DisplayName("시세 대비 20% 저렴하면 실제 비율을 담아 설명을 반환한다")
+    void detectReturnsSuccessWithActualPercentInDescription() {
+        ReflectionTestUtils.setField(policyConfig, "priceAnomalyPercent", 10);
+
+        SignalCheckResult result = detector.detect(property(), success(-0.20));
+
+        assertThat(result.description()).isEqualTo("시세보다 20% 낮은 가격이에요 — 왜 이렇게 저렴한지 확인해보세요");
+    }
+
+    @Test
+    @DisplayName("시세 대비 10% 미만으로 저렴하면 SUCCESS와 null 설명(리스크 없음)을 반환한다")
+    void detectReturnsSuccessWithNullDescriptionWhenBelowThreshold() {
+        ReflectionTestUtils.setField(policyConfig, "priceAnomalyPercent", 10);
+
+        SignalCheckResult result = detector.detect(property(), success(-0.05));
+
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.SUCCESS);
+        assertThat(result.description()).isNull();
+    }
+
+    @Test
+    @DisplayName("시세보다 오히려 비싸면 SUCCESS와 null 설명(리스크 없음)을 반환한다")
+    void detectReturnsSuccessWithNullDescriptionWhenMoreExpensive() {
+        SignalCheckResult result = detector.detect(property(), success(0.05));
+
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.SUCCESS);
+        assertThat(result.description()).isNull();
+    }
+}

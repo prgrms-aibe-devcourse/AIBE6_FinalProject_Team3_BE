@@ -19,6 +19,11 @@ public record MarketComparisonProperties(
         int radiusFarMeters,
         int minSampleCount,
         double areaErrorRate,
-        int lookbackMonths
+        int lookbackMonths,
+        // MarketComparisonService.compare(Property) 결과를 Redis에 얼마나 들고 있을지(propertyId
+        // 기준). 매물 수정 시에는 PropertyService.update()가 캐시를 명시적으로 비우고 재계산하므로,
+        // 이 TTL은 "수정 없이도 새 실거래 데이터가 반영되기까지 최대 얼마나 기다릴지"를 결정하는
+        // 안전망 성격이다.
+        int cacheTtlMinutes
 ) {
 }
