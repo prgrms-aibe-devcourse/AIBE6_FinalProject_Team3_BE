@@ -41,4 +41,35 @@ class ChecklistItemTemplateTest {
         assertThat(template.isApplicableTo(PropertyType.MULTI_FAMILY)).isTrue();
         assertThat(template.isApplicableTo(PropertyType.DETACHED_HOUSE)).isFalse();
     }
+
+    @Test
+    @DisplayName("update()는 version을 제외한 모든 필드를 바꾼다")
+    void updateChangesAllFieldsExceptVersion() {
+        ChecklistItemTemplate template = baseBuilder().build();
+
+        template.update(
+                ChecklistCategory.DOCUMENTS,
+                "등기부등본을 확인했나요?",
+                "안내 문구",
+                "쉬운 설명",
+                ChecklistImportance.REQUIRED,
+                ChecklistItemType.YES_NO,
+                ChecklistItemCode.TRUST_REGISTRATION,
+                5,
+                "OFFICETEL",
+                false
+        );
+
+        assertThat(template.getVersion()).isEqualTo(2); // baseBuilder()의 version 그대로 유지
+        assertThat(template.getCategory()).isEqualTo(ChecklistCategory.DOCUMENTS);
+        assertThat(template.getContent()).isEqualTo("등기부등본을 확인했나요?");
+        assertThat(template.getGuideText()).isEqualTo("안내 문구");
+        assertThat(template.getHelperText()).isEqualTo("쉬운 설명");
+        assertThat(template.getImportance()).isEqualTo(ChecklistImportance.REQUIRED);
+        assertThat(template.getItemType()).isEqualTo(ChecklistItemType.YES_NO);
+        assertThat(template.getCode()).isEqualTo(ChecklistItemCode.TRUST_REGISTRATION);
+        assertThat(template.getDisplayOrder()).isEqualTo(5);
+        assertThat(template.getApplicablePropertyTypes()).isEqualTo("OFFICETEL");
+        assertThat(template.isActive()).isFalse();
+    }
 }
