@@ -3,6 +3,8 @@ package com.algogyeyak.global.s3.service;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.s3.util.S3ImagePurpose;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -11,10 +13,24 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.net.URI;
 import java.time.Duration;
+import java.util.Optional;
 
 @Service
 public class S3PresignService {
+
+    private static final Logger log = LoggerFactory.getLogger(S3PresignService.class);
+
+    private static final String PENDING_TAG_KEY = "status";
+    private static final String PENDING_TAG_VALUE = "pending";
+
+    // 업로드용 presigned URL을 발급할 때 이 태그를 서명에 포함시켜 객체에 걸어둔다. 버킷 Lifecycle
+    // 규칙이 이 태그(status=pending)가 붙은 객체를 일정 기간(예: 1일) 뒤 자동 삭제하도록 설정돼 있어
+    // (AWS 콘솔에서 별도 설정, 2026-08-04) - presign만 받고 confirm을 호출하지 않은 채 이탈한 경우
+    // S3에 영구히 남는 고아 객체를 우리 서버가 직접 정리하지 않아도 자동으로 청소된다. confirmUpload()가
+    // 성공하면 이 태그를 지워 Lifecycle 대상에서 제외시킨다.
+    public static final String PENDING_UPLOAD_TAG = PENDING_TAG_KEY + "=" + PENDING_TAG_VALUE;
 
     private final S3Presigner s3Presigner;
     private final S3Client s3Client;
@@ -43,6 +59,7 @@ public class S3PresignService {
                 .key(key)
                 .contentType(contentType)
                 .contentLength(contentLength)
+                .tagging(PENDING_UPLOAD_TAG)
                 .build();
 
         PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
@@ -81,6 +98,18 @@ public class S3PresignService {
             deleteObject(key);
             throw new BusinessException(contentTypeInvalid ? ErrorCode.FILE_CONTENT_TYPE_NOT_ALLOWED : ErrorCode.FILE_TOO_LARGE);
         }
+
+        clearPendingTag(key);
+    }
+
+    // confirm이 성공적으로 끝난 객체는 더 이상 "확정 대기 중"이 아니므로 PENDING_UPLOAD_TAG를 지운다 -
+    // 안 지우면 버킷 Lifecycle 규칙이 이 객체도 언젠가(태그 기준 만료일 뒤) 지워버린다. 이 호출 자체가
+    // 실패해도(권한/네트워크 등) 사용자 요청을 실패시킬 정도는 아니라고 보고, 다른 best-effort
+    // 삭제(deletePreviousProfileImageIfOwned)와 달리 여기선 예외를 삼키지 않는다 - 태그 제거 실패를
+    // 조용히 넘기면 정상적으로 확정된 객체가 나중에 예기치 않게 사라질 수 있어, 실패 시 그대로 알 수
+    // 있게 던지는 쪽이 안전하다고 판단함.
+    private void clearPendingTag(String key) {
+        s3Client.deleteObjectTagging(DeleteObjectTaggingRequest.builder().bucket(bucket).key(key).build());
     }
 
     // HeadObject는 응답 바디가 없어 S3가 404를 NoSuchKey로 못 내려주고 바디 없는 일반 404로 내려주는
@@ -120,7 +149,8 @@ public class S3PresignService {
         return s3Presigner.presignGetObject(presignRequest).url().toString();
     }
 
-    // 계약서 이미지: OCR 처리 후 즉시 삭제용
+    // 계약서 이미지는 OCR 처리 후 즉시 삭제용으로, 프로필/매물 이미지는 새 이미지로 교체된 이전
+    // 이미지를 정리하는 용도로 쓴다.
     public void deleteObject(String key) {
         s3Client.deleteObject(
                 DeleteObjectRequest.builder()
@@ -128,5 +158,58 @@ public class S3PresignService {
                         .key(key)
                         .build()
         );
+    }
+
+    // 새 이미지로 교체돼 정리 대상이 된 "이미 confirm까지 끝난" 이전 이미지 전용 삭제 메서드다 -
+    // confirmUpload()에서 막 지운 PENDING_UPLOAD_TAG가 이미 없는 상태이므로, deleteObject()만 믿고
+    // 있다가 그 호출이 권한/네트워크 등으로 실패하면 이 객체는 태그도 없이 영영 고아로 남는다(버킷
+    // Lifecycle 규칙이 이 태그가 있는 객체만 보기 때문). 그래서 즉시 삭제를 시도하기 전에 먼저 다시
+    // PENDING_UPLOAD_TAG를 걸어둬서, 즉시 삭제가 실패해도 Lifecycle 규칙이 나중에 대신 정리해줄 수
+    // 있게 한다. 태깅 자체가 실패해도(기존 동작과 동일하게) 즉시 삭제 시도는 그대로 진행하고, 호출부가
+    // deleteObject()와 동일하게 그 실패를 처리하도록 예외를 그대로 전파한다.
+    public void deleteReplacedObject(String key) {
+        try {
+            tagAsPending(key);
+        } catch (RuntimeException e) {
+            log.warn("교체된 이전 이미지에 정리용 태그를 걸지 못함 - key={}", key, e);
+        }
+
+        deleteObject(key);
+    }
+
+    private void tagAsPending(String key) {
+        s3Client.putObjectTagging(PutObjectTaggingRequest.builder()
+                .bucket(bucket)
+                .key(key)
+                .tagging(Tagging.builder()
+                        .tagSet(Tag.builder().key(PENDING_TAG_KEY).value(PENDING_TAG_VALUE).build())
+                        .build())
+                .build());
+    }
+
+    // 저장된 URL(예: User.profileImageUrl)이 우리 버킷의 객체를 가리키는지 확인하고, 맞으면 key만
+    // 뽑아낸다. generateDownloadUrl(public)이 만드는 URL은 virtual-hosted-style
+    // (`https://{bucket}.s3.{region}.amazonaws.com/{key}`)이라 host가 `{bucket}.s3.`로 시작하는지로
+    // 판별한다 - 구글/카카오 같은 외부 OAuth 프로필 사진 URL은 이 패턴과 안 맞으므로 항상 empty를
+    // 반환해, 우리 버킷이 아닌 객체를 절대 삭제 대상으로 착각하지 않게 한다.
+    public Optional<String> extractOwnedKey(String url) {
+        if (url == null) {
+            return Optional.empty();
+        }
+
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+
+        String host = uri.getHost();
+        String path = uri.getPath();
+        if (host == null || !host.startsWith(bucket + ".s3.") || path == null || path.length() <= 1) {
+            return Optional.empty();
+        }
+
+        return Optional.of(path.substring(1));
     }
 }
