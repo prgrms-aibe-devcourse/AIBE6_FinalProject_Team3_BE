@@ -42,6 +42,7 @@ class FakeListingSignalServiceTest {
     private Property property(Long id, Long ownerId) {
         Property property = Property.builder()
                 .userId(ownerId)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(10_000_000L)

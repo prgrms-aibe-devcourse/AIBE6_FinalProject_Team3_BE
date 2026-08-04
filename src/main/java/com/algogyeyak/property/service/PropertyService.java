@@ -71,6 +71,7 @@ public class PropertyService {
 
         Property property = Property.builder()
                 .userId(userId)
+                .title(request.title())
                 .propertyType(request.propertyType())
                 .transactionType(request.transactionType())
                 .deposit(request.deposit())
@@ -216,6 +217,7 @@ public class PropertyService {
 
         validatePriceCombination(property.getTransactionType(), request.deposit(), request.monthlyRent());
 
+        property.updateTitle(request.title());
         property.updatePriceInfo(request.deposit(), request.monthlyRent());
         property.updateArea(request.area());
         property.updateDescription(request.description());

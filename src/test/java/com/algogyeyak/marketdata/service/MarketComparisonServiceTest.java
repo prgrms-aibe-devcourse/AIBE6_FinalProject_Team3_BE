@@ -59,6 +59,7 @@ class MarketComparisonServiceTest {
     private Property jeonseOfficetel(long deposit, double area) {
         Property property = Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(deposit)
@@ -117,6 +118,7 @@ class MarketComparisonServiceTest {
         init();
         Property property = Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.MONTHLY_RENT)
                 .deposit(10_000_000L)
@@ -142,6 +144,7 @@ class MarketComparisonServiceTest {
         init();
         Property property = Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.DETACHED_HOUSE)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(200_000_000L)
@@ -166,6 +169,7 @@ class MarketComparisonServiceTest {
         init();
         Property property = Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(200_000_000L)
