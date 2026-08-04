@@ -58,6 +58,12 @@ public class UserController {
         return ApiResponse.success(userService.confirmProfileImageUpload(userDetails.userId(), request.getKey()));
     }
 
+    @DeleteMapping("/me/profile-image")
+    public ApiResponse<UserProfileResponse> resetProfileImage(
+            @AuthenticationPrincipal JwtUserPrincipal userDetails) {
+        return ApiResponse.success(userService.resetProfileImage(userDetails.userId()));
+    }
+
     @PatchMapping("/me")
     public ApiResponse<UserProfileResponse> updateMyProfile(
             @AuthenticationPrincipal JwtUserPrincipal userDetails,

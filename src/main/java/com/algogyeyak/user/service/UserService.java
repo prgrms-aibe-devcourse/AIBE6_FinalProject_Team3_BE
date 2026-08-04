@@ -103,6 +103,20 @@ public class UserService {
         return toResponse(user, preference);
     }
 
+    // 기본(미설정) 프로필 이미지로 되돌린다 - 이미 기본 이미지 상태(profileImageUrl == null)여도
+    // 에러 없이 그대로 성공 처리한다(멱등).
+    @Transactional
+    public UserProfileResponse resetProfileImage(Long userId) {
+        User user = getActiveUserOrThrow(userId);
+
+        String previousImageUrl = user.getProfileImageUrl();
+        user.updateProfileImageUrl(null);
+        deletePreviousProfileImageIfOwned(userId, previousImageUrl);
+
+        UserPreference preference = userPreferenceRepository.findByUserId(userId).orElse(null);
+        return toResponse(user, preference);
+    }
+
     // 새 이미지로 교체된 이전 프로필 이미지를 정리한다. 이미 새 이미지 저장은 끝난 뒤라, 여기서
     // 실패해도(권한/네트워크 등) 요청 자체를 실패시키지 않고 로그만 남긴다.
     private void deletePreviousProfileImageIfOwned(Long userId, String previousImageUrl) {

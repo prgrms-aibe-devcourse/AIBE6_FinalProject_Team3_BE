@@ -4,6 +4,7 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
+import com.algogyeyak.user.dto.UserProfileResponse;
 import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.TransactionType;
@@ -16,8 +17,12 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class UserServiceTest {
@@ -98,5 +103,32 @@ class UserServiceTest {
 
         assertEquals(ErrorCode.USER_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
         assertEquals(HttpStatus.CONFLICT, exception.getStatus());
+    }
+
+    @Test
+    void resetProfileImageClearsUrlAndDeletesOwnedS3Object() {
+        User user = activeUser(1L);
+        user.updateProfileImageUrl("https://bucket.s3.ap-northeast-2.amazonaws.com/profile-images/1/old.jpg");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(s3PresignService.extractOwnedKey(user.getProfileImageUrl()))
+                .thenReturn(Optional.of("profile-images/1/old.jpg"));
+
+        UserProfileResponse response = userService.resetProfileImage(1L);
+
+        assertNull(response.getProfileImageUrl());
+        verify(s3PresignService).deleteObject("profile-images/1/old.jpg");
+    }
+
+    @Test
+    void resetProfileImageIsNoOpWhenAlreadyDefault() {
+        // 이미 기본 이미지(profileImageUrl == null) 상태에서 호출해도 에러 없이 그대로 성공해야
+        // 한다(멱등) - 클라이언트가 상태를 미리 알 필요 없이 안전하게 호출할 수 있게 하기 위함.
+        User user = activeUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        UserProfileResponse response = userService.resetProfileImage(1L);
+
+        assertNull(response.getProfileImageUrl());
+        verify(s3PresignService, never()).deleteObject(any());
     }
 }
