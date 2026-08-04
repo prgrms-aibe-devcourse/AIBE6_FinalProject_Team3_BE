@@ -16,6 +16,7 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
+import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
@@ -107,7 +108,7 @@ class PropertyServiceTest {
                 eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
         )).thenReturn(false);
         when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
         PropertyRegisterResponse response = propertyService.register(USER_ID, request);
 
@@ -216,7 +217,7 @@ class PropertyServiceTest {
                 eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
         )).thenReturn(false);
         when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
         PropertyRegisterResponse response = propertyService.register(USER_ID, request);
 
@@ -527,7 +528,7 @@ class PropertyServiceTest {
         property.assignAddress(resolvedPropertyAddress());
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
         when(checklistRepository.findByPropertyId(1L)).thenReturn(Optional.empty());
         when(propertyReportRepository.existsByPropertyIdAndReporterId(1L, USER_ID)).thenReturn(false);
 
@@ -554,7 +555,7 @@ class PropertyServiceTest {
         property.assignAddress(resolvedPropertyAddress());
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
         when(checklistRepository.findByPropertyId(1L))
                 .thenReturn(Optional.of(com.algogyeyak.checklist.entity.Checklist.builder().build()));
         when(propertyReportRepository.existsByPropertyIdAndReporterId(1L, USER_ID)).thenReturn(true);
@@ -607,7 +608,7 @@ class PropertyServiceTest {
         property.assignAddress(resolvedPropertyAddress());
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
-        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable("stub"));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
         PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, "수정된 설명");
 
