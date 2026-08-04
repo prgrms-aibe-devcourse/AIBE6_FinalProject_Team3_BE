@@ -23,6 +23,7 @@ import com.algogyeyak.property.entity.PropertyImage;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.event.PropertyUpdatedEvent;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import java.util.List;
@@ -30,6 +31,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -46,6 +48,7 @@ public class PropertyService {
     private final ChecklistRepository checklistRepository;
     private final ChecklistItemRepository checklistItemRepository;
     private final PropertyReportRepository propertyReportRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     // 목록 조회 정렬 허용 필드 - PageableUtils.validateSort가 이 밖의 필드는 INVALID_SORT_FIELD로 막는다.
     private static final Set<String> SORTABLE_PROPERTIES = Set.of("createdAt", "deposit", "area");
@@ -225,6 +228,10 @@ public class PropertyService {
         // 가격/면적이 바뀌었으니 캐시된 예전 시세비교 결과를 비우고 재계산한다 - 안 비우면
         // compare()가 캐시 히트로 수정 전 결과를 그대로 반환해버린다.
         marketComparisonService.evictCache(propertyId);
+
+        // risk-analysis가 위험 신호·전세가율을 재계산할 수 있도록 이벤트만 발행한다 - 이 도메인은
+        // risk-analysis를 몰라도 된다(누가 구독하는지, 구독자가 있는지조차 관심 없음).
+        eventPublisher.publishEvent(new PropertyUpdatedEvent(propertyId));
 
         return PropertyDetailResponse.from(
                 property,

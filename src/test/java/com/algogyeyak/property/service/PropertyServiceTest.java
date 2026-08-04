@@ -32,6 +32,7 @@ import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.event.PropertyUpdatedEvent;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import java.util.List;
@@ -42,6 +43,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -69,6 +71,9 @@ class PropertyServiceTest {
     @Mock
     private PropertyReportRepository propertyReportRepository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private PropertyService propertyService;
 
     private static final Long USER_ID = 1L;
@@ -77,7 +82,7 @@ class PropertyServiceTest {
     void setUp() {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
-                checklistRepository, checklistItemRepository, propertyReportRepository
+                checklistRepository, checklistItemRepository, propertyReportRepository, eventPublisher
         );
     }
 
@@ -638,6 +643,9 @@ class PropertyServiceTest {
         // 가격/면적이 바뀌었으니 예전 시세비교 결과 캐시를 비우고 재계산해야 한다 - 안 비우면
         // 캐시 히트로 수정 전 결과가 그대로 반환된다.
         verify(marketComparisonService).evictCache(1L);
+        // risk-analysis가 위험 신호·전세가율을 재계산할 수 있도록 이벤트를 발행한다 - property는
+        // risk-analysis를 직접 참조하지 않고 이벤트로만 알린다(도메인 결합 방지).
+        verify(eventPublisher).publishEvent(new PropertyUpdatedEvent(1L));
     }
 
     @Test

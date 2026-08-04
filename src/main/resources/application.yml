@@ -106,6 +106,7 @@ risk-policy:
   short-term-relisting-window-days: 30
   short-term-relisting-price-tolerance-percent: 5
   short-term-relisting-area-tolerance-percent: 10
+  ownership-recent-change-months: 6
 
 aws:
   s3:

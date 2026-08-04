@@ -37,7 +37,7 @@ class DepositSafetyCheckResponseTest {
                 property(10L), BigDecimal.valueOf(82), null, null,
                 LocalDate.of(2026, 7, 31), "이 집 전세가율은 82%예요.", "v1.0");
 
-        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check);
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, false);
 
         assertThat(response.propertyId()).isEqualTo(10L);
         assertThat(response.status()).isEqualTo(DepositSafetyStatus.CALCULATED);
@@ -47,6 +47,19 @@ class DepositSafetyCheckResponseTest {
         assertThat(response.referenceDate()).isEqualTo(LocalDate.of(2026, 7, 31));
         assertThat(response.reason()).isNull();
         assertThat(response.disclaimer()).isEqualTo(DepositSafetyCheckResponse.DISCLAIMER);
+        assertThat(response.recentOwnershipChangeWarning()).isFalse();
+    }
+
+    @Test
+    @DisplayName("최근 소유권 변경 + 높은 전세가율 조합이면 recentOwnershipChangeWarning을 true로 담는다")
+    void fromIncludesRecentOwnershipChangeWarningWhenTrue() {
+        DepositSafetyCheck check = DepositSafetyCheck.calculated(
+                property(10L), BigDecimal.valueOf(120), null, null,
+                LocalDate.of(2026, 7, 31), "이 집 전세가율은 120%예요.", "v1.0");
+
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, true);
+
+        assertThat(response.recentOwnershipChangeWarning()).isTrue();
     }
 
     @Test
@@ -56,7 +69,7 @@ class DepositSafetyCheckResponseTest {
                 property(10L), BigDecimal.valueOf(95), BigDecimal.valueOf(50_000_000L), BigDecimal.valueOf(10_000_000L),
                 LocalDate.of(2026, 7, 31), "이 집 전세가율은 95%예요.", "v1.0");
 
-        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check);
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, false);
 
         assertThat(response.seniorDepositApplied()).isTrue();
         assertThat(response.seniorDeposit()).isEqualTo(50_000_000L);
@@ -69,7 +82,7 @@ class DepositSafetyCheckResponseTest {
         DepositSafetyCheck check = DepositSafetyCheck.unavailable(
                 property(10L), null, null, DepositSafetyCheckReason.ESTIMATED_PRICE_MISSING, "v1.0");
 
-        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check);
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, false);
 
         assertThat(response.status()).isEqualTo(DepositSafetyStatus.UNAVAILABLE);
         assertThat(response.reason()).isEqualTo(DepositSafetyCheckReason.ESTIMATED_PRICE_MISSING);
@@ -82,7 +95,7 @@ class DepositSafetyCheckResponseTest {
     @Test
     @DisplayName("체크 결과가 아직 없으면(null) 미계산 상태로 담는다")
     void fromNullChecksIsNotCalculatedYet() {
-        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, null);
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, null, false);
 
         assertThat(response.propertyId()).isEqualTo(10L);
         assertThat(response.status()).isNull();

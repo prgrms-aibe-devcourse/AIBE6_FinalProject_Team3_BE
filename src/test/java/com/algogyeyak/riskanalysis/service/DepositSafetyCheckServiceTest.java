@@ -35,9 +35,11 @@ class DepositSafetyCheckServiceTest {
     private final DepositSafetyCheckRepository depositSafetyCheckRepository = mock(DepositSafetyCheckRepository.class);
     private final MarketSaleDataClient marketSaleDataClient = mock(MarketSaleDataClient.class);
     private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
+    private final com.algogyeyak.checklist.repository.ChecklistItemRepository checklistItemRepository =
+            mock(com.algogyeyak.checklist.repository.ChecklistItemRepository.class);
     private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
-    private final DepositSafetyCheckService service =
-            new DepositSafetyCheckService(depositSafetyCheckRepository, marketSaleDataClient, propertyRepository, policyConfig);
+    private final DepositSafetyCheckService service = new DepositSafetyCheckService(
+            depositSafetyCheckRepository, marketSaleDataClient, propertyRepository, checklistItemRepository, policyConfig);
 
     private Property property(Long id, TransactionType transactionType, Long deposit) {
         Property property = Property.builder()
@@ -189,6 +191,50 @@ class DepositSafetyCheckServiceTest {
         assertThat(response.propertyId()).isEqualTo(10L);
         assertThat(response.status()).isEqualTo(DepositSafetyStatus.CALCULATED);
         assertThat(response.jeonseRatio()).isEqualTo(82);
+    }
+
+    @Test
+    @DisplayName("get()은 전세가율이 위험 구간이고 소유권 취득일이 최근이면 recentOwnershipChangeWarning을 true로 반환한다")
+    void getReturnsRecentOwnershipChangeWarningWhenBothConditionsMet() {
+        setPolicy();
+        ReflectionTestUtils.setField(policyConfig, "ownershipRecentChangeMonths", 6);
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        DepositSafetyCheck check = DepositSafetyCheck.calculated(
+                property, BigDecimal.valueOf(120), null, null, LocalDate.of(2026, 7, 31), "설명", "v1.0");
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
+
+        com.algogyeyak.checklist.entity.ChecklistItem ownershipItem = mock(com.algogyeyak.checklist.entity.ChecklistItem.class);
+        when(ownershipItem.getValue()).thenReturn(LocalDate.now().minusMonths(3).toString());
+        when(checklistItemRepository.findByChecklist_Property_IdAndCode(
+                10L, com.algogyeyak.checklist.entity.ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE))
+                .thenReturn(Optional.of(ownershipItem));
+
+        DepositSafetyCheckResponse response = service.get(1L, 10L);
+
+        assertThat(response.recentOwnershipChangeWarning()).isTrue();
+    }
+
+    @Test
+    @DisplayName("get()은 전세가율이 위험 구간이어도 소유권 취득일이 오래됐으면 recentOwnershipChangeWarning을 false로 반환한다")
+    void getReturnsNoWarningWhenOwnershipIsOld() {
+        setPolicy();
+        ReflectionTestUtils.setField(policyConfig, "ownershipRecentChangeMonths", 6);
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        DepositSafetyCheck check = DepositSafetyCheck.calculated(
+                property, BigDecimal.valueOf(120), null, null, LocalDate.of(2026, 7, 31), "설명", "v1.0");
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
+
+        com.algogyeyak.checklist.entity.ChecklistItem ownershipItem = mock(com.algogyeyak.checklist.entity.ChecklistItem.class);
+        when(ownershipItem.getValue()).thenReturn(LocalDate.now().minusMonths(24).toString());
+        when(checklistItemRepository.findByChecklist_Property_IdAndCode(
+                10L, com.algogyeyak.checklist.entity.ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE))
+                .thenReturn(Optional.of(ownershipItem));
+
+        DepositSafetyCheckResponse response = service.get(1L, 10L);
+
+        assertThat(response.recentOwnershipChangeWarning()).isFalse();
     }
 
     @Test
