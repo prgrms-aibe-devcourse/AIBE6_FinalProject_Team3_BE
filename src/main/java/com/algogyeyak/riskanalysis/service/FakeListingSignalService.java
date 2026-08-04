@@ -6,6 +6,8 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
 import com.algogyeyak.riskanalysis.dto.MarketComparison;
+import com.algogyeyak.riskanalysis.dto.RiskAnalysisSummaryResponse;
+import com.algogyeyak.riskanalysis.dto.RiskSignalListResponse;
 import com.algogyeyak.riskanalysis.dto.RiskSignalResponse;
 import com.algogyeyak.riskanalysis.dto.SignalCheckResult;
 import com.algogyeyak.riskanalysis.entity.PropertyRisk;
@@ -21,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -41,7 +44,7 @@ public class FakeListingSignalService {
      * 확인한 뒤, PropertyRiskCheck(신호별 상태)와 PropertyRisk(리스크 발견 시 설명)를 signalType
      * 기준으로 묶어 응답한다.
      */
-    public List<RiskSignalResponse> getSignals(Long userId, Long propertyId) {
+    public RiskSignalListResponse getSignals(Long userId, Long propertyId) {
         Property property = propertyRepository.findById(propertyId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
         if (property.isDeleted()) {
@@ -54,9 +57,12 @@ public class FakeListingSignalService {
         Map<RiskSignalType, PropertyRisk> risksByType = riskRepository.findAllByPropertyId(propertyId).stream()
                 .collect(Collectors.toMap(PropertyRisk::getSignalType, Function.identity()));
 
-        return riskCheckRepository.findAllByPropertyId(propertyId).stream()
+        List<RiskSignalResponse> signals = riskCheckRepository.findAllByPropertyId(propertyId).stream()
                 .map(check -> RiskSignalResponse.from(check, risksByType.get(check.getSignalType())))
                 .toList();
+        int signalCount = (int) signals.stream().filter(signal -> signal.description() != null).count();
+
+        return new RiskSignalListResponse(propertyId, signalCount, signals, RiskSignalListResponse.DISCLAIMER);
     }
 
     /**
@@ -77,6 +83,18 @@ public class FakeListingSignalService {
         }
 
         checkAndSave(property);
+    }
+
+    /**
+     * checkAndSave(userId, propertyId)를 실행한 뒤, 상세 목록(GET /risk-signals가 담당) 대신
+     * "리스크가 실제로 발견된 신호가 몇 건인지" 요약만 반환한다 - POST 응답이 너무 무거워지지 않게
+     * 상세는 별도 GET 호출로 분리하는 설계.
+     */
+    @Transactional
+    public RiskAnalysisSummaryResponse checkAndSummarize(Long userId, Long propertyId) {
+        checkAndSave(userId, propertyId);
+        RiskSignalListResponse signals = getSignals(userId, propertyId);
+        return new RiskAnalysisSummaryResponse(signals.signalCount(), policyConfig.getVersion(), LocalDateTime.now());
     }
 
     /**

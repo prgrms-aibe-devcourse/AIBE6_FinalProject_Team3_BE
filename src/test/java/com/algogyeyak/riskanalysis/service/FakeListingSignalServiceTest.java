@@ -7,11 +7,13 @@ import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
+import com.algogyeyak.riskanalysis.dto.RiskSignalListResponse;
 import com.algogyeyak.riskanalysis.dto.RiskSignalResponse;
 import com.algogyeyak.riskanalysis.entity.PropertyRisk;
 import com.algogyeyak.riskanalysis.entity.PropertyRiskCheck;
 import com.algogyeyak.riskanalysis.enums.RiskSignalType;
 import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
+import com.algogyeyak.riskanalysis.dto.RiskAnalysisSummaryResponse;
 import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
 import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import com.algogyeyak.riskanalysis.signal.SignalDetector;
@@ -63,11 +65,14 @@ class FakeListingSignalServiceTest {
         when(riskCheckRepository.findAllByPropertyId(10L)).thenReturn(List.of(check));
         when(riskRepository.findAllByPropertyId(10L)).thenReturn(List.of(risk));
 
-        List<RiskSignalResponse> result = service.getSignals(1L, 10L);
+        RiskSignalListResponse result = service.getSignals(1L, 10L);
 
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).signalType()).isEqualTo(RiskSignalType.DUPLICATE_LISTING);
-        assertThat(result.get(0).description()).isEqualTo("동일 주소로 등록된 다른 매물이 있어요");
+        assertThat(result.propertyId()).isEqualTo(10L);
+        assertThat(result.signalCount()).isEqualTo(1);
+        assertThat(result.signals()).hasSize(1);
+        assertThat(result.signals().get(0).signalType()).isEqualTo(RiskSignalType.DUPLICATE_LISTING);
+        assertThat(result.signals().get(0).description()).isEqualTo("동일 주소로 등록된 다른 매물이 있어요");
+        assertThat(result.disclaimer()).isEqualTo(RiskSignalListResponse.DISCLAIMER);
     }
 
     @Test
@@ -155,5 +160,41 @@ class FakeListingSignalServiceTest {
                 .satisfies(exception ->
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
                 );
+    }
+
+    @Test
+    @DisplayName("checkAndSummarize()는 실행 후 리스크가 발견된 신호 개수와 정책 버전을 요약해 반환한다")
+    void checkAndSummarizeReturnsSignalCountAndPolicyVersion() {
+        ReflectionTestUtils.setField(policyConfig, "version", "v1.0");
+        Property property = property(10L, 1L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+
+        PropertyRiskCheck foundCheck = PropertyRiskCheck.success(property, RiskSignalType.DUPLICATE_LISTING, "v1.0");
+        PropertyRisk foundRisk = PropertyRisk.of(property, RiskSignalType.DUPLICATE_LISTING, "동일 주소로 등록된 다른 매물이 있어요");
+        PropertyRiskCheck cleanCheck = PropertyRiskCheck.success(property, RiskSignalType.SHORT_TERM_RELISTING, "v1.0");
+        when(riskCheckRepository.findAllByPropertyId(10L)).thenReturn(List.of(foundCheck, cleanCheck));
+        when(riskRepository.findAllByPropertyId(10L)).thenReturn(List.of(foundRisk));
+
+        RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
+
+        assertThat(result.signalCount()).isEqualTo(1);
+        assertThat(result.policyVersion()).isEqualTo("v1.0");
+        assertThat(result.calculatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("checkAndSummarize()는 리스크가 발견된 신호가 없으면 signalCount 0을 반환한다")
+    void checkAndSummarizeReturnsZeroWhenNoRiskFound() {
+        ReflectionTestUtils.setField(policyConfig, "version", "v1.0");
+        Property property = property(10L, 1L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+
+        PropertyRiskCheck cleanCheck = PropertyRiskCheck.success(property, RiskSignalType.DUPLICATE_LISTING, "v1.0");
+        when(riskCheckRepository.findAllByPropertyId(10L)).thenReturn(List.of(cleanCheck));
+        when(riskRepository.findAllByPropertyId(10L)).thenReturn(List.of());
+
+        RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
+
+        assertThat(result.signalCount()).isEqualTo(0);
     }
 }
