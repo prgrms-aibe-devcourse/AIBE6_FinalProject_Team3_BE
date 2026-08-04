@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
  * 여기서는 "확인 필요 신호가 몇 건이었는지" 요약만 제공한다.
  */
 public record RiskAnalysisSummaryResponse(
+        Long propertyId,
         int signalCount,
         String policyVersion,
         LocalDateTime calculatedAt

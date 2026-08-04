@@ -176,6 +176,7 @@ class FakeListingSignalServiceTest {
 
         RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
 
+        assertThat(result.propertyId()).isEqualTo(10L);
         assertThat(result.signalCount()).isEqualTo(1);
         assertThat(result.policyVersion()).isEqualTo("v1.0");
         assertThat(result.calculatedAt()).isNotNull();
@@ -194,6 +195,7 @@ class FakeListingSignalServiceTest {
 
         RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
 
+        assertThat(result.propertyId()).isEqualTo(10L);
         assertThat(result.signalCount()).isEqualTo(0);
     }
 }

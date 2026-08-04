@@ -94,7 +94,7 @@ public class FakeListingSignalService {
     public RiskAnalysisSummaryResponse checkAndSummarize(Long userId, Long propertyId) {
         checkAndSave(userId, propertyId);
         RiskSignalListResponse signals = getSignals(userId, propertyId);
-        return new RiskAnalysisSummaryResponse(signals.signalCount(), policyConfig.getVersion(), LocalDateTime.now());
+        return new RiskAnalysisSummaryResponse(propertyId, signals.signalCount(), policyConfig.getVersion(), LocalDateTime.now());
     }
 
     /**
