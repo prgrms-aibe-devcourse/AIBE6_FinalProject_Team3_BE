@@ -82,7 +82,7 @@ public class UserService {
         String uploadUrl = s3PresignService.generateUploadUrl(
                 key, request.getContentType(), request.getFileSize(), S3ImagePurpose.PROFILE);
 
-        return new PresignedUploadResponse(uploadUrl, key);
+        return new PresignedUploadResponse(uploadUrl, key, S3PresignService.PENDING_UPLOAD_TAG);
     }
 
     @Transactional

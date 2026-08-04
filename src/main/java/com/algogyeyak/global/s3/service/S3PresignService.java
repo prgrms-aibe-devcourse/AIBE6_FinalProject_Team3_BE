@@ -18,6 +18,13 @@ import java.util.Optional;
 @Service
 public class S3PresignService {
 
+    // 업로드용 presigned URL을 발급할 때 이 태그를 서명에 포함시켜 객체에 걸어둔다. 버킷 Lifecycle
+    // 규칙이 이 태그(status=pending)가 붙은 객체를 일정 기간(예: 1일) 뒤 자동 삭제하도록 설정돼 있어
+    // (AWS 콘솔에서 별도 설정, 2026-08-04) - presign만 받고 confirm을 호출하지 않은 채 이탈한 경우
+    // S3에 영구히 남는 고아 객체를 우리 서버가 직접 정리하지 않아도 자동으로 청소된다. confirmUpload()가
+    // 성공하면 이 태그를 지워 Lifecycle 대상에서 제외시킨다.
+    public static final String PENDING_UPLOAD_TAG = "status=pending";
+
     private final S3Presigner s3Presigner;
     private final S3Client s3Client;
     private final String bucket;
@@ -45,6 +52,7 @@ public class S3PresignService {
                 .key(key)
                 .contentType(contentType)
                 .contentLength(contentLength)
+                .tagging(PENDING_UPLOAD_TAG)
                 .build();
 
         PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
@@ -83,6 +91,18 @@ public class S3PresignService {
             deleteObject(key);
             throw new BusinessException(contentTypeInvalid ? ErrorCode.FILE_CONTENT_TYPE_NOT_ALLOWED : ErrorCode.FILE_TOO_LARGE);
         }
+
+        clearPendingTag(key);
+    }
+
+    // confirm이 성공적으로 끝난 객체는 더 이상 "확정 대기 중"이 아니므로 PENDING_UPLOAD_TAG를 지운다 -
+    // 안 지우면 버킷 Lifecycle 규칙이 이 객체도 언젠가(태그 기준 만료일 뒤) 지워버린다. 이 호출 자체가
+    // 실패해도(권한/네트워크 등) 사용자 요청을 실패시킬 정도는 아니라고 보고, 다른 best-effort
+    // 삭제(deletePreviousProfileImageIfOwned)와 달리 여기선 예외를 삼키지 않는다 - 태그 제거 실패를
+    // 조용히 넘기면 정상적으로 확정된 객체가 나중에 예기치 않게 사라질 수 있어, 실패 시 그대로 알 수
+    // 있게 던지는 쪽이 안전하다고 판단함.
+    private void clearPendingTag(String key) {
+        s3Client.deleteObjectTagging(DeleteObjectTaggingRequest.builder().bucket(bucket).key(key).build());
     }
 
     // HeadObject는 응답 바디가 없어 S3가 404를 NoSuchKey로 못 내려주고 바디 없는 일반 404로 내려주는
