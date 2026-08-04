@@ -104,7 +104,11 @@ public class ChecklistItemTemplate {
         if (applicablePropertyTypes == null) {
             return true;
         }
-        return Arrays.asList(applicablePropertyTypes.split(",")).contains(propertyType.name());
+        // 관리자 페이지에서 자유 입력으로 들어올 수 있어(예: "OFFICETEL, MULTI_FAMILY"), 토큰마다
+        // 앞뒤 공백을 제거한 뒤 비교해야 공백 때문에 매칭이 조용히 실패하는 걸 막을 수 있다.
+        return Arrays.stream(applicablePropertyTypes.split(","))
+                .map(String::trim)
+                .anyMatch(token -> token.equals(propertyType.name()));
     }
 
     /**

@@ -43,6 +43,18 @@ class ChecklistItemTemplateTest {
     }
 
     @Test
+    @DisplayName("적용 대상 매물유형 토큰 사이에 공백이 있어도(관리자 페이지 자유 입력) 정상 매칭된다")
+    void isApplicableToTrimsWhitespaceAroundTokens() {
+        ChecklistItemTemplate template = baseBuilder()
+                .applicablePropertyTypes("OFFICETEL, MULTI_FAMILY")
+                .build();
+
+        assertThat(template.isApplicableTo(PropertyType.OFFICETEL)).isTrue();
+        assertThat(template.isApplicableTo(PropertyType.MULTI_FAMILY)).isTrue();
+        assertThat(template.isApplicableTo(PropertyType.DETACHED_HOUSE)).isFalse();
+    }
+
+    @Test
     @DisplayName("update()는 version을 제외한 모든 필드를 바꾼다")
     void updateChangesAllFieldsExceptVersion() {
         ChecklistItemTemplate template = baseBuilder().build();
