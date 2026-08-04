@@ -28,6 +28,7 @@ class DuplicateListingDetectorTest {
     private Property property(Long id, String roadAddress, String jibunAddress, TransactionType transactionType) {
         Property property = Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(transactionType)
                 .deposit(10_000_000L)
@@ -104,6 +105,7 @@ class DuplicateListingDetectorTest {
     void detectReturnsUndeterminableWhenAddressMissing() {
         Property property = Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(10_000_000L)

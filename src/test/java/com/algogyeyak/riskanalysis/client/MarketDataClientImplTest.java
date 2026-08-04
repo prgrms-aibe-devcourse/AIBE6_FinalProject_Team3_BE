@@ -31,6 +31,7 @@ class MarketDataClientImplTest {
     private Property property(Long id, long deposit) {
         Property property = Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(deposit)

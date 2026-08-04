@@ -31,6 +31,7 @@ class ShortTermRelistingDetectorTest {
     private Property property(Long id, String roadAddress, String jibunAddress, Long deposit, Double area) {
         Property property = Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(deposit)

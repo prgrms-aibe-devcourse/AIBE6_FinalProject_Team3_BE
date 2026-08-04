@@ -28,6 +28,7 @@ class ChecklistResponseTest {
     private Property testProperty(Long id) {
         Property property = Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(10_000_000L)

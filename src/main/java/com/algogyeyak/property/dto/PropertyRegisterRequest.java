@@ -18,6 +18,9 @@ import java.util.List;
  * 케이스가 나오면 그때 거래유형별로 분기해서 완화하는 게 맞다고 판단해 지금은 유지한다.
  */
 public record PropertyRegisterRequest(
+        @NotBlank(message = "매물 이름은 필수입니다.")
+        String title,
+
         @NotBlank(message = "주소는 필수입니다.")
         String address,
 

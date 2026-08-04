@@ -15,6 +15,7 @@ import java.util.List;
  */
 public record PropertyDetailResponse(
         Long propertyId,
+        String title,
         String propertyType,
         String transactionType,
         Long deposit,
@@ -41,6 +42,7 @@ public record PropertyDetailResponse(
     ) {
         return new PropertyDetailResponse(
                 property.getId(),
+                property.getTitle(),
                 property.getPropertyType().name(),
                 property.getTransactionType().name(),
                 property.getDeposit(),

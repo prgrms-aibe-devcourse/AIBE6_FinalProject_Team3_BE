@@ -94,6 +94,7 @@ class PropertyServiceTest {
     @Test
     void 전세_등록에_성공하면_주소와_상태가_포함된_응답을_반환한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
@@ -123,6 +124,7 @@ class PropertyServiceTest {
     @Test
     void 주소_확인에_실패하면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "존재하지 않는 주소",
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
@@ -143,6 +145,7 @@ class PropertyServiceTest {
     @Test
     void 동일_조건으로_중복_등록하면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
@@ -165,6 +168,7 @@ class PropertyServiceTest {
     @Test
     void 도로명주소가_없으면_지번주소로_중복_등록을_체크한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "서울특별시 종로구 충신동 1",
                 PropertyType.DETACHED_HOUSE,
                 TransactionType.JEONSE,
@@ -195,6 +199,7 @@ class PropertyServiceTest {
     @Test
     void 연립다세대이면서_도로명주소가_없으면_매칭정확도_안내문구가_포함된다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "서울특별시 종로구 청운동 1",
                 PropertyType.MULTI_FAMILY,
                 TransactionType.JEONSE,
@@ -228,6 +233,7 @@ class PropertyServiceTest {
     @Test
     void 허용되지_않은_확장자의_이미지면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
@@ -247,6 +253,7 @@ class PropertyServiceTest {
     @Test
     void 이미지_URL이_http_https가_아니면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
@@ -269,6 +276,7 @@ class PropertyServiceTest {
                 .mapToObj(i -> "https://cdn.algogyeyak.com/img/" + i + ".jpg")
                 .toList();
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
@@ -288,6 +296,7 @@ class PropertyServiceTest {
     @Test
     void 월세인데_월임대료가_없으면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
                 PropertyType.OFFICETEL,
                 TransactionType.MONTHLY_RENT,
@@ -305,6 +314,7 @@ class PropertyServiceTest {
     @Test
     void 전세인데_월임대료를_입력하면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
@@ -323,6 +333,7 @@ class PropertyServiceTest {
     void 매물_목록조회는_본인_소유_ACTIVE_매물만_최신순으로_반환한다() {
         Property property = Property.builder()
                 .userId(USER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -359,6 +370,7 @@ class PropertyServiceTest {
     void 매물_목록조회_응답에_체크리스트_진행률이_매물별로_포함된다() {
         Property propertyWithChecklist = Property.builder()
                 .userId(USER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -369,6 +381,7 @@ class PropertyServiceTest {
 
         Property propertyWithoutChecklist = Property.builder()
                 .userId(USER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(20_000_000L)
@@ -519,6 +532,7 @@ class PropertyServiceTest {
     void 매물_상세조회에_성공하면_설명과_주소가_포함된_응답을_반환한다() {
         Property property = Property.builder()
                 .userId(USER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -546,6 +560,7 @@ class PropertyServiceTest {
     void 매물_상세조회_응답에_체크리스트_생성여부와_신고여부가_반영된다() {
         Property property = Property.builder()
                 .userId(USER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -580,6 +595,7 @@ class PropertyServiceTest {
         Long otherUserId = 999L;
         Property property = Property.builder()
                 .userId(otherUserId)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -599,6 +615,7 @@ class PropertyServiceTest {
     void 매물_수정에_성공하면_변경된_가격과_설명이_반영된_응답을_반환한다() {
         Property property = Property.builder()
                 .userId(USER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -611,7 +628,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, "수정된 설명");
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, "수정된 설명");
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -627,7 +644,7 @@ class PropertyServiceTest {
     void 존재하지_않는_매물을_수정하면_예외가_발생한다() {
         when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 999L, request))
                 .isInstanceOf(BusinessException.class);
@@ -638,6 +655,7 @@ class PropertyServiceTest {
         Long otherUserId = 999L;
         Property property = Property.builder()
                 .userId(otherUserId)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -649,7 +667,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, null, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
@@ -659,6 +677,7 @@ class PropertyServiceTest {
     void 전세_매물을_수정하면서_월임대료를_입력하면_예외가_발생한다() {
         Property property = Property.builder()
                 .userId(USER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -670,7 +689,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest(35_000_000L, 500_000L, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
@@ -680,6 +699,7 @@ class PropertyServiceTest {
     void 매물_삭제에_성공하면_상태가_DELETED로_바뀐다() {
         Property property = Property.builder()
                 .userId(USER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -709,6 +729,7 @@ class PropertyServiceTest {
         Long otherUserId = 999L;
         Property property = Property.builder()
                 .userId(otherUserId)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
@@ -728,6 +749,7 @@ class PropertyServiceTest {
     void 이미_삭제된_매물을_다시_삭제하면_예외가_발생한다() {
         Property property = Property.builder()
                 .userId(USER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)
