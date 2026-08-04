@@ -161,6 +161,46 @@ class AdminChecklistTemplateControllerTest {
     }
 
     @Test
+    void guideText가_255자를_넘으면_문항생성이_400이다() throws Exception {
+        String tooLong = "가".repeat(256);
+
+        mockMvc.perform(post("/admin/checklist-templates")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "category":"AREA",
+                                  "content":"주차 공간이 충분한가요?",
+                                  "guideText":"%s",
+                                  "importance":"GENERAL",
+                                  "itemType":"CHECK",
+                                  "displayOrder":1
+                                }
+                                """.formatted(tooLong)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void applicablePropertyTypes가_255자를_넘으면_문항생성이_400이다() throws Exception {
+        String tooLong = "OFFICETEL,".repeat(30);
+
+        mockMvc.perform(post("/admin/checklist-templates")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "category":"AREA",
+                                  "content":"주차 공간이 충분한가요?",
+                                  "importance":"GENERAL",
+                                  "itemType":"CHECK",
+                                  "displayOrder":1,
+                                  "applicablePropertyTypes":"%s"
+                                }
+                                """.formatted(tooLong)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void code에_맞지_않는_itemType으로_생성하면_400이다() throws Exception {
         mockMvc.perform(post("/admin/checklist-templates")
                         .cookie(adminCookie())

@@ -12,13 +12,15 @@ import jakarta.validation.constraints.Size;
 public record AdminChecklistItemTemplateUpdateRequest(
         @NotNull ChecklistCategory category,
         @NotBlank @Size(max = 200) String content,
-        String guideText,
+        // guideText/applicablePropertyTypes 둘 다 엔티티 컬럼에 length 지정이 없어 Hibernate 기본값인
+        // varchar(255)로 잡힌다 - 여기서 막아두지 않으면 DB 제약 위반이 400이 아니라 500으로 올라온다.
+        @Size(max = 255) String guideText,
         String helperText,
         @NotNull ChecklistImportance importance,
         @NotNull ChecklistItemType itemType,
         ChecklistItemCode code,
         @NotNull @Min(1) Integer displayOrder,
-        String applicablePropertyTypes,
+        @Size(max = 255) String applicablePropertyTypes,
         @NotNull Boolean active
 ) {
 }
