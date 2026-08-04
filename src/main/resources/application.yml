@@ -1,3 +1,116 @@
 spring:
   application:
     name: algogyeyak
+  # access token blacklist/refresh token 저장소(auth) + 캐싱 연결 준비용(그 외 도메인 - 실제
+  # 캐시 대상/TTL 설계는 별도 작업). 로컬은 docker-compose의 redis 서비스(localhost:6379)를
+  # 그대로 쓴다. Lettuce는 연결이 지연 생성이라 Redis가 안 떠 있어도 앱 기동 자체는 영향받지 않는다.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # Redis 장애 시 access token blacklist/refresh token 조회가 기본 타임아웃(수 초~무한 대기)까지
+      # 붙잡고 있으면 fail-closed 정책(장애 시 인증 거부)이 "거부"가 아니라 "응답 없음"이 되어버린다 —
+      # 짧게 끊어야 장애가 즉시 401/503으로 드러난다.
+      connect-timeout: 2s
+      timeout: 2s
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:dummy}
+            client-secret: ${GOOGLE_CLIENT_SECRET:dummy}
+            scope: email, profile
+          kakao:
+            client-id: ${KAKAO_CLIENT_ID:dummy}
+            client-secret: ${KAKAO_CLIENT_SECRET:dummy}
+            client-authentication-method: client_secret_post
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            client-name: Kakao
+            # account_email은 카카오 콘솔에서 동의항목이 활성화(비즈니스 앱 검수 등)된 이후에만 요청 가능.
+            # 활성화 전에 요청하면 카카오가 인가 요청 자체를 거부한다 (KOE010 등). 승인되면 다시 추가할 것.
+            scope: profile_nickname
+        provider:
+          kakao:
+            authorization-uri: https://kauth.kakao.com/oauth/authorize
+            token-uri: https://kauth.kakao.com/oauth/token
+            user-info-uri: https://kapi.kakao.com/v2/user/me
+            user-name-attribute: id
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:local-dev-only-secret-please-override-32-bytes-min}
+    access-token-validity-seconds: 1800
+    refresh-token-validity-seconds: 1209600 # 14일
+  oauth2:
+    authorized-redirect-uri: ${OAUTH2_REDIRECT_URI:http://localhost:3000/oauth/callback}
+    state-signing-key: ${OAUTH2_STATE_SIGNING_KEY:local-dev-only-state-signing-key-please-override-32-bytes-min}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  cookie:
+    secure: ${COOKIE_SECURE:false}
+    same-site: ${COOKIE_SAME_SITE:Lax}
+    # 로컬은 host-only(비워둠)로 둔다 — *.localhost 서브도메인 간 공유는 크롬이 지원하지 않아서
+    # (localhost를 public-suffix처럼 취급해 서브도메인의 Domain 지정 자체를 거부함) 로컬에서
+    # 커스텀 서브도메인 구조를 이 값으로 흉내낼 수 없다. 실제 커스텀 서브도메인 배포 시에만
+    # .example.com처럼 설정할 것 — README의 "운영 배포 시 쿠키 설정" 표 참고.
+    domain: ${COOKIE_DOMAIN:}
+  # 개발 편의용 "관리자로 로그인" 버튼(POST /auth/dev-login)의 스위치. 기본값은 false이며,
+  # 운영(application-prod.yml)에서는 환경변수 없이 false로 고정해 실수로 켜지는 것을 막는다.
+  dev-login:
+    enabled: ${DEV_LOGIN_ENABLED:false}
+    email: ${DEV_LOGIN_EMAIL:admin@algogyeyak.local}
+
+kakao:
+  rest-api-key: ${KAKAO_REST_API_KEY:dummy-key-for-local}
+
+clova:
+  ocr:
+    invoke-url: ${CLOVA_OCR_INVOKE_URL:https://dummy-clova-ocr-invoke-url.apigw.ntruss.com/custom/v1/dummy/general}
+    secret-key: ${CLOVA_OCR_SECRET_KEY:dummy-secret-key-for-local}
+
+gemini:
+  api-key: ${GEMINI_API_KEY:dummy-gemini-api-key-for-local}
+  model: gemini-3.5-flash
+
+# 국토교통부 실거래가 API(공공데이터포털). 반드시 "일반 인증키(Decoding)" 값을 사용할 것 -
+# Encoding 키를 넣으면 UriComponentsBuilder가 다시 인코딩해 이중 인코딩으로 인증에 실패한다.
+molit:
+  service-key: ${MOLIT_SERVICE_KEY:dummy-key-for-local}
+
+# 실거래가 비교(market-data) 정책값. M1 기간 국토부 API 실측 데이터로 재검증 예정이라고
+# 명시된 값들이라 하드코딩 대신 설정값으로 뺐다 - 재배포 없이 튜닝 가능.
+market-data:
+  comparison:
+    radius-near-meters: 300
+    radius-far-meters: 600
+    min-sample-count: 3
+    area-error-rate: 0.2
+    lookback-months: 6
+    # 시세비교 결과(Redis) 캐시 TTL. 매물 수정 시에는 캐시를 명시적으로 비우고 재계산하므로,
+    # 이 값은 수정 없이도 새 실거래 데이터가 반영되기까지 기다리는 최대 시간이다.
+    cache-ttl-minutes: 30
+
+risk-policy:
+  version: v1.0
+  price-anomaly-percent: 10
+  jeonse-ratio-caution-from: 80
+  jeonse-ratio-warn-from: 100
+  jeonse-ratio-warn-to: 150
+  jeonse-ratio-alert-over: 150
+  multi-account-detection-enabled: false
+  same-account-threshold-count: 3
+  same-account-window-days: 7
+  short-term-relisting-window-days: 30
+  short-term-relisting-price-tolerance-percent: 5
+  short-term-relisting-area-tolerance-percent: 10
+  ownership-recent-change-months: 6
+
+aws:
+  s3:
+    bucket: 3team-storage-495264909330-ap-northeast-2-an
+    region: ap-northeast-2
+    access-key: ${AWS_ACCESS_KEY:dummy-access-key-for-local}
+    secret-key: ${AWS_SECRET_KEY:dummy-secret-key-for-local}
