@@ -5,6 +5,7 @@ import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateUpdateRequest;
 import com.algogyeyak.checklist.entity.ChecklistCategory;
 import com.algogyeyak.checklist.entity.ChecklistImportance;
+import com.algogyeyak.checklist.entity.ChecklistItemCode;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
@@ -38,6 +39,21 @@ class AdminChecklistTemplateServiceTest {
                 .importance(ChecklistImportance.GENERAL)
                 .itemType(ChecklistItemType.CHECK)
                 .displayOrder(displayOrder)
+                .active(true)
+                .build();
+        ReflectionTestUtils.setField(template, "id", id);
+        return template;
+    }
+
+    private ChecklistItemTemplate templateWithCode(Long id, ChecklistItemCode code, ChecklistItemType itemType) {
+        ChecklistItemTemplate template = ChecklistItemTemplate.builder()
+                .version(2)
+                .category(ChecklistCategory.DOCUMENTS)
+                .content("특수 문항")
+                .importance(ChecklistImportance.REQUIRED)
+                .itemType(itemType)
+                .code(code)
+                .displayOrder(1)
                 .active(true)
                 .build();
         ReflectionTestUtils.setField(template, "id", id);
@@ -133,10 +149,86 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
+    @DisplayName("code에 맞지 않는 itemType으로 생성하면 ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE 예외가 발생한다")
+    void createThrowsWhenCodeAndItemTypeMismatch() {
+        assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK,
+                        ChecklistItemCode.TRUST_REGISTRATION, 1, null
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE));
+    }
+
+    @Test
+    @DisplayName("이미 다른 활성 문항이 쓰는 code로 생성하면 ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE 예외가 발생한다")
+    void createThrowsWhenCodeAlreadyUsedByAnotherActiveTemplate() {
+        when(checklistItemTemplateRepository.findByCodeAndActiveTrue(ChecklistItemCode.TRUST_REGISTRATION))
+                .thenReturn(List.of(templateWithCode(1L, ChecklistItemCode.TRUST_REGISTRATION, ChecklistItemType.YES_NO)));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (중복)", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
+                        ChecklistItemCode.TRUST_REGISTRATION, 2, null
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE));
+    }
+
+    @Test
+    @DisplayName("자기 자신의 code를 그대로 유지하며 수정하면 중복으로 보지 않는다")
+    void updateAllowsKeepingSameCodeOnSameTemplate() {
+        ChecklistItemTemplate existing = templateWithCode(1L, ChecklistItemCode.TRUST_REGISTRATION, ChecklistItemType.YES_NO);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(checklistItemTemplateRepository.findByCodeAndActiveTrue(ChecklistItemCode.TRUST_REGISTRATION))
+                .thenReturn(List.of(existing));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (문구 수정)", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
+                        ChecklistItemCode.TRUST_REGISTRATION, 1, null, true
+                )
+        );
+
+        assertThat(result.code()).isEqualTo(ChecklistItemCode.TRUST_REGISTRATION);
+    }
+
+    @Test
+    @DisplayName("다른 활성 문항이 쓰는 code로 수정하면 ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE 예외가 발생한다")
+    void updateThrowsWhenCodeAlreadyUsedByAnotherActiveTemplate() {
+        ChecklistItemTemplate other = templateWithCode(2L, ChecklistItemCode.TRUST_REGISTRATION, ChecklistItemType.YES_NO);
+        ChecklistItemTemplate target = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(checklistItemTemplateRepository.findByCodeAndActiveTrue(ChecklistItemCode.TRUST_REGISTRATION))
+                .thenReturn(List.of(other));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.update(
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
+                        ChecklistItemCode.TRUST_REGISTRATION, 1, null, true
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE));
+    }
+
+    @Test
     @DisplayName("존재하는 문항을 삭제하면 repository.delete가 호출된다")
     void deleteRemovesExistingTemplate() {
         ChecklistItemTemplate existing = template(1L, 2, 1);
         when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(checklistItemTemplateRepository.count()).thenReturn(2L);
 
         adminChecklistTemplateService.delete(1L);
 
@@ -152,5 +244,20 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("마지막 남은 문항을 삭제하려 하면 ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM 예외가 발생하고 삭제되지 않는다")
+    void deleteThrowsWhenOnlyOneTemplateRemains() {
+        ChecklistItemTemplate existing = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(checklistItemTemplateRepository.count()).thenReturn(1L);
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.delete(1L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
+
+        verify(checklistItemTemplateRepository, org.mockito.Mockito.never()).delete(any(ChecklistItemTemplate.class));
     }
 }

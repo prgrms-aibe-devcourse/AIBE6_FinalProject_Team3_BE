@@ -161,6 +161,48 @@ class AdminChecklistTemplateControllerTest {
     }
 
     @Test
+    void code에_맞지_않는_itemType으로_생성하면_400이다() throws Exception {
+        mockMvc.perform(post("/admin/checklist-templates")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "category":"DOCUMENTS",
+                                  "content":"신탁등기가 되어 있나요?",
+                                  "importance":"REQUIRED",
+                                  "itemType":"CHECK",
+                                  "code":"TRUST_REGISTRATION",
+                                  "displayOrder":1
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE"));
+    }
+
+    @Test
+    void 이미_사용중인_code로_생성하면_409이다() throws Exception {
+        ChecklistItemTemplate existing = template(10L);
+        when(checklistItemTemplateRepository.findByCodeAndActiveTrue(com.algogyeyak.checklist.entity.ChecklistItemCode.TRUST_REGISTRATION))
+                .thenReturn(List.of(existing));
+
+        mockMvc.perform(post("/admin/checklist-templates")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "category":"DOCUMENTS",
+                                  "content":"신탁등기가 되어 있나요? (중복)",
+                                  "importance":"REQUIRED",
+                                  "itemType":"YES_NO",
+                                  "code":"TRUST_REGISTRATION",
+                                  "displayOrder":1
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE"));
+    }
+
+    @Test
     void 관리자_토큰으로_문항수정에_성공한다() throws Exception {
         when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(template(10L)));
 
@@ -206,6 +248,7 @@ class AdminChecklistTemplateControllerTest {
     @Test
     void 관리자_토큰으로_문항삭제에_성공한다() throws Exception {
         when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(template(10L)));
+        when(checklistItemTemplateRepository.count()).thenReturn(2L);
 
         mockMvc.perform(delete("/admin/checklist-templates/{id}", 10L).cookie(adminCookie()))
                 .andExpect(status().isOk())
@@ -219,5 +262,15 @@ class AdminChecklistTemplateControllerTest {
         mockMvc.perform(delete("/admin/checklist-templates/{id}", 999L).cookie(adminCookie()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND"));
+    }
+
+    @Test
+    void 마지막_남은_문항삭제는_409이다() throws Exception {
+        when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(template(10L)));
+        when(checklistItemTemplateRepository.count()).thenReturn(1L);
+
+        mockMvc.perform(delete("/admin/checklist-templates/{id}", 10L).cookie(adminCookie()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM"));
     }
 }

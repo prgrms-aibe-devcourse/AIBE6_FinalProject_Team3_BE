@@ -3,11 +3,14 @@ package com.algogyeyak.checklist.service;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateUpdateRequest;
+import com.algogyeyak.checklist.entity.ChecklistItemCode;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
+import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +24,18 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class AdminChecklistTemplateService {
+
+    // 각 code가 어떤 itemType과 짝을 이뤄야 자동 issueFound 판정이 실제로 동작하는지(ChecklistItem의
+    // answerYesNo/answerDocumentRequest 참고) - code만 붙이고 itemType이 안 맞으면(예: TRUST_REGISTRATION을
+    // CHECK 문항에 붙임) 자동 판정 자체가 조용히 무시된다.
+    private static final Map<ChecklistItemCode, ChecklistItemType> REQUIRED_ITEM_TYPE_BY_CODE = Map.of(
+            ChecklistItemCode.TRUST_REGISTRATION, ChecklistItemType.YES_NO,
+            ChecklistItemCode.OWNERSHIP_MATCH, ChecklistItemType.YES_NO,
+            ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE, ChecklistItemType.DATE,
+            ChecklistItemCode.TAX_DELINQUENCY_NOTICE, ChecklistItemType.CHECK,
+            ChecklistItemCode.DATE_OF_CONFIRMATION_REQUEST, ChecklistItemType.DOCUMENT_REQUEST,
+            ChecklistItemCode.RESIDENT_REGISTRATION_REQUEST, ChecklistItemType.DOCUMENT_REQUEST
+    );
 
     private final ChecklistItemTemplateRepository checklistItemTemplateRepository;
 
@@ -36,6 +51,9 @@ public class AdminChecklistTemplateService {
      */
     @Transactional
     public AdminChecklistItemTemplateResponse create(AdminChecklistItemTemplateCreateRequest request) {
+        // 새로 만드는 문항은 항상 active=true라, 다른 활성 문항과의 code 중복도 그 기준으로 검사한다.
+        validateCode(request.code(), request.itemType(), true, null);
+
         int version = checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc().stream()
                 .mapToInt(ChecklistItemTemplate::getVersion)
                 .max()
@@ -61,6 +79,8 @@ public class AdminChecklistTemplateService {
     @Transactional
     public AdminChecklistItemTemplateResponse update(Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
         ChecklistItemTemplate template = findTemplate(templateId);
+        validateCode(request.code(), request.itemType(), request.active(), templateId);
+
         template.update(
                 request.category(),
                 request.content(),
@@ -76,9 +96,50 @@ public class AdminChecklistTemplateService {
         return AdminChecklistItemTemplateResponse.from(template);
     }
 
+    /**
+     * code는 자동 issueFound 판정이 code당 정확히 1개의 활성 문항을 전제하므로(ChecklistTemplateSeedDataTest
+     * 참고), itemType과의 짝이 맞는지 + 다른 활성 문항과 중복되지 않는지 둘 다 검증한다.
+     */
+    private void validateCode(ChecklistItemCode code, ChecklistItemType itemType, boolean active, Long excludeTemplateId) {
+        if (code == null) {
+            return;
+        }
+
+        ChecklistItemType requiredItemType = REQUIRED_ITEM_TYPE_BY_CODE.get(code);
+        if (requiredItemType != itemType) {
+            throw new BusinessException(
+                    ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE,
+                    "%s 코드는 %s 응답 방식에서만 사용할 수 있습니다.".formatted(code, requiredItemType)
+            );
+        }
+
+        if (!active) {
+            return;
+        }
+
+        boolean duplicate = checklistItemTemplateRepository.findByCodeAndActiveTrue(code).stream()
+                .anyMatch(existing -> !existing.getId().equals(excludeTemplateId));
+        if (duplicate) {
+            throw new BusinessException(
+                    ErrorCode.ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE,
+                    "이미 다른 활성 문항이 %s 코드를 사용하고 있습니다.".formatted(code)
+            );
+        }
+    }
+
+    /**
+     * 마지막 남은 문항까지 물리 삭제하면, 앱 재시작 시 ChecklistTemplateSeeder가 "테이블이 비어있다"고
+     * 판단해 기본 시드 데이터를 다시 채워 넣는다 - 관리자가 의도적으로 전부 정리했다고 생각한 상태가
+     * 재시작 한 번에 되돌아가 버리는 걸 막기 위해, 항상 최소 1개는 남기도록 강제한다. 노출을 끄고 싶으면
+     * active=false(수정 API)를 쓰면 된다.
+     */
     @Transactional
     public void delete(Long templateId) {
-        checklistItemTemplateRepository.delete(findTemplate(templateId));
+        ChecklistItemTemplate template = findTemplate(templateId);
+        if (checklistItemTemplateRepository.count() <= 1) {
+            throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM);
+        }
+        checklistItemTemplateRepository.delete(template);
     }
 
     private ChecklistItemTemplate findTemplate(Long templateId) {
