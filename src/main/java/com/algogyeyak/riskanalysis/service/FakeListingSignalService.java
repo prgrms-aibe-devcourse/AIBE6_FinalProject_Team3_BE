@@ -37,6 +37,7 @@ public class FakeListingSignalService {
     private final PropertyRiskCheckRepository riskCheckRepository;
     private final PropertyRiskRepository riskRepository;
     private final PropertyRepository propertyRepository;
+    private final DepositSafetyCheckService depositSafetyCheckService;
     private final RiskPolicyConfig policyConfig;
 
     /**
@@ -94,7 +95,7 @@ public class FakeListingSignalService {
     public RiskAnalysisSummaryResponse checkAndSummarize(Long userId, Long propertyId) {
         checkAndSave(userId, propertyId);
         RiskSignalListResponse signals = getSignals(userId, propertyId);
-        return new RiskAnalysisSummaryResponse(signals.signalCount(), policyConfig.getVersion(), LocalDateTime.now());
+        return new RiskAnalysisSummaryResponse(propertyId, signals.signalCount(), policyConfig.getVersion(), LocalDateTime.now());
     }
 
     /**
@@ -111,6 +112,8 @@ public class FakeListingSignalService {
         detectors.stream()
                 .filter(SignalDetector::isEnabled)
                 .forEach(detector -> checkAndSaveSignal(property, comparison, detector));
+
+        depositSafetyCheckService.checkAndSave(property);
     }
 
     private void checkAndSaveSignal(Property property, MarketComparison comparison, SignalDetector detector) {

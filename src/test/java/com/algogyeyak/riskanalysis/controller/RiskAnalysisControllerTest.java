@@ -75,13 +75,14 @@ class RiskAnalysisControllerTest {
     @DisplayName("인증된 사용자가 위험 신호 분석을 요청하면 실행하고 신호 개수 요약을 반환한다")
     void triggerRiskAnalysisReturnsSummary() throws Exception {
         String token = tokenFor(1L);
-        RiskAnalysisSummaryResponse summary = new RiskAnalysisSummaryResponse(2, "v1.0", LocalDateTime.now());
+        RiskAnalysisSummaryResponse summary = new RiskAnalysisSummaryResponse(10L, 2, "v1.0", LocalDateTime.now());
         when(fakeListingSignalService.checkAndSummarize(1L, 10L)).thenReturn(summary);
 
         mockMvc.perform(post("/properties/10/risk-analysis")
                         .cookie(new Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.propertyId").value(10))
                 .andExpect(jsonPath("$.data.signalCount").value(2))
                 .andExpect(jsonPath("$.data.policyVersion").value("v1.0"));
 

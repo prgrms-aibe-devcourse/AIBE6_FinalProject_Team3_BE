@@ -93,6 +93,7 @@ class AdminPropertyReportControllerTest {
     private Property buildProperty() {
         Property property = Property.builder()
                 .userId(REPORTER_ID)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)

@@ -27,6 +27,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @DisplayName("FakeListingSignalService")
@@ -36,14 +37,16 @@ class FakeListingSignalServiceTest {
     private final PropertyRiskCheckRepository riskCheckRepository = mock(PropertyRiskCheckRepository.class);
     private final PropertyRiskRepository riskRepository = mock(PropertyRiskRepository.class);
     private final MarketDataClient marketDataClient = mock(MarketDataClient.class);
+    private final DepositSafetyCheckService depositSafetyCheckService = mock(DepositSafetyCheckService.class);
     private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
     private final FakeListingSignalService service = new FakeListingSignalService(
             List.of(mock(SignalDetector.class)), marketDataClient, riskCheckRepository, riskRepository,
-            propertyRepository, policyConfig);
+            propertyRepository, depositSafetyCheckService, policyConfig);
 
     private Property property(Long id, Long ownerId) {
         Property property = Property.builder()
                 .userId(ownerId)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(10_000_000L)
@@ -124,6 +127,17 @@ class FakeListingSignalServiceTest {
     }
 
     @Test
+    @DisplayName("checkAndSave(Property)는 신호 탐지와 함께 보증금 안전성 체크도 실행한다")
+    void checkAndSaveAlsoRunsDepositSafetyCheck() {
+        Property property = property(10L, 1L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+
+        service.checkAndSave(1L, 10L);
+
+        verify(depositSafetyCheckService).checkAndSave(property);
+    }
+
+    @Test
     @DisplayName("checkAndSave(userId, propertyId)는 존재하지 않는 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
     void checkAndSaveWithOwnerCheckThrowsWhenPropertyNotFound() {
         when(propertyRepository.findById(10L)).thenReturn(Optional.empty());
@@ -176,6 +190,7 @@ class FakeListingSignalServiceTest {
 
         RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
 
+        assertThat(result.propertyId()).isEqualTo(10L);
         assertThat(result.signalCount()).isEqualTo(1);
         assertThat(result.policyVersion()).isEqualTo("v1.0");
         assertThat(result.calculatedAt()).isNotNull();
@@ -194,6 +209,7 @@ class FakeListingSignalServiceTest {
 
         RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
 
+        assertThat(result.propertyId()).isEqualTo(10L);
         assertThat(result.signalCount()).isEqualTo(0);
     }
 }
