@@ -22,6 +22,7 @@ import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
+import com.algogyeyak.property.dto.PropertyImageRequest;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
@@ -102,7 +103,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 "역세권 오피스텔",
-                List.of("https://cdn.algogyeyak.com/img/abc.jpg")
+                List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.jpg", null))
         );
 
         when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
@@ -241,7 +242,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
-                List.of("https://cdn.algogyeyak.com/img/abc.bmp")
+                List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.bmp", null))
         );
 
         assertThatThrownBy(() -> propertyService.register(USER_ID, request))
@@ -261,7 +262,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
-                List.of("ftp://cdn.algogyeyak.com/img/abc.jpg")
+                List.of(new PropertyImageRequest("ftp://cdn.algogyeyak.com/img/abc.jpg", null))
         );
 
         assertThatThrownBy(() -> propertyService.register(USER_ID, request))
@@ -272,8 +273,8 @@ class PropertyServiceTest {
 
     @Test
     void 이미지가_10장을_초과하면_예외가_발생한다() {
-        List<String> tooManyImages = IntStream.range(0, 11)
-                .mapToObj(i -> "https://cdn.algogyeyak.com/img/" + i + ".jpg")
+        List<PropertyImageRequest> tooManyImages = IntStream.range(0, 11)
+                .mapToObj(i -> new PropertyImageRequest("https://cdn.algogyeyak.com/img/" + i + ".jpg", null))
                 .toList();
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
@@ -628,7 +629,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, "수정된 설명");
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, "수정된 설명", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -644,7 +645,7 @@ class PropertyServiceTest {
     void 존재하지_않는_매물을_수정하면_예외가_발생한다() {
         when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 999L, request))
                 .isInstanceOf(BusinessException.class);
@@ -667,7 +668,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
@@ -689,7 +690,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);

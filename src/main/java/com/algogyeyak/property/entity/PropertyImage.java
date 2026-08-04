@@ -2,6 +2,8 @@ package com.algogyeyak.property.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -31,11 +33,17 @@ public class PropertyImage {
     @Column(nullable = false, length = 500)
     private String imageUrl;
 
+    // 어느 공간(거실/침실 등) 사진인지 라벨. 필수 아님 - 라벨 없이 올릴 수도 있다.
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private RoomType roomType;
+
     private Integer sortOrder;
 
     @Builder
-    public PropertyImage(String imageUrl, Integer sortOrder) {
+    public PropertyImage(String imageUrl, RoomType roomType, Integer sortOrder) {
         this.imageUrl = imageUrl;
+        this.roomType = roomType;
         this.sortOrder = sortOrder;
     }
 

@@ -3,7 +3,6 @@ package com.algogyeyak.property.dto;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
-import com.algogyeyak.property.entity.PropertyImage;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -23,7 +22,7 @@ public record PropertyDetailResponse(
         Double area,
         String description,
         AddressResponse address,
-        List<String> imageUrls,
+        List<PropertyImageResponse> images,
         MarketComparisonResponse marketComparison,
         // 본인이 이 매물의 임장 체크리스트를 생성한 적이 있는지 여부(진행 상태까지는 아니고 생성 여부만).
         boolean checklistCreated,
@@ -50,7 +49,7 @@ public record PropertyDetailResponse(
                 property.getArea(),
                 property.getDescription(),
                 AddressResponse.from(property.getAddress()),
-                property.getImages().stream().map(PropertyImage::getImageUrl).toList(),
+                property.getImages().stream().map(PropertyImageResponse::from).toList(),
                 marketComparison,
                 checklistCreated,
                 reported,
