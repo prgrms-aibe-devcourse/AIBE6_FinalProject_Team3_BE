@@ -21,6 +21,7 @@ import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
+import com.algogyeyak.property.dto.PropertyImageResponse;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
@@ -256,7 +257,7 @@ class PropertyControllerTest {
                         37.4995539438207,
                         127.031393491745
                 ),
-                List.of("https://cdn.algogyeyak.com/img/abc.jpg"),
+                List.of(new PropertyImageResponse("https://cdn.algogyeyak.com/img/abc.jpg", null)),
                 MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
                 false,
                 false,
@@ -300,7 +301,7 @@ class PropertyControllerTest {
 
     @Test
     void 매물_수정에_성공하면_200과_수정된_정보를_반환한다() throws Exception {
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, "수정된 설명");
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, "수정된 설명", null);
 
         PropertyDetailResponse response = new PropertyDetailResponse(
                 101L,
@@ -341,7 +342,7 @@ class PropertyControllerTest {
 
     @Test
     void 존재하지_않는_매물을_수정하면_404를_반환한다() throws Exception {
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
 
         when(propertyService.update(anyLong(), anyLong(), any(PropertyUpdateRequest.class)))
                 .thenThrow(new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
@@ -356,7 +357,7 @@ class PropertyControllerTest {
 
     @Test
     void 본인_소유가_아닌_매물을_수정하면_403을_반환한다() throws Exception {
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
 
         when(propertyService.update(anyLong(), anyLong(), any(PropertyUpdateRequest.class)))
                 .thenThrow(new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED));
@@ -371,7 +372,7 @@ class PropertyControllerTest {
 
     @Test
     void 보증금이_없으면_수정요청은_400을_반환한다() throws Exception {
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, null, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, null, 25.0, null, null);
 
         mockMvc.perform(patch("/properties/101")
                         .with(asUser(USER_ID))

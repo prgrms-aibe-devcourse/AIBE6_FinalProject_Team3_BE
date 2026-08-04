@@ -114,6 +114,12 @@ public class Property {
         image.assignProperty(this);
     }
 
+    // 수정 시 이미지 목록을 통째로 교체하기 위한 클리어. orphanRemoval=true라 컬렉션에서 빼면
+    // 다음 flush 때 DB에서도 실제로 삭제된다 - 별도로 imageRepository.delete()를 호출할 필요 없다.
+    public void clearImages() {
+        this.images.clear();
+    }
+
     public void updateTitle(String title) {
         this.title = title;
     }
