@@ -99,6 +99,12 @@ public class AdminChecklistTemplateService {
     /**
      * code는 자동 issueFound 판정이 code당 정확히 1개의 활성 문항을 전제하므로(ChecklistTemplateSeedDataTest
      * 참고), itemType과의 짝이 맞는지 + 다른 활성 문항과 중복되지 않는지 둘 다 검증한다.
+     *
+     * 알려진 한계(조회 후 저장 방식이라 원자적이지 않음): 관리자 두 명이 동시에 같은 code로
+     * 생성/활성화하면 둘 다 이 중복 검사를 통과할 수 있다. 관리자 전용 화면이고 동시 편집 빈도가
+     * 매우 낮아 감수하기로 함(2026-08-04) - 실제로 강한 불변식이 필요해지면 DB partial unique
+     * index(활성 행에만 적용)나 비관적 락이 필요하지만, 지금은 그 정도의 스키마/락 복잡도를 들일
+     * 만큼의 위험이 아니라고 판단했다.
      */
     private void validateCode(ChecklistItemCode code, ChecklistItemType itemType, boolean active, Long excludeTemplateId) {
         if (code == null) {
@@ -132,6 +138,9 @@ public class AdminChecklistTemplateService {
      * 판단해 기본 시드 데이터를 다시 채워 넣는다 - 관리자가 의도적으로 전부 정리했다고 생각한 상태가
      * 재시작 한 번에 되돌아가 버리는 걸 막기 위해, 항상 최소 1개는 남기도록 강제한다. 노출을 끄고 싶으면
      * active=false(수정 API)를 쓰면 된다.
+     *
+     * 이 count() 검사도 validateCode()와 같은 이유로 원자적이지 않다 - 딱 2개 남은 상태에서 두 관리자가
+     * 동시에 삭제를 시도하면 둘 다 통과해 0개가 될 수 있다. 같은 이유(관리자 전용, 저빈도)로 감수한다.
      */
     @Transactional
     public void delete(Long templateId) {
