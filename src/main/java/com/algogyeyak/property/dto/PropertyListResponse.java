@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
  */
 public record PropertyListResponse(
         Long propertyId,
+        String title,
         String propertyType,
         String transactionType,
         Long deposit,
@@ -29,6 +30,7 @@ public record PropertyListResponse(
         var address = property.getAddress();
         return new PropertyListResponse(
                 property.getId(),
+                property.getTitle(),
                 property.getPropertyType().name(),
                 property.getTransactionType().name(),
                 property.getDeposit(),
