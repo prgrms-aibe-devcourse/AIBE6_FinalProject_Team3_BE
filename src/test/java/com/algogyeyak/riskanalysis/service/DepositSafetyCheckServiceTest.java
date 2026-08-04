@@ -248,4 +248,74 @@ class DepositSafetyCheckServiceTest {
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
                 );
     }
+
+    @Test
+    @DisplayName("recalculate()는 선순위보증금과 근저당 채권최고액을 분자에 합산해 재계산한다")
+    void recalculateAppliesSeniorDepositAndMaxClaimAmount() {
+        setPolicy();
+        // (200M deposit + 50M senior + 10M maxClaim) / 300M = 86.666...% -> 87%
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
+        when(depositSafetyCheckRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketSaleDataClient.getSalePrice(10L)).thenReturn(
+                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31))));
+
+        DepositSafetyCheckResponse response = service.recalculate(1L, 10L, 50_000_000L, 10_000_000L);
+
+        assertThat(response.jeonseRatio()).isEqualTo(87);
+        assertThat(response.seniorDepositApplied()).isTrue();
+        assertThat(response.seniorDeposit()).isEqualTo(50_000_000L);
+        assertThat(response.maxClaimAmount()).isEqualTo(10_000_000L);
+    }
+
+    @Test
+    @DisplayName("recalculate()는 근저당 채권최고액 없이 선순위보증금만으로도 계산한다")
+    void recalculateWorksWithSeniorDepositOnly() {
+        setPolicy();
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
+        when(depositSafetyCheckRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketSaleDataClient.getSalePrice(10L)).thenReturn(
+                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31))));
+
+        DepositSafetyCheckResponse response = service.recalculate(1L, 10L, 50_000_000L, null);
+
+        // (200M + 50M) / 300M = 83.33% -> 83%
+        assertThat(response.jeonseRatio()).isEqualTo(83);
+        assertThat(response.maxClaimAmount()).isNull();
+    }
+
+    @Test
+    @DisplayName("recalculate()는 존재하지 않는 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
+    void recalculateThrowsWhenPropertyNotFound() {
+        when(propertyRepository.findById(10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.recalculate(1L, 10L, 50_000_000L, null))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_NOT_FOUND)
+                );
+    }
+
+    @Test
+    @DisplayName("recalculate()는 본인 소유가 아니면 PROPERTY_ACCESS_DENIED 예외가 발생한다")
+    void recalculateThrowsWhenNotOwner() {
+        Property property = Property.builder()
+                .userId(999L)
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(200_000_000L)
+                .area(20.0)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 10L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+
+        assertThatThrownBy(() -> service.recalculate(1L, 10L, 50_000_000L, null))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.PROPERTY_ACCESS_DENIED)
+                );
+    }
 }

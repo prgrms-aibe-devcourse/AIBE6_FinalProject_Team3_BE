@@ -50,6 +50,20 @@ class DepositSafetyCheckResponseTest {
     }
 
     @Test
+    @DisplayName("선순위보증금이 반영된 경우 seniorDepositApplied와 값들을 함께 담는다")
+    void fromCalculatedWithSeniorDepositApplied() {
+        DepositSafetyCheck check = DepositSafetyCheck.calculated(
+                property(10L), BigDecimal.valueOf(95), BigDecimal.valueOf(50_000_000L), BigDecimal.valueOf(10_000_000L),
+                LocalDate.of(2026, 7, 31), "이 집 전세가율은 95%예요.", "v1.0");
+
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check);
+
+        assertThat(response.seniorDepositApplied()).isTrue();
+        assertThat(response.seniorDeposit()).isEqualTo(50_000_000L);
+        assertThat(response.maxClaimAmount()).isEqualTo(10_000_000L);
+    }
+
+    @Test
     @DisplayName("판정 불가인 경우 사유를 담고 수치 관련 필드는 null로 둔다")
     void fromUnavailableIncludesReason() {
         DepositSafetyCheck check = DepositSafetyCheck.unavailable(

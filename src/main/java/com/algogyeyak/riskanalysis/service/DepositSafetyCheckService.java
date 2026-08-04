@@ -23,9 +23,10 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 /**
- * 보증금과 매매시세를 이용해 전세가율(보증금/매매시세)을 계산·저장한다. 선순위보증금/근저당
- * 채권최고액을 반영한 정밀 재계산은 별도 트리거(POST /deposit-safety/recalculate, 미구현)의
- * 몫이라 이 기본 계산에는 항상 null로 저장한다.
+ * 보증금과 매매시세를 이용해 전세가율(보증금/매매시세)을 계산·저장한다. checkAndSave(Property)는
+ * POST /risk-analysis 흐름에서 선순위보증금 없이 기본 계산만 하고, recalculate()는
+ * POST /deposit-safety/recalculate에서 사용자가 입력한 선순위보증금/근저당 채권최고액을 반영해
+ * 정밀 재계산한다 - 둘 다 같은 calculate()를 공유하고 seniorDeposit/maxClaimAmount만 다르다.
  */
 @Service
 @RequiredArgsConstructor
@@ -42,6 +43,32 @@ public class DepositSafetyCheckService {
      * 응답을 그대로 반환한다 - 이 메서드는 조회 전용이라 계산을 트리거하지 않는다.
      */
     public DepositSafetyCheckResponse get(Long userId, Long propertyId) {
+        Property property = findOwnedProperty(userId, propertyId);
+        DepositSafetyCheck check = depositSafetyCheckRepository.findByPropertyId(propertyId).orElse(null);
+        return DepositSafetyCheckResponse.from(propertyId, check);
+    }
+
+    @Transactional
+    public void checkAndSave(Property property) {
+        calculate(property, null, null);
+    }
+
+    /**
+     * 사용자가 입력한 선순위보증금(+근저당 채권최고액)을 반영해 전세가율을 다시 계산·저장하고,
+     * 갱신된 결과를 바로 반환한다(POST가 계산 결과를 직접 돌려주는 도메인 컨벤션과 동일).
+     */
+    @Transactional
+    public DepositSafetyCheckResponse recalculate(Long userId, Long propertyId, Long seniorDeposit, Long maxClaimAmount) {
+        Property property = findOwnedProperty(userId, propertyId);
+
+        DepositSafetyCheck check = calculate(property,
+                seniorDeposit != null ? BigDecimal.valueOf(seniorDeposit) : null,
+                maxClaimAmount != null ? BigDecimal.valueOf(maxClaimAmount) : null);
+
+        return DepositSafetyCheckResponse.from(propertyId, check);
+    }
+
+    private Property findOwnedProperty(Long userId, Long propertyId) {
         Property property = propertyRepository.findById(propertyId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
         if (property.isDeleted()) {
@@ -50,31 +77,33 @@ public class DepositSafetyCheckService {
         if (!property.isOwnedBy(userId)) {
             throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
         }
-
-        DepositSafetyCheck check = depositSafetyCheckRepository.findByPropertyId(propertyId).orElse(null);
-        return DepositSafetyCheckResponse.from(propertyId, check);
+        return property;
     }
 
-    @Transactional
-    public void checkAndSave(Property property) {
+    private DepositSafetyCheck calculate(Property property, BigDecimal seniorDeposit, BigDecimal maxClaimAmount) {
         if (property.getTransactionType() == TransactionType.MONTHLY_RENT) {
-            upsertUnavailable(property, DepositSafetyCheckReason.TRANSACTION_TYPE_UNSUPPORTED);
-            return;
+            return upsertUnavailable(property, seniorDeposit, maxClaimAmount, DepositSafetyCheckReason.TRANSACTION_TYPE_UNSUPPORTED);
         }
 
         if (property.getDeposit() == null || property.getDeposit() <= 0) {
-            upsertUnavailable(property, DepositSafetyCheckReason.DEPOSIT_INFO_MISSING);
-            return;
+            return upsertUnavailable(property, seniorDeposit, maxClaimAmount, DepositSafetyCheckReason.DEPOSIT_INFO_MISSING);
         }
 
         Optional<MarketSalePrice> salePrice = marketSaleDataClient.getSalePrice(property.getId());
         if (salePrice.isEmpty()) {
-            upsertUnavailable(property, DepositSafetyCheckReason.ESTIMATED_PRICE_MISSING);
-            return;
+            return upsertUnavailable(property, seniorDeposit, maxClaimAmount, DepositSafetyCheckReason.ESTIMATED_PRICE_MISSING);
         }
 
-        BigDecimal ratio = calculateRatioPercent(BigDecimal.valueOf(property.getDeposit()), salePrice.get().referencePrice());
-        upsertCalculated(property, ratio, salePrice.get().referenceDate(), buildExplanation(ratio));
+        BigDecimal numerator = BigDecimal.valueOf(property.getDeposit());
+        if (seniorDeposit != null) {
+            numerator = numerator.add(seniorDeposit);
+        }
+        if (maxClaimAmount != null) {
+            numerator = numerator.add(maxClaimAmount);
+        }
+
+        BigDecimal ratio = calculateRatioPercent(numerator, salePrice.get().referencePrice());
+        return upsertCalculated(property, ratio, seniorDeposit, maxClaimAmount, salePrice.get().referenceDate(), buildExplanation(ratio));
     }
 
     private BigDecimal calculateRatioPercent(BigDecimal numerator, BigDecimal salePrice) {
@@ -101,19 +130,24 @@ public class DepositSafetyCheckService {
         return "이 집 전세가율은 %d%%예요. 매우 높은 수치라 입력값을 다시 확인해보시는 게 좋아요.".formatted(ratio);
     }
 
-    private void upsertUnavailable(Property property, DepositSafetyCheckReason reason) {
-        depositSafetyCheckRepository.findByPropertyId(property.getId()).ifPresentOrElse(
-                existing -> existing.overwrite(null, null, null, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE),
-                () -> depositSafetyCheckRepository.save(
-                        DepositSafetyCheck.unavailable(property, null, null, reason, policyConfig.getVersion()))
-        );
+    private DepositSafetyCheck upsertUnavailable(Property property, BigDecimal seniorDeposit, BigDecimal maxClaimAmount, DepositSafetyCheckReason reason) {
+        return depositSafetyCheckRepository.findByPropertyId(property.getId())
+                .map(existing -> {
+                    existing.overwrite(null, seniorDeposit, maxClaimAmount, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
+                    return existing;
+                })
+                .orElseGet(() -> depositSafetyCheckRepository.save(
+                        DepositSafetyCheck.unavailable(property, seniorDeposit, maxClaimAmount, reason, policyConfig.getVersion())));
     }
 
-    private void upsertCalculated(Property property, BigDecimal ratio, LocalDate referenceDate, String explanation) {
-        depositSafetyCheckRepository.findByPropertyId(property.getId()).ifPresentOrElse(
-                existing -> existing.overwrite(ratio, null, null, referenceDate, explanation, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED),
-                () -> depositSafetyCheckRepository.save(
-                        DepositSafetyCheck.calculated(property, ratio, null, null, referenceDate, explanation, policyConfig.getVersion()))
-        );
+    private DepositSafetyCheck upsertCalculated(Property property, BigDecimal ratio, BigDecimal seniorDeposit, BigDecimal maxClaimAmount,
+                                                 LocalDate referenceDate, String explanation) {
+        return depositSafetyCheckRepository.findByPropertyId(property.getId())
+                .map(existing -> {
+                    existing.overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
+                    return existing;
+                })
+                .orElseGet(() -> depositSafetyCheckRepository.save(
+                        DepositSafetyCheck.calculated(property, ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, policyConfig.getVersion())));
     }
 }
