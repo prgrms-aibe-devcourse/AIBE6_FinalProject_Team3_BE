@@ -40,9 +40,11 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
   cookie:
     secure: ${COOKIE_SECURE:true}
-    # SAME_SITE/DOMAIN 값은 배포 도메인 전략(커스텀 서브도메인 / Vercel rewrite / 도메인 공유 없음)에
-    # 따라 완전히 달라진다 — README.md의 "운영 배포 시 쿠키 설정" 표 참고 후 확정할 것.
-    same-site: ${COOKIE_SAME_SITE:Lax}
+    # 배포 전략을 시나리오 C(프론트 Vercel / 백엔드 EC2, 도메인 공유 없음)로 확정 —
+    # README.md의 "운영 배포 시 쿠키 설정" 표 참고. SameSite=None은 반드시 Secure=true와 함께
+    # 가야 하며(CookieUtils가 기동 시점에 이를 강제한다), COOKIE_DOMAIN은 어차피 서로 다른
+    # 등록 도메인이라 맞출 수 없으므로 비워둔다(host-only).
+    same-site: ${COOKIE_SAME_SITE:None}
     domain: ${COOKIE_DOMAIN:}
   # 개발 편의용 로그인 우회 기능은 운영에서 절대 켜지면 안 되므로, 환경변수를 참조하지 않고
   # 값 자체를 고정한다 — 배포 환경에 DEV_LOGIN_ENABLED=true가 잘못 설정돼도 이 값이 이긴다.

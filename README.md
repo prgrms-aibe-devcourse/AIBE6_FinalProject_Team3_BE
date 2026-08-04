@@ -92,7 +92,11 @@ dotenv는 원래 JVM의 working directory 기준으로 `.env`를 찾습니다. �
 | **B. Vercel rewrite** (`/api/*`를 EC2로 프록시, 브라우저는 Vercel origin만 봄) | `true` | `Lax` (기본값) | 비워둠(host-only) | 브라우저 입장에서 이미 같은 origin이라 `Domain` 지정이 필요 없음. 단, `proxy.ts`/`oauth/callback`이 지금처럼 EC2를 직접 부르는 구조라 rewrite에 맞춰 손봐야 함 (검토 예정) |
 | **C. 도메인 공유 없음** (완전히 별개 호스트, 위 둘 다 아닌 경우) | `true` | `None` | 비워둠(host-only, 어차피 못 맞춤) | ⚠️ `SameSite=None`만으로는 안 풀림 — 쿠키의 `Domain`이 EC2 자체 호스트로 고정돼 있어서, 프론트 미들웨어(`proxy.ts`)가 `/home` 같은 요청에서 쿠키를 여전히 못 봄. `SameSite=None; Secure`는 브라우저→EC2 API 호출 자체는 되게 해주지만, "로그인 게이트"/자동 refresh 로직은 별도로 재설계해야 함 |
 
-시나리오 A/B는 둘 다 `SameSite=Lax`로 충분하고, `SameSite=None`은 시나리오 C에서만, 그것도 부분적으로만 문제를 해결합니다. 지금은 시나리오 A를 기본값으로 잡아뒀습니다 — 실제 배포 전략(A/B/C 중 어느 것)이 확정되면 이 표를 기준으로 환경변수만 바꾸면 됩니다.
+시나리오 A/B는 둘 다 `SameSite=Lax`로 충분하고, `SameSite=None`은 시나리오 C에서만, 그것도 부분적으로만 문제를 해결합니다.
+
+**(2026-08-04 확정)** AWS 배포는 시나리오 C(프론트 Vercel, 백엔드 EC2 — 도메인 공유 없음)로 결정되어, `application-prod.yml` 기본값을 `COOKIE_SAME_SITE=None`으로 바꿔뒀습니다(`COOKIE_SECURE`는 이미 `true`가 기본값). `CookieUtils`는 기동 시점에 `same-site=None`인데 `secure=false`면 즉시 실패하도록 막아둬서, `COOKIE_SECURE`를 켜지 않은 채 조용히 뜨는 상황(브라우저가 쿠키를 버려 로그인이 전부 깨지는데 원인이 안 보임)을 방지합니다.
+
+⚠️ 위 표 시나리오 C 비고에 적힌 대로, 이 설정만으로 로그인이 전부 해결되지는 않습니다 — 프론트 `proxy.ts`의 로그인 게이트가 `request.cookies.has(...)`로 **자신의(Vercel) origin에 붙은 쿠키**를 읽는데, 백엔드가 발급하는 쿠키의 Domain은 EC2 호스트로 고정돼 있어 브라우저가 Vercel로 가는 요청에는 그 쿠키를 절대 붙이지 않습니다. 즉 지금 구조로는 실제로 로그인된 사용자도 보호 페이지에서 항상 로그인 화면으로 튕깁니다 — 별도로 프론트 쪽 게이트 로직(예: 미들웨어가 쿠키를 직접 읽는 대신 `credentials:'include'`로 백엔드 `/auth/me`를 호출해 세션 여부를 확인하는 방식)을 재설계해야 실제로 동작합니다.
 
 ## Docs
 
