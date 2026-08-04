@@ -29,6 +29,10 @@ public class GeminiClientImpl implements GeminiClient {
     private static final String ENDPOINT_TEMPLATE =
             "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent";
 
+    // originalText가 매 호출마다 다르게 재구성되어 환각 검증(contains 체크)이
+    // 불안정해지는 것을 막기 위해, 응답 재현성을 높이는 낮은 temperature를 고정한다.
+    private static final double TEMPERATURE = 0.1;
+
     private static final String SYSTEM_INSTRUCTION = """
             당신은 대한민국 주택임대차 계약서의 특약사항을 분석하는 어시스턴트입니다.
             사용자는 부동산 계약 경험이 없는 사회초년생/대학생입니다.
@@ -98,7 +102,7 @@ public class GeminiClientImpl implements GeminiClient {
                         "user",
                         List.of(new GeminiGenerateContentRequest.Part(maskedText))
                 )),
-                new GeminiGenerateContentRequest.GenerationConfig("application/json", RESPONSE_SCHEMA)
+                new GeminiGenerateContentRequest.GenerationConfig("application/json", RESPONSE_SCHEMA, TEMPERATURE)
         );
 
         URI uri = UriComponentsBuilder.fromUriString(ENDPOINT_TEMPLATE.formatted(model))
