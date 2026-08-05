@@ -6,6 +6,7 @@ import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.testsupport.CsrfHeaderMockMvcCustomizer;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -21,16 +23,20 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -48,6 +54,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 // 거부됨"이라는 실제 동작 자체를 검증하는 회귀 테스트라, 진짜 Redis가 필요하다.
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(CsrfHeaderMockMvcCustomizer.class)
 @Testcontainers
 class AuthControllerTest {
 
@@ -188,6 +195,36 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.data.email").value("test@example.com"))
                 .andExpect(header().string("Set-Cookie",
                         containsString(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "=")));
+    }
+
+    @Test
+    void loginDeletesLeakedAccessTokenCookieWhenRefreshTokenIssueFails() throws Exception {
+        // access token 쿠키를 먼저 심은 뒤 refresh token 발급(Redis 등)이 실패하면, 응답은
+        // 503/실패인데 브라우저에는 access token만 남아 30분짜리 반쪽 로그인 세션이 생기던 버그의
+        // 회귀 테스트 - issueAuthCookies()가 이 경우 access 쿠키를 삭제(Set-Cookie Max-Age=0)로
+        // 덧붙여야 한다.
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+        when(refreshTokenService.issue(user)).thenThrow(new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE));
+
+        MvcResult result = mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"test@example.com","password":"password1"}
+                                """))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_STORE_UNAVAILABLE"))
+                .andReturn();
+
+        List<String> accessTokenCookies = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "="))
+                .toList();
+        assertFalse(accessTokenCookies.isEmpty());
+        // 여러 Set-Cookie가 같은 이름으로 내려가면 브라우저는 마지막 것을 최종 값으로 받아들인다 -
+        // 그래서 삭제 신호가 반드시 마지막이어야 한다.
+        assertTrue(accessTokenCookies.get(accessTokenCookies.size() - 1).contains("Max-Age=0"));
     }
 
     @Test

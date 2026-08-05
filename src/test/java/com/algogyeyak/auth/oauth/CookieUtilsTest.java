@@ -86,4 +86,23 @@ class CookieUtilsTest {
         String setCookie = response.getHeader("Set-Cookie");
         assertTrue(setCookie.contains("Domain=.localhost"));
     }
+
+    @Test
+    void constructorRejectsSameSiteNoneWithoutSecure() {
+        assertThrows(IllegalStateException.class, () ->
+                new CookieUtils(false, "None", "", "test-state-signing-key-must-be-at-least-32-bytes"));
+    }
+
+    @Test
+    void constructorAllowsSameSiteNoneWithSecure() {
+        CookieUtils secureNoneCookieUtils =
+                new CookieUtils(true, "None", "", "test-state-signing-key-must-be-at-least-32-bytes");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        secureNoneCookieUtils.addCookie(response, "test", "value", 3600);
+
+        String setCookie = response.getHeader("Set-Cookie");
+        assertTrue(setCookie.contains("SameSite=None"));
+        assertTrue(setCookie.contains("Secure"));
+    }
 }

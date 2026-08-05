@@ -115,6 +115,13 @@ public class DepositSafetyCheckService {
     }
 
     private DepositSafetyCheck calculate(Property property, BigDecimal seniorDeposit, BigDecimal maxClaimAmount) {
+        // upsertUnavailable/upsertCalculated가 "없으면 insert" check-then-act라, 같은 매물에 대한
+        // checkAndSave(POST /risk-analysis 경유)와 recalculate(POST /deposit-safety/recalculate)가
+        // 동시에 들어오면 유니크 제약 위반이 날 수 있다 - 매물 행에 쓰기 잠금을 걸어 뒤에 온
+        // 트랜잭션이 앞선 트랜잭션의 커밋을 기다리게 한다(PropertyRepository.findByIdForRiskCheckUpdate
+        // 참고, FakeListingSignalService.checkAndSave(Property)와 동일한 이유).
+        propertyRepository.findByIdForRiskCheckUpdate(property.getId());
+
         if (property.getTransactionType() == TransactionType.MONTHLY_RENT) {
             return upsertUnavailable(property, seniorDeposit, maxClaimAmount, DepositSafetyCheckReason.TRANSACTION_TYPE_UNSUPPORTED);
         }

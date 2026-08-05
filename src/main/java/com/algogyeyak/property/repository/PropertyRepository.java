@@ -6,13 +6,30 @@ import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 
 public interface PropertyRepository extends JpaRepository<Property, Long> {
+
+    /**
+     * risk-analysis/deposit-safety의 신호 upsert(findByPropertyIdAndSignalType 등)가 "없으면 insert,
+     * 있으면 update"인 check-then-act라서, 같은 매물에 대한 두 요청(예: 위험 신호 재계산 POST가
+     * 빠르게 두 번 겹치는 경우, 또는 사용자 조회 트리거와 PropertyUpdatedEvent 배치 재계산이 동시에
+     * 도는 경우)이 동시에 이 메서드를 타면 둘 다 "없음"으로 보고 동시에 insert를 시도해 유니크 제약
+     * 위반(DataIntegrityViolationException)이 날 수 있다. 이 조회로 매물 행에 쓰기 잠금을 걸어두면,
+     * 뒤에 도착한 트랜잭션은 앞선 트랜잭션이 커밋할 때까지 대기했다가 그제서야 "이미 있음"을 보고
+     * update로 처리되어 위반이 사라진다 - FakeListingSignalService.checkAndSave(Property)/
+     * DepositSafetyCheckService.calculate() 진입부에서 호출한다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Property p where p.id = :id")
+    Optional<Property> findByIdForRiskCheckUpdate(@Param("id") Long id);
 
     /**
      * 동일 사용자가 동일 주소·동일 거래유형으로 이미 등록해둔 매물이 있는지 확인 (PROPERTY_DUPLICATE 판단용).
