@@ -2,11 +2,14 @@ package com.algogyeyak.contractanalysis.client;
 
 import com.algogyeyak.contractanalysis.client.dto.GeminiGenerateContentRequest;
 import com.algogyeyak.contractanalysis.client.dto.GeminiGenerateContentResponse;
+import com.algogyeyak.contractanalysis.dto.ContractAnalysisChatClause;
+import com.algogyeyak.contractanalysis.dto.ContractAnalysisChatMessage;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -51,6 +54,17 @@ public class GeminiClientImpl implements GeminiClient {
                사용자 자신의 상황을 확인하는 질문(예: 당신은 ~하시나요)이 아니라,
                상대방에게 정보나 예외 여부를 묻는 질문(예: ~한 경우도 포함되나요,
                ~는 허용되나요)으로 작성하세요.
+            """;
+
+    private static final String CHAT_SYSTEM_INSTRUCTION_TEMPLATE = """
+            당신은 이 계약 조항에 대한 사용자의 추가 질문에 답하는 어시스턴트입니다.
+            이 조항과 관련 없는 질문에는 답하지 말고 정중히 안내하세요.
+            쉬운 말로 설명하고, 법적 효력 없는 참고정보임을 매 답변에 명시하세요.
+
+            [분석 대상 조항]
+            원문: %s
+            위험 여부: %s
+            설명: %s
             """;
 
     private static final Map<String, Object> RESPONSE_SCHEMA = Map.of(
@@ -105,6 +119,48 @@ public class GeminiClientImpl implements GeminiClient {
                 new GeminiGenerateContentRequest.GenerationConfig("application/json", RESPONSE_SCHEMA, TEMPERATURE)
         );
 
+        return execute(requestBody);
+    }
+
+    @Override
+    public GeminiGenerateContentResponse chat(
+            ContractAnalysisChatClause clause,
+            String question,
+            List<ContractAnalysisChatMessage> history
+    ) {
+        String systemInstruction = CHAT_SYSTEM_INSTRUCTION_TEMPLATE.formatted(
+                clause.originalText(), clause.riskFlag(), clause.explanation()
+        );
+
+        List<GeminiGenerateContentRequest.Content> contents = new ArrayList<>();
+        for (ContractAnalysisChatMessage message : history) {
+            contents.add(new GeminiGenerateContentRequest.Content(
+                    toGeminiRole(message.role()),
+                    List.of(new GeminiGenerateContentRequest.Part(message.content()))
+            ));
+        }
+        contents.add(new GeminiGenerateContentRequest.Content(
+                "user",
+                List.of(new GeminiGenerateContentRequest.Part(question))
+        ));
+
+        GeminiGenerateContentRequest requestBody = new GeminiGenerateContentRequest(
+                new GeminiGenerateContentRequest.SystemInstruction(
+                        List.of(new GeminiGenerateContentRequest.Part(systemInstruction))
+                ),
+                contents,
+                new GeminiGenerateContentRequest.GenerationConfig(null, null, TEMPERATURE)
+        );
+
+        return execute(requestBody);
+    }
+
+    // Gemini는 "user"/"model" role만 허용하므로, 우리 히스토리의 "assistant"를 매핑해준다.
+    private String toGeminiRole(String role) {
+        return "assistant".equals(role) ? "model" : "user";
+    }
+
+    private GeminiGenerateContentResponse execute(GeminiGenerateContentRequest requestBody) {
         URI uri = UriComponentsBuilder.fromUriString(ENDPOINT_TEMPLATE.formatted(model))
                 .queryParam("key", apiKey)
                 .build()
