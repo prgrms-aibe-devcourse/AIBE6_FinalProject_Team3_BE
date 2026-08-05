@@ -151,7 +151,16 @@ public class SecurityConfig {
     private List<String> parseAllowedOrigins() {
         return Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
+                .map(SecurityConfig::stripTrailingSlash)
                 .filter(origin -> !origin.isEmpty())
                 .collect(Collectors.toUnmodifiableList());
+    }
+
+    // 브라우저가 보내는 Origin 헤더는 절대 트레일링 슬래시를 붙이지 않는다(스킴+호스트+포트뿐,
+    // 경로가 없다) - CORS_ALLOWED_ORIGINS에 "https://app.example.com/"처럼 슬래시를 붙이는 흔한
+    // 오타가 있으면, 값 자체는 비어있지 않으니 fail-fast에도 안 걸리면서 모든 정상 Origin과
+    // 영원히 매칭되지 않아 CORS/CSRF가 전부 막히는 조용한 전체 장애가 된다.
+    private static String stripTrailingSlash(String origin) {
+        return origin.endsWith("/") ? origin.substring(0, origin.length() - 1) : origin;
     }
 }
