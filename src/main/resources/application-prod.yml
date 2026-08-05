@@ -35,6 +35,11 @@ app:
   jwt:
     secret: ${JWT_SECRET}
   oauth2:
+    # application.yml의 기본값(http://localhost:3000/oauth/callback)을 여기서 없애지 않으면,
+    # 운영 배포 시 OAUTH2_REDIRECT_URI를 깜빡해도 기동은 성공하고 구글/카카오 로그인 성공 후
+    # 브라우저가 조용히 localhost:3000으로 리다이렉트된다 - JWT_SECRET 등 다른 값들과 같은
+    # 이유로 기본값 자체를 없애 배포 시 반드시 명시하도록 강제한다.
+    authorized-redirect-uri: ${OAUTH2_REDIRECT_URI}
     state-signing-key: ${OAUTH2_STATE_SIGNING_KEY}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
