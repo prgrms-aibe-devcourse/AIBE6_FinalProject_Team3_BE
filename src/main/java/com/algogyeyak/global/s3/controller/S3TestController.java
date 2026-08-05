@@ -42,7 +42,8 @@ public class S3TestController {
         String uploadUrl = s3PresignService.generateUploadUrl(
                 key, request.getContentType(), request.getFileSize(), purpose);
 
-        return ResponseEntity.ok(ApiResponse.success(new PresignedUploadResponse(uploadUrl, key)));
+        return ResponseEntity.ok(ApiResponse.success(
+                new PresignedUploadResponse(uploadUrl, key, S3PresignService.PENDING_UPLOAD_TAG)));
     }
 
     @PostMapping("/confirm")

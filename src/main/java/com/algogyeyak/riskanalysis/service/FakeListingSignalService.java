@@ -6,6 +6,8 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
 import com.algogyeyak.riskanalysis.dto.MarketComparison;
+import com.algogyeyak.riskanalysis.dto.RiskAnalysisSummaryResponse;
+import com.algogyeyak.riskanalysis.dto.RiskSignalListResponse;
 import com.algogyeyak.riskanalysis.dto.RiskSignalResponse;
 import com.algogyeyak.riskanalysis.dto.SignalCheckResult;
 import com.algogyeyak.riskanalysis.entity.PropertyRisk;
@@ -21,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -34,6 +37,7 @@ public class FakeListingSignalService {
     private final PropertyRiskCheckRepository riskCheckRepository;
     private final PropertyRiskRepository riskRepository;
     private final PropertyRepository propertyRepository;
+    private final DepositSafetyCheckService depositSafetyCheckService;
     private final RiskPolicyConfig policyConfig;
 
     /**
@@ -41,7 +45,7 @@ public class FakeListingSignalService {
      * 확인한 뒤, PropertyRiskCheck(신호별 상태)와 PropertyRisk(리스크 발견 시 설명)를 signalType
      * 기준으로 묶어 응답한다.
      */
-    public List<RiskSignalResponse> getSignals(Long userId, Long propertyId) {
+    public RiskSignalListResponse getSignals(Long userId, Long propertyId) {
         Property property = propertyRepository.findById(propertyId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
         if (property.isDeleted()) {
@@ -54,9 +58,12 @@ public class FakeListingSignalService {
         Map<RiskSignalType, PropertyRisk> risksByType = riskRepository.findAllByPropertyId(propertyId).stream()
                 .collect(Collectors.toMap(PropertyRisk::getSignalType, Function.identity()));
 
-        return riskCheckRepository.findAllByPropertyId(propertyId).stream()
+        List<RiskSignalResponse> signals = riskCheckRepository.findAllByPropertyId(propertyId).stream()
                 .map(check -> RiskSignalResponse.from(check, risksByType.get(check.getSignalType())))
                 .toList();
+        int signalCount = (int) signals.stream().filter(signal -> signal.description() != null).count();
+
+        return new RiskSignalListResponse(propertyId, signalCount, signals, RiskSignalListResponse.DISCLAIMER);
     }
 
     /**
@@ -80,6 +87,18 @@ public class FakeListingSignalService {
     }
 
     /**
+     * checkAndSave(userId, propertyId)를 실행한 뒤, 상세 목록(GET /risk-signals가 담당) 대신
+     * "리스크가 실제로 발견된 신호가 몇 건인지" 요약만 반환한다 - POST 응답이 너무 무거워지지 않게
+     * 상세는 별도 GET 호출로 분리하는 설계.
+     */
+    @Transactional
+    public RiskAnalysisSummaryResponse checkAndSummarize(Long userId, Long propertyId) {
+        checkAndSave(userId, propertyId);
+        RiskSignalListResponse signals = getSignals(userId, propertyId);
+        return new RiskAnalysisSummaryResponse(propertyId, signals.signalCount(), policyConfig.getVersion(), LocalDateTime.now());
+    }
+
+    /**
      * 신호 4종을 각각 독립적으로 판정·저장한다. 시세비교(comparison)를 한 번만 조회해 각 탐지기에
      * 넘기되, 그 결과를 어떻게 쓸지는(혹은 아예 무시할지는) 각 SignalDetector가 결정한다 —
      * 시세비교가 실패/판정불가여도 이를 필요로 하지 않는 신호(중복매물/동일계정/재등록)는
@@ -93,6 +112,8 @@ public class FakeListingSignalService {
         detectors.stream()
                 .filter(SignalDetector::isEnabled)
                 .forEach(detector -> checkAndSaveSignal(property, comparison, detector));
+
+        depositSafetyCheckService.checkAndSave(property);
     }
 
     private void checkAndSaveSignal(Property property, MarketComparison comparison, SignalDetector detector) {

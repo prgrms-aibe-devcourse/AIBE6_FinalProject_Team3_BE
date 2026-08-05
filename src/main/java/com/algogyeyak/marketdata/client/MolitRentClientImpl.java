@@ -7,6 +7,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
@@ -27,6 +31,13 @@ import java.util.List;
  * 주의: molit.service-key 값은 공공데이터포털에서 발급받은 "일반 인증키(Decoding)"를 사용할 것.
  * "Encoding" 키를 그대로 넣으면 UriComponentsBuilder가 다시 인코딩해 이중 인코딩으로 인증에 실패한다.
  *
+ * 주의 2: 요청에 User-Agent 헤더를 반드시 붙여야 한다 - data.go.kr 게이트웨이가 curl/Java의 기본
+ * User-Agent(예: "Java/21.0.x")가 붙은 요청을 차단하는 것으로 확인됨(2026-08-04). 이 경우 HTTP
+ * 자체는 200 OK로 응답하되 바디에 {"cmmMsgHeader":{"errMsg":"HTTP_ERROR", ...}} 형태의 에러가
+ * 담겨오기 때문에 RestClientException으로 잡히지 않고, toSamples()가 이를 "그냥 데이터 없음"과
+ * 구분하지 못해 조용히 빈 리스트를 반환해버린다 - 그 결과 시세비교가 항상 UNAVAILABLE로 나오는데도
+ * 로그에는 아무 단서도 안 남는 문제가 있었다. brew/curl로 재현 및 원인 확인함.
+ *
  * RestTemplate의 기본 Jackson 컨버터를 그대로 쓰지 않고 문자열로 받아 별도 ObjectMapper로 파싱하는 이유:
  * 공공데이터포털 XML->JSON 변환은 결과가 1건일 때 item을 배열이 아닌 단일 객체로 내려주는 경우가 있어
  * (ACCEPT_SINGLE_VALUE_AS_ARRAY 필요) 앱 전역 ObjectMapper 설정을 건드리지 않고 이 클라이언트에서만 대응한다.
@@ -42,6 +53,11 @@ public class MolitRentClientImpl implements MolitRentClient {
             "https://apis.data.go.kr/1613000/RTMSDataSvcRHRent/getRTMSDataSvcRHRent";
     private static final String DETACHED_HOUSE_URL =
             "https://apis.data.go.kr/1613000/RTMSDataSvcSHRent/getRTMSDataSvcSHRent";
+
+    // data.go.kr 게이트웨이가 curl/Java 기본 User-Agent를 차단해서 임의로 브라우저처럼 보이는 값을 붙인다.
+    private static final String USER_AGENT =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
     private static final DateTimeFormatter DEAL_YMD_FORMAT = DateTimeFormatter.ofPattern("yyyyMM");
 
@@ -69,8 +85,23 @@ public class MolitRentClientImpl implements MolitRentClient {
                     .build(true) // serviceKey가 이미 인코딩된 값일 수 있어 재인코딩하지 않는다
                     .toUri();
 
-            String rawJson = restTemplate.getForObject(uri, String.class);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set(HttpHeaders.USER_AGENT, USER_AGENT);
+
+            ResponseEntity<String> response = restTemplate.exchange(
+                    uri, HttpMethod.GET, new HttpEntity<>(headers), String.class
+            );
+            String rawJson = response.getBody();
             MolitRentResponse parsed = rawJson == null ? null : MOLIT_OBJECT_MAPPER.readValue(rawJson, MolitRentResponse.class);
+
+            if (parsed == null || parsed.getResponse() == null) {
+                // 정상 스키마({"response":{"header":...,"body":...}})가 아니라는 뜻 - 국토부 API 자체
+                // 에러 응답({"cmmMsgHeader":{"errMsg":...}})일 가능성이 높다. 진짜 "데이터 없음"과
+                // 구분하기 위해 원본을 남긴다(개인정보 없는 공개 실거래 데이터라 로그에 남겨도 무방).
+                log.warn("국토부 실거래가 응답이 예상 스키마가 아님 - propertyType: {}, lawdCd: {}, dealYm: {}, rawResponse: {}",
+                        propertyType, lawdCd, dealYm, rawJson);
+                return Collections.emptyList();
+            }
 
             return toSamples(propertyType, parsed);
 

@@ -46,6 +46,7 @@ class PropertyReportServiceTest {
     private Property ownedProperty(Long userId) {
         return Property.builder()
                 .userId(userId)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(30_000_000L)

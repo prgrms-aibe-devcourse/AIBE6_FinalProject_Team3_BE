@@ -10,7 +10,14 @@ import com.algogyeyak.user.repository.UserPreferenceRepository;
 import com.algogyeyak.user.repository.UserRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.global.s3.dto.PresignedUploadRequest;
+import com.algogyeyak.global.s3.dto.PresignedUploadResponse;
+import com.algogyeyak.global.s3.service.S3PresignService;
+import com.algogyeyak.global.s3.util.S3ImagePurpose;
+import com.algogyeyak.global.s3.util.S3KeyGenerator;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -20,8 +27,11 @@ import org.springframework.util.StringUtils;
 @Transactional(readOnly = true)
 public class UserService {
 
+    private static final Logger log = LoggerFactory.getLogger(UserService.class);
+
     private final UserRepository userRepository;
     private final UserPreferenceRepository userPreferenceRepository;
+    private final S3PresignService s3PresignService;
 
     public UserProfileResponse getMyProfile(Long userId) {
         User user = getActiveUserOrThrow(userId);
@@ -64,6 +74,63 @@ public class UserService {
         return toResponse(user, preference);
     }
 
+    // 업로드용 presigned URL 발급 - S3에 실제로 아무 흔적도 남기지 않으므로 조회 트랜잭션(readOnly)이면 충분하다.
+    public PresignedUploadResponse presignProfileImageUpload(Long userId, PresignedUploadRequest request) {
+        getActiveUserOrThrow(userId);
+
+        String key = S3KeyGenerator.profileImageKey(userId, request.getFileExtension());
+        String uploadUrl = s3PresignService.generateUploadUrl(
+                key, request.getContentType(), request.getFileSize(), S3ImagePurpose.PROFILE);
+
+        return new PresignedUploadResponse(uploadUrl, key, S3PresignService.PENDING_UPLOAD_TAG);
+    }
+
+    @Transactional
+    public UserProfileResponse confirmProfileImageUpload(Long userId, String key) {
+        User user = getActiveUserOrThrow(userId);
+
+        if (!S3KeyGenerator.isProfileImageOwnedBy(userId, key)) {
+            throw new BusinessException(ErrorCode.FILE_KEY_ACCESS_DENIED);
+        }
+
+        s3PresignService.confirmUpload(key, S3ImagePurpose.PROFILE);
+
+        String previousImageUrl = user.getProfileImageUrl();
+        user.updateProfileImageUrl(s3PresignService.generateDownloadUrl(key, S3ImagePurpose.PROFILE));
+        deletePreviousProfileImageIfOwned(userId, previousImageUrl);
+
+        UserPreference preference = userPreferenceRepository.findByUserId(userId).orElse(null);
+        return toResponse(user, preference);
+    }
+
+    // 기본(미설정) 프로필 이미지로 되돌린다 - 이미 기본 이미지 상태(profileImageUrl == null)여도
+    // 에러 없이 그대로 성공 처리한다(멱등).
+    @Transactional
+    public UserProfileResponse resetProfileImage(Long userId) {
+        User user = getActiveUserOrThrow(userId);
+
+        String previousImageUrl = user.getProfileImageUrl();
+        user.updateProfileImageUrl(null);
+        deletePreviousProfileImageIfOwned(userId, previousImageUrl);
+
+        UserPreference preference = userPreferenceRepository.findByUserId(userId).orElse(null);
+        return toResponse(user, preference);
+    }
+
+    // 새 이미지로 교체된 이전 프로필 이미지를 정리한다. 이미 새 이미지 저장은 끝난 뒤라, 여기서
+    // 실패해도(권한/네트워크 등) 요청 자체를 실패시키지 않고 로그만 남긴다.
+    private void deletePreviousProfileImageIfOwned(Long userId, String previousImageUrl) {
+        s3PresignService.extractOwnedKey(previousImageUrl)
+                .filter(oldKey -> S3KeyGenerator.isProfileImageOwnedBy(userId, oldKey))
+                .ifPresent(oldKey -> {
+                    try {
+                        s3PresignService.deleteReplacedObject(oldKey);
+                    } catch (RuntimeException e) {
+                        log.warn("이전 프로필 이미지 삭제 실패 - userId={}, key={}", userId, oldKey, e);
+                    }
+                });
+    }
+
     @Transactional
     public UserProfileResponse updateMyProfile(Long userId, ProfileUpdateRequest request) {
         User user = getActiveUserOrThrow(userId);
@@ -72,10 +139,6 @@ public class UserService {
                 && !request.getNickname().equals(user.getNickname())) {
             validateNicknameNotDuplicated(userId, request.getNickname());
             user.updateNickname(request.getNickname());
-        }
-
-        if (request.getProfileImageUrl() != null) {
-            user.updateProfileImageUrl(request.getProfileImageUrl());
         }
 
         UserPreference preference = userPreferenceRepository.findByUserId(userId)

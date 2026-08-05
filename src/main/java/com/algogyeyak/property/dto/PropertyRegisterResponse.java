@@ -6,6 +6,7 @@ import com.algogyeyak.property.entity.PropertyAddress;
 
 public record PropertyRegisterResponse(
         Long propertyId,
+        String title,
         String status,
         AddressResponse address,
         MarketComparisonResponse marketComparison,
@@ -16,6 +17,7 @@ public record PropertyRegisterResponse(
         PropertyAddress propertyAddress = property.getAddress();
         return new PropertyRegisterResponse(
                 property.getId(),
+                property.getTitle(),
                 property.getStatus().name(),
                 AddressResponse.from(propertyAddress),
                 marketComparison,

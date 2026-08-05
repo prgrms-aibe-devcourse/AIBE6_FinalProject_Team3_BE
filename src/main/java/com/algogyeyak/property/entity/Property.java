@@ -43,6 +43,9 @@ public class Property {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(nullable = false)
+    private String title;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private PropertyType propertyType;
@@ -82,6 +85,7 @@ public class Property {
     @Builder
     private Property(
             Long userId,
+            String title,
             PropertyType propertyType,
             TransactionType transactionType,
             Long deposit,
@@ -90,6 +94,7 @@ public class Property {
             String description
     ) {
         this.userId = userId;
+        this.title = title;
         this.propertyType = propertyType;
         this.transactionType = transactionType;
         this.deposit = deposit;
@@ -107,6 +112,16 @@ public class Property {
     public void addImage(PropertyImage image) {
         this.images.add(image);
         image.assignProperty(this);
+    }
+
+    // 수정 시 이미지 목록을 통째로 교체하기 위한 클리어. orphanRemoval=true라 컬렉션에서 빼면
+    // 다음 flush 때 DB에서도 실제로 삭제된다 - 별도로 imageRepository.delete()를 호출할 필요 없다.
+    public void clearImages() {
+        this.images.clear();
+    }
+
+    public void updateTitle(String title) {
+        this.title = title;
     }
 
     public void updatePriceInfo(Long deposit, Long monthlyRent) {

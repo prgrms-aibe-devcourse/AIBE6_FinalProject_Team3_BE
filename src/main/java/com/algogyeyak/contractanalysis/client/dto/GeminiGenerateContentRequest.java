@@ -24,7 +24,8 @@ public record GeminiGenerateContentRequest(
 
     public record GenerationConfig(
             String responseMimeType,
-            Map<String, Object> responseSchema
+            Map<String, Object> responseSchema,
+            Double temperature
     ) {
     }
 }

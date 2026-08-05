@@ -89,10 +89,14 @@ market-data:
     min-sample-count: 3
     area-error-rate: 0.2
     lookback-months: 6
+    # 시세비교 결과(Redis) 캐시 TTL. 매물 수정 시에는 캐시를 명시적으로 비우고 재계산하므로,
+    # 이 값은 수정 없이도 새 실거래 데이터가 반영되기까지 기다리는 최대 시간이다.
+    cache-ttl-minutes: 30
 
 risk-policy:
   version: v1.0
   price-anomaly-percent: 10
+  jeonse-ratio-caution-from: 80
   jeonse-ratio-warn-from: 100
   jeonse-ratio-warn-to: 150
   jeonse-ratio-alert-over: 150
@@ -102,6 +106,7 @@ risk-policy:
   short-term-relisting-window-days: 30
   short-term-relisting-price-tolerance-percent: 5
   short-term-relisting-area-tolerance-percent: 10
+  ownership-recent-change-months: 6
 
 aws:
   s3:

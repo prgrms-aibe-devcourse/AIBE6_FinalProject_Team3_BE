@@ -28,6 +28,7 @@ class PriceAnomalyDetectorTest {
     private Property property() {
         return Property.builder()
                 .userId(1L)
+                .title("테스트 매물")
                 .propertyType(PropertyType.OFFICETEL)
                 .transactionType(TransactionType.JEONSE)
                 .deposit(180_000_000L)
