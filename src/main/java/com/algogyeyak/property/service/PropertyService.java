@@ -143,7 +143,11 @@ public class PropertyService {
 
         return PageResponse.from(
                 properties,
-                property -> PropertyListResponse.from(property, checklistProgressByPropertyId.get(property.getId()))
+                property -> PropertyListResponse.from(
+                        property,
+                        checklistProgressByPropertyId.get(property.getId()),
+                        marketComparisonService.compare(property)
+                )
         );
     }
 
