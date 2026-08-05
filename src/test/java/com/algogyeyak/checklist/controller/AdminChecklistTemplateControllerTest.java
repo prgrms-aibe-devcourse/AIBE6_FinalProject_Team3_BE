@@ -17,6 +17,7 @@ import com.algogyeyak.checklist.entity.ChecklistImportance;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
+import com.algogyeyak.testsupport.CsrfHeaderMockMvcCustomizer;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -39,6 +41,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(CsrfHeaderMockMvcCustomizer.class)
 class AdminChecklistTemplateControllerTest {
 
     private static final Long ADMIN_ID = 1L;

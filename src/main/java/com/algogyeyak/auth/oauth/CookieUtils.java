@@ -50,6 +50,14 @@ public class CookieUtils {
             @Value("${app.cookie.same-site:Lax}") String sameSite,
             @Value("${app.cookie.domain:}") String cookieDomain,
             @Value("${app.oauth2.state-signing-key}") String stateSigningKey) {
+        // 브라우저는 SameSite=None인데 Secure가 없는 쿠키는 아예 거부한다 — 이 조합으로 기동되면
+        // access/refresh 쿠키가 Set-Cookie로는 내려가지만 브라우저가 조용히 버려서 로그인이
+        // 전부 깨지는데, 그 원인이 겉으로 드러나지 않는다. 배포 시 COOKIE_SECURE를 함께 켜는 걸
+        // 잊었을 때 이 상태로 조용히 뜨는 대신 기동 자체를 막는다.
+        if ("none".equalsIgnoreCase(sameSite) && !secureCookie) {
+            throw new IllegalStateException(
+                    "app.cookie.same-site=None requires app.cookie.secure=true (browsers reject SameSite=None cookies without Secure)");
+        }
         this.secureCookie = secureCookie;
         this.sameSite = sameSite;
         this.cookieDomain = cookieDomain;

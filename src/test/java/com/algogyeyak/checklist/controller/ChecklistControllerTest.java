@@ -17,6 +17,7 @@ import com.algogyeyak.checklist.service.ChecklistService;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.testsupport.CsrfHeaderMockMvcCustomizer;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -46,6 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(CsrfHeaderMockMvcCustomizer.class)
 @DisplayName("ChecklistController")
 class ChecklistControllerTest {
 

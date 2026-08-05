@@ -106,6 +106,13 @@ public class FakeListingSignalService {
      */
     @Transactional
     public void checkAndSave(Property property) {
+        // 아래 upsertCheck/upsertRisk가 "없으면 insert" check-then-act라, 같은 매물에 대한 두 요청이
+        // 동시에 여기 들어오면 유니크 제약 위반이 날 수 있다 - 매물 행에 쓰기 잠금을 걸어 뒤에 온
+        // 트랜잭션이 앞선 트랜잭션의 커밋을 기다리게 한다(PropertyRepository.findByIdForRiskCheckUpdate
+        // 참고). depositSafetyCheckService.checkAndSave()도 내부에서 같은 잠금을 다시 걸지만, 같은
+        // 트랜잭션 안에서 이미 보유한 잠금을 재요청하는 것뿐이라 안전하다.
+        propertyRepository.findByIdForRiskCheckUpdate(property.getId());
+
         MarketComparison comparison = marketDataClient.getComparison(property.getId())
                 .orElse(null);
 
