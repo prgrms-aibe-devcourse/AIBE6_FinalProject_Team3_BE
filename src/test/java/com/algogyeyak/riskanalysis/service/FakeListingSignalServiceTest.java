@@ -30,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -159,13 +160,17 @@ class FakeListingSignalServiceTest {
         when(riskCheckRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.PRICE_ANOMALY))
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.of(PropertyRiskCheck.success(property, RiskSignalType.PRICE_ANOMALY, "v1.0")));
+        // 첫 saveAndFlush(신규 insert)만 유니크 제약 위반으로 실패하고, 복구 과정에서 재조회한
+        // 기존 행을 저장하는 두 번째 saveAndFlush(update)는 정상 처리된다 - 실제로도 update는
+        // insert와 달리 이 유니크 제약에 걸릴 이유가 없다.
         when(riskCheckRepository.saveAndFlush(any(PropertyRiskCheck.class)))
-                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"))
+                .thenReturn(null);
 
         serviceWithDetector.checkAndSave(property);
 
         // 예외가 밖으로 안 새어 나오면 성공 - 재조회한 기존 행에 overwrite()로 복구됐다는 뜻.
-        verify(riskCheckRepository).saveAndFlush(any(PropertyRiskCheck.class));
+        verify(riskCheckRepository, times(2)).saveAndFlush(any(PropertyRiskCheck.class));
     }
 
     @Test
@@ -188,11 +193,12 @@ class FakeListingSignalServiceTest {
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.of(PropertyRisk.of(property, RiskSignalType.DUPLICATE_LISTING, "동일 주소로 등록된 다른 매물이 있어요")));
         when(riskRepository.saveAndFlush(any(PropertyRisk.class)))
-                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"))
+                .thenReturn(null);
 
         serviceWithDetector.checkAndSave(property);
 
-        verify(riskRepository).saveAndFlush(any(PropertyRisk.class));
+        verify(riskRepository, times(2)).saveAndFlush(any(PropertyRisk.class));
     }
 
     @Test

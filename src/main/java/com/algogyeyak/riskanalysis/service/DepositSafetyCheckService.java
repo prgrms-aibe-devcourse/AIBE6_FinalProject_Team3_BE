@@ -16,6 +16,7 @@ import com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason;
 import com.algogyeyak.riskanalysis.enums.DepositSafetyStatus;
 import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
 import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -35,6 +36,7 @@ import java.util.Optional;
  * 정밀 재계산한다 - 둘 다 같은 calculate()를 공유하고 seniorDeposit/maxClaimAmount만 다르다.
  */
 @Service
+@Slf4j
 public class DepositSafetyCheckService {
 
     private final DepositSafetyCheckRepository depositSafetyCheckRepository;
@@ -204,12 +206,24 @@ public class DepositSafetyCheckService {
             requiresNewTransactionTemplate.executeWithoutResult(status -> depositSafetyCheckRepository.saveAndFlush(newCheck));
             return newCheck;
         } catch (DataIntegrityViolationException e) {
-            return depositSafetyCheckRepository.findByPropertyId(property.getId())
-                    .map(winner -> {
-                        winner.overwrite(null, seniorDeposit, maxClaimAmount, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
-                        return winner;
-                    })
-                    .orElseThrow(() -> e);
+            // 재조회도 REQUIRES_NEW로 새 트랜잭션에서 한다 - 바깥 트랜잭션에서 그대로 재조회하면,
+            // MySQL InnoDB의 기본 격리수준(REPEATABLE READ)에서는 이 트랜잭션이 이미 앞서 읽은 시점의
+            // 스냅샷에 갇혀 있어 방금 다른 트랜잭션이 커밋한 승자 행이 안 보일 수 있다(H2는 기본이
+            // READ_COMMITTED라 로컬 테스트에서는 드러나지 않는다). 새 트랜잭션은 항상 새 스냅샷을
+            // 잡으므로 격리수준과 무관하게 승자를 확실히 볼 수 있다.
+            DepositSafetyCheck winner = requiresNewTransactionTemplate.execute(status ->
+                    depositSafetyCheckRepository.findByPropertyId(property.getId())
+                            .map(found -> {
+                                found.overwrite(null, seniorDeposit, maxClaimAmount, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
+                                depositSafetyCheckRepository.saveAndFlush(found);
+                                return found;
+                            })
+                            .orElse(null));
+            if (winner == null) {
+                log.error("DepositSafetyCheck 동시 insert 경쟁 복구 실패 - propertyId={}", property.getId(), e);
+                throw e;
+            }
+            return winner;
         }
     }
 
@@ -226,12 +240,20 @@ public class DepositSafetyCheckService {
             requiresNewTransactionTemplate.executeWithoutResult(status -> depositSafetyCheckRepository.saveAndFlush(newCheck));
             return newCheck;
         } catch (DataIntegrityViolationException e) {
-            return depositSafetyCheckRepository.findByPropertyId(property.getId())
-                    .map(winner -> {
-                        winner.overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
-                        return winner;
-                    })
-                    .orElseThrow(() -> e);
+            // upsertUnavailable()과 동일한 이유로 재조회도 REQUIRES_NEW 새 트랜잭션에서 한다.
+            DepositSafetyCheck winner = requiresNewTransactionTemplate.execute(status ->
+                    depositSafetyCheckRepository.findByPropertyId(property.getId())
+                            .map(found -> {
+                                found.overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
+                                depositSafetyCheckRepository.saveAndFlush(found);
+                                return found;
+                            })
+                            .orElse(null));
+            if (winner == null) {
+                log.error("DepositSafetyCheck 동시 insert 경쟁 복구 실패 - propertyId={}", property.getId(), e);
+                throw e;
+            }
+            return winner;
         }
     }
 }

@@ -19,6 +19,7 @@ import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
 import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
 import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import com.algogyeyak.riskanalysis.signal.SignalDetector;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -34,6 +35,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class FakeListingSignalService {
     private final List<SignalDetector> detectors;
     private final MarketDataClient marketDataClient;
@@ -173,11 +175,24 @@ public class FakeListingSignalService {
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status2 -> riskCheckRepository.saveAndFlush(newCheck));
         } catch (DataIntegrityViolationException e) {
-            riskCheckRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
-                    .ifPresentOrElse(
-                            winner -> winner.overwrite(status, reason, policyConfig.getVersion()),
-                            () -> { throw e; }
-                    );
+            // 재조회도 REQUIRES_NEW로 새 트랜잭션에서 한다 - 바깥(이 메서드가 속한) 트랜잭션에서 그대로
+            // 재조회하면, MySQL InnoDB의 기본 격리수준(REPEATABLE READ)에서는 그 트랜잭션이 이미 앞서
+            // 읽은 시점의 스냅샷에 갇혀 있어서 방금 다른 트랜잭션이 커밋한 승자 행이 안 보일 수 있다
+            // (H2는 기본이 READ_COMMITTED라 로컬 테스트에서는 이 문제가 드러나지 않는다). 새
+            // 트랜잭션은 항상 새 스냅샷을 잡으므로 격리수준과 무관하게 승자를 확실히 볼 수 있다.
+            boolean recovered = Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(status2 ->
+                    riskCheckRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
+                            .map(winner -> {
+                                winner.overwrite(status, reason, policyConfig.getVersion());
+                                riskCheckRepository.saveAndFlush(winner);
+                                return true;
+                            })
+                            .orElse(false)));
+            if (!recovered) {
+                log.error("PropertyRiskCheck 동시 insert 경쟁 복구 실패 - propertyId={}, signalType={}",
+                        property.getId(), signalType, e);
+                throw e;
+            }
         }
     }
 
@@ -200,11 +215,20 @@ public class FakeListingSignalService {
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status -> riskRepository.saveAndFlush(newRisk));
         } catch (DataIntegrityViolationException e) {
-            riskRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
-                    .ifPresentOrElse(
-                            winner -> winner.overwrite(result.description()),
-                            () -> { throw e; }
-                    );
+            // upsertCheck()와 동일한 이유로 재조회도 REQUIRES_NEW 새 트랜잭션에서 한다.
+            boolean recovered = Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(status ->
+                    riskRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
+                            .map(winner -> {
+                                winner.overwrite(result.description());
+                                riskRepository.saveAndFlush(winner);
+                                return true;
+                            })
+                            .orElse(false)));
+            if (!recovered) {
+                log.error("PropertyRisk 동시 insert 경쟁 복구 실패 - propertyId={}, signalType={}",
+                        property.getId(), signalType, e);
+                throw e;
+            }
         }
     }
 }
