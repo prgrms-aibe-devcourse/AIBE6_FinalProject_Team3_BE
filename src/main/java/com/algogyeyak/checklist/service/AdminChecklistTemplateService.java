@@ -80,6 +80,7 @@ public class AdminChecklistTemplateService {
     public AdminChecklistItemTemplateResponse update(Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
         ChecklistItemTemplate template = findTemplate(templateId);
         validateCode(request.code(), request.itemType(), request.active(), templateId);
+        validateNotDeactivatingLastActiveTemplate(template, request.active());
 
         template.update(
                 request.category(),
@@ -130,6 +131,24 @@ public class AdminChecklistTemplateService {
                     ErrorCode.ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE,
                     "이미 다른 활성 문항이 %s 코드를 사용하고 있습니다.".formatted(code)
             );
+        }
+    }
+
+    /**
+     * delete()가 마지막 문항 물리 삭제를 막는 것과 같은 이유로, "숨기려면 active=false(수정 API)를
+     * 쓰라"는 안내 문구와 달리 그 active=false 자체가 마지막 활성 문항을 0개로 만드는 경로는 막혀
+     * 있지 않았다 - 그러면 ChecklistService.createChecklist()가 그 이후 만드는 모든 유저 체크리스트가
+     * 문항 0개로 조용히 생성된다. delete()와 동일한 원자성 한계(조회 후 저장 방식)를 그대로 감수한다.
+     */
+    private void validateNotDeactivatingLastActiveTemplate(ChecklistItemTemplate template, boolean nextActive) {
+        if (nextActive || !template.isActive()) {
+            return;
+        }
+        long remainingActiveCount = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc().stream()
+                .filter(existing -> !existing.getId().equals(template.getId()))
+                .count();
+        if (remainingActiveCount == 0) {
+            throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM);
         }
     }
 

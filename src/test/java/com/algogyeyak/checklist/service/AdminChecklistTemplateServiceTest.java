@@ -114,6 +114,10 @@ class AdminChecklistTemplateServiceTest {
     void updateChangesExistingTemplateFields() {
         ChecklistItemTemplate existing = template(1L, 2, 1);
         when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        // 이 테스트는 active=false로의 전환 자체(마지막 활성 문항 보호)가 아니라 필드 반영을
+        // 검증하는 것이 목적이므로, 다른 활성 문항이 남아있는 상태로 스텁해 그 보호에 걸리지 않게 한다.
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(existing, template(2L, 2, 2)));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
                 1L,
@@ -244,6 +248,48 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("마지막 활성 문항을 비활성화하려 하면 ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM 예외가 발생한다")
+    void updateThrowsWhenDeactivatingTheLastActiveTemplate() {
+        // delete()는 마지막 문항 물리 삭제를 막지만, "숨기려면 active=false를 쓰라"는 안내와 달리
+        // 그 경로 자체는 막혀 있지 않았던 회귀 테스트 - 이 경우 그 이후 생성되는 모든 유저
+        // 체크리스트가 문항 0개로 만들어진다.
+        ChecklistItemTemplate existing = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of(existing));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.update(
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
+    }
+
+    @Test
+    @DisplayName("다른 활성 문항이 남아있으면 비활성화해도 된다")
+    void updateAllowsDeactivatingWhenOtherActiveTemplatesRemain() {
+        ChecklistItemTemplate existing = template(1L, 2, 1);
+        ChecklistItemTemplate other = template(2L, 2, 2);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(existing, other));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                )
+        );
+
+        assertThat(result.active()).isFalse();
     }
 
     @Test
