@@ -11,7 +11,9 @@ import com.algogyeyak.user.enums.TransactionType;
 import com.algogyeyak.user.repository.UserPreferenceRepository;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
@@ -30,7 +32,8 @@ class UserServiceTest {
     private final UserRepository userRepository = mock(UserRepository.class);
     private final UserPreferenceRepository userPreferenceRepository = mock(UserPreferenceRepository.class);
     private final S3PresignService s3PresignService = mock(S3PresignService.class);
-    private final UserService userService = new UserService(userRepository, userPreferenceRepository, s3PresignService);
+    private final UserService userService = new UserService(
+            userRepository, userPreferenceRepository, s3PresignService, mock(PlatformTransactionManager.class));
 
     private User activeUser(Long id) {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
@@ -97,6 +100,40 @@ class UserServiceTest {
 
         ProfileUpdateRequest request = new ProfileUpdateRequest();
         ReflectionTestUtils.setField(request, "nickname", "중복닉네임");
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> userService.updateMyProfile(1L, request));
+
+        assertEquals(ErrorCode.USER_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
+    }
+
+    @Test
+    void updateMyProfileChangesNicknameWhenAvailable() {
+        User user = activeUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.existsByNicknameAndIdNot("새닉네임", 1L)).thenReturn(false);
+
+        ProfileUpdateRequest request = new ProfileUpdateRequest();
+        ReflectionTestUtils.setField(request, "nickname", "새닉네임");
+
+        UserProfileResponse response = userService.updateMyProfile(1L, request);
+
+        assertEquals("새닉네임", response.getNickname());
+    }
+
+    @Test
+    void updateMyProfileRecoversWithNicknameConflictWhenConcurrentChangeWinsTheRace() {
+        // 사전 검사(existsByNicknameAndIdNot)를 통과한 이후에도, 커밋 전에 동시에 같은 닉네임으로
+        // 바꾼 다른 요청이 먼저 커밋되면 유니크 제약에 걸릴 수 있다 - 이때 500 대신 정확한
+        // USER_NICKNAME_ALREADY_EXISTS 409로 복구되어야 한다(UserService.changeNickname 참고).
+        User user = activeUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.existsByNicknameAndIdNot("경쟁닉네임", 1L)).thenReturn(false, true);
+        when(userRepository.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("duplicate"));
+
+        ProfileUpdateRequest request = new ProfileUpdateRequest();
+        ReflectionTestUtils.setField(request, "nickname", "경쟁닉네임");
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> userService.updateMyProfile(1L, request));

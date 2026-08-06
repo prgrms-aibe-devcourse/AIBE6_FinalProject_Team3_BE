@@ -15,15 +15,17 @@ import com.algogyeyak.global.s3.dto.PresignedUploadResponse;
 import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.global.s3.util.S3ImagePurpose;
 import com.algogyeyak.global.s3.util.S3KeyGenerator;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 @Service
-@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class UserService {
 
@@ -32,6 +34,19 @@ public class UserService {
     private final UserRepository userRepository;
     private final UserPreferenceRepository userPreferenceRepository;
     private final S3PresignService s3PresignService;
+    private final TransactionTemplate requiresNewTransactionTemplate;
+
+    public UserService(
+            UserRepository userRepository,
+            UserPreferenceRepository userPreferenceRepository,
+            S3PresignService s3PresignService,
+            PlatformTransactionManager transactionManager) {
+        this.userRepository = userRepository;
+        this.userPreferenceRepository = userPreferenceRepository;
+        this.s3PresignService = s3PresignService;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     public UserProfileResponse getMyProfile(Long userId) {
         User user = getActiveUserOrThrow(userId);
@@ -58,8 +73,7 @@ public class UserService {
 
         if (StringUtils.hasText(request.getNickname())
                 && !request.getNickname().equals(user.getNickname())) {
-            validateNicknameNotDuplicated(userId, request.getNickname());
-            user.updateNickname(request.getNickname());
+            changeNickname(user, userId, request.getNickname());
         }
 
         UserPreference preference = UserPreference.builder()
@@ -137,8 +151,7 @@ public class UserService {
 
         if (StringUtils.hasText(request.getNickname())
                 && !request.getNickname().equals(user.getNickname())) {
-            validateNicknameNotDuplicated(userId, request.getNickname());
-            user.updateNickname(request.getNickname());
+            changeNickname(user, userId, request.getNickname());
         }
 
         UserPreference preference = userPreferenceRepository.findByUserId(userId)
@@ -176,6 +189,30 @@ public class UserService {
         if (userRepository.existsByNicknameAndIdNot(nickname, userId)) {
             throw new BusinessException(ErrorCode.USER_NICKNAME_ALREADY_EXISTS);
         }
+    }
+
+    // 사전 검사(validateNicknameNotDuplicated) 통과 이후에도, 커밋 전에 동시에 같은 닉네임으로
+    // 바꾼 다른 요청이 먼저 커밋되면 유니크 제약에 걸릴 수 있다. 이 UPDATE를 바깥 트랜잭션과 같은
+    // 세션에서 그냥 저장하면 유니크 제약 위반 시 바깥 트랜잭션 세션 전체가 더 이상 쓸 수 없는
+    // 상태가 되어 버리므로, CustomOAuth2UserService.createUser / LocalAuthService.createUser와
+    // 동일한 이유로 REQUIRES_NEW(별도 세션)로 분리해 실패해도 폐기되는 세션이 이 임시
+    // 트랜잭션뿐이도록 격리하고, 실패 시 진짜 원인(닉네임 중복)을 재확인해 정확한 에러로 변환한다.
+    private void changeNickname(User user, Long userId, String newNickname) {
+        validateNicknameNotDuplicated(userId, newNickname);
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> {
+                User managed = userRepository.findById(userId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+                managed.updateNickname(newNickname);
+                userRepository.saveAndFlush(managed);
+            });
+        } catch (DataIntegrityViolationException e) {
+            if (userRepository.existsByNicknameAndIdNot(newNickname, userId)) {
+                throw new BusinessException(ErrorCode.USER_NICKNAME_ALREADY_EXISTS);
+            }
+            throw e;
+        }
+        user.updateNickname(newNickname);
     }
 
     private UserProfileResponse toResponse(User user, UserPreference preference) {
