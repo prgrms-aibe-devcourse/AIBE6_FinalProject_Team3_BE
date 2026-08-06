@@ -207,7 +207,14 @@ public class UserService {
                 userRepository.saveAndFlush(managed);
             });
         } catch (DataIntegrityViolationException e) {
-            if (userRepository.existsByNicknameAndIdNot(newNickname, userId)) {
+            // 이 재확인도 바깥 트랜잭션에서 그냥 실행하면 안 된다 - MySQL 기본 REPEATABLE READ에서는
+            // 바깥 트랜잭션이 경쟁 요청의 커밋 전 스냅샷을 이미 고정하고 있을 수 있어, 실제로는
+            // 닉네임이 선점됐는데도 이 재확인이 stale한 "아직 안 겹침" 결과를 돌려줄 수 있다.
+            // 그러면 의도한 409 대신 원래 예외가 그대로 다시 던져져 500으로 샌다 - 재확인도
+            // REQUIRES_NEW(별도 세션)로 분리해 항상 그 시점의 최신 커밋 상태를 보게 한다.
+            boolean nicknameTaken = Boolean.TRUE.equals(
+                    requiresNewTransactionTemplate.execute(status -> userRepository.existsByNicknameAndIdNot(newNickname, userId)));
+            if (nicknameTaken) {
                 throw new BusinessException(ErrorCode.USER_NICKNAME_ALREADY_EXISTS);
             }
             throw e;
