@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationFailureHandler;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -32,8 +33,17 @@ public class OAuth2AuthenticationFailureHandler extends SimpleUrlAuthenticationF
 
         authorizationRequestRepository.removeAuthorizationRequest(request, response);
 
+        // CustomOAuth2UserService가 account_blocked/email_conflict처럼 구체적인 OAuth2Error 코드를
+        // 이미 만들어서 던지는데, 여기서 항상 GENERIC_ERROR_CODE로 덮어써버리면 정지된 계정이나
+        // 닉네임/이메일 충돌이나 진짜 알 수 없는 오류나 프론트에서 전부 똑같은 문구로 보였다.
+        // 실제 코드가 있으면 그대로 전달하고, Spring Security 자체 오류(제공자 응답 거부 등
+        // OAuth2AuthenticationException이 아닌 경우) 등 코드가 없을 때만 일반 코드로 대체한다.
+        String errorCode = exception instanceof OAuth2AuthenticationException oauth2Exception
+                ? oauth2Exception.getError().getErrorCode()
+                : GENERIC_ERROR_CODE;
+
         String targetUrl = UriComponentsBuilder.fromUriString(authorizedRedirectUri)
-                .queryParam("error", GENERIC_ERROR_CODE)
+                .queryParam("error", errorCode)
                 .build().toUriString();
 
         getRedirectStrategy().sendRedirect(request, response, targetUrl);

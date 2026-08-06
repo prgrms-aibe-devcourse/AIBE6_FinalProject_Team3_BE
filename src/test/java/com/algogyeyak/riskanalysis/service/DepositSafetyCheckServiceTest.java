@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -188,12 +189,16 @@ class DepositSafetyCheckServiceTest {
         when(depositSafetyCheckRepository.findByPropertyId(10L))
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.of(winner));
+        // 첫 saveAndFlush(신규 insert)만 유니크 제약 위반으로 실패하고, 복구 과정에서 재조회한
+        // 기존 행을 저장하는 두 번째 saveAndFlush(update)는 정상 처리된다.
         when(depositSafetyCheckRepository.saveAndFlush(any()))
-                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"))
+                .thenReturn(winner);
 
         service.checkAndSave(property);
 
         verify(winner).overwrite(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(depositSafetyCheckRepository, times(2)).saveAndFlush(any());
     }
 
     private void verifyNoMarketLookup() {
