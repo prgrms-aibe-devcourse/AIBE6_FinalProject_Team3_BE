@@ -60,10 +60,16 @@ public class LocalAuthService {
             // 실질적으로 거의 항상 닉네임이 맞겠지만, 재확인 없이 단정하면 제약이 하나 더
             // 늘어나거나 일시적인 DB 이슈로 같은 예외가 나는 경우에도 항상 "닉네임 중복"이라는
             // 틀린 응답이 나갈 수 있다.
-            if (userRepository.existsByEmail(normalizedEmail)) {
+            //
+            // 이 재확인도 REQUIRES_NEW(새 스냅샷)에서 해야 한다 - 이 메서드의 바깥(signup())
+            // 트랜잭션은 이미 existsByEmail/existsByNickname을 먼저 읽어 스냅샷을 확보해둔 상태라
+            // (MySQL InnoDB 기본 격리수준 REPEATABLE READ 기준), 그 스냅샷으로 재확인하면 방금
+            // 경쟁에서 이긴 다른 트랜잭션의 커밋이 안 보여 stale한 "중복 아님" 결과가 나오고,
+            // 원래 DataIntegrityViolationException이 그대로 다시 던져져 500으로 샐 수 있다.
+            if (Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(status -> userRepository.existsByEmail(normalizedEmail)))) {
                 throw new BusinessException(ErrorCode.AUTH_EMAIL_ALREADY_EXISTS);
             }
-            if (userRepository.existsByNickname(nickname)) {
+            if (Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(status -> userRepository.existsByNickname(nickname)))) {
                 throw new BusinessException(ErrorCode.AUTH_NICKNAME_ALREADY_EXISTS);
             }
             throw e;
