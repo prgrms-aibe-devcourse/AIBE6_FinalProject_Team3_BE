@@ -152,6 +152,14 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     }
 
     private User createUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
+        return createUser(provider, userInfo, nickname, true);
+    }
+
+    // allowNicknameFallback: 닉네임 충돌로 복구 재시도를 한 번 했다면(아래 참고) 다시 재귀 호출할 때
+    // false로 넘겨 무한 재시도를 막는다 - 그 재시도에서 쓰는 provider+providerId 조합 닉네임은 이
+    // 메서드 진입 시 이미 provider+providerId 재조회를 한 번 거치므로, 그마저 충돌한다면 원인은
+    // 닉네임이 아니라 진짜 동시 레이스(같은 provider+providerId로 동시 첫 로그인)일 수밖에 없다.
+    private User createUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname, boolean allowNicknameFallback) {
         // 검증되지 않은 이메일은 저장하지 않고 null로 둔다. 저장해버리면, 나중에 이 이메일의 실제
         // 소유자가 검증된 OAuth(다른 provider 포함)로 로그인할 때 findVerifiedEmailMatch가 "이미
         // 존재하는 계정"으로 착각해 이 row에 연동해버린다 — 검증 안 된 이메일로 아무나 먼저 만들어둔
@@ -182,25 +190,42 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             // 등을 먼저 읽어 스냅샷을 확보해둔 상태라(MySQL InnoDB 기본 격리수준 REPEATABLE READ
             // 기준), 그 스냅샷으로 재조회하면 방금 경쟁에서 이긴 다른 트랜잭션의 커밋이 안 보여
             // winner를 못 찾고, 실제로는 계정이 있는데도 email_conflict로 로그인이 실패할 수 있다.
-            // 그마저도 못 찾으면(검증 안 된 이메일이라 위 조회가 애초에 empty를 준 경우 포함) 이
-            // 예외를 raw로 흘려보내는 대신 AuthenticationException으로 감싼다 — 그래야
-            // OAuth2LoginAuthenticationFilter가 이를 잡아 OAuth2AuthenticationFailureHandler로
-            // 정상적으로 프론트에 에러 리다이렉트를 보내고, 서블릿까지 예외가 올라가 500으로
-            // 크래시하는 것을 막는다.
             Optional<User> winner = requiresNewTransactionTemplate.execute(status ->
                     userSocialAccountRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
                             .map(UserSocialAccount::getUser)
                             .or(() -> findVerifiedEmailMatch(userInfo)));
 
-            return winner
-                    .map(found -> {
-                        // 동시 레이스로 복구된 winner도 다른 모든 경로와 동일하게 정지/탈퇴 여부를
-                        // 확인해야 한다 - 그렇지 않으면 이 레이스 케이스만 그 검사를 우회하게 된다.
-                        rejectIfBlocked(found);
-                        return found;
-                    })
-                    .orElseThrow(() -> new OAuth2AuthenticationException(
-                            new OAuth2Error("email_conflict", "이미 사용 중인 이메일입니다.", null), e));
+            if (winner.isPresent()) {
+                User found = winner.get();
+                // 동시 레이스로 복구된 winner도 다른 모든 경로와 동일하게 정지/탈퇴 여부를 확인해야
+                // 한다 - 그렇지 않으면 이 레이스 케이스만 그 검사를 우회하게 된다.
+                rejectIfBlocked(found);
+                return found;
+            }
+
+            // provider+providerId도, 검증된 이메일도 못 찾았다면 이 유니크 제약 위반은 사실 닉네임
+            // 충돌일 가능성이 높다 - User 테이블의 유니크 제약은 email/nickname/(provider,providerId)
+            // 뿐이다. OAuth 가입은 로컬 가입과 달리 유저가 닉네임을 미리 고르거나 중복 확인을 거칠
+            // 기회가 없으므로, provider가 매번 내려주는 닉네임이 다른 유저와 우연히 겹치기만 해도
+            // 이 계정은 재시도해도 항상 같은 닉네임으로 다시 시도해 영원히 가입이 불가능해진다 -
+            // 아래에서 이 원인을 확인하지 않으면 "이미 사용 중인 이메일입니다"라는 잘못된 메시지로
+            // 영구 차단되는 실제 유저가 생긴다. provider+providerId로 만든 닉네임(getNickname()이
+            // null일 때 이미 쓰는 것과 같은 fallback)은 이 유저에게만 유일하므로, 그 값으로 한 번만
+            // 재시도한다.
+            boolean nicknameConflict = allowNicknameFallback && Boolean.TRUE.equals(
+                    requiresNewTransactionTemplate.execute(status -> userRepository.existsByNickname(nickname)));
+            if (nicknameConflict) {
+                String fallbackNickname = provider.name().toLowerCase() + "_" + userInfo.getProviderId();
+                return createUser(provider, userInfo, fallbackNickname, false);
+            }
+
+            // 그마저도 아니면(검증 안 된 이메일이라 위 조회가 애초에 empty를 준 경우 포함) 이 예외를
+            // raw로 흘려보내는 대신 AuthenticationException으로 감싼다 — 그래야
+            // OAuth2LoginAuthenticationFilter가 이를 잡아 OAuth2AuthenticationFailureHandler로
+            // 정상적으로 프론트에 에러 리다이렉트를 보내고, 서블릿까지 예외가 올라가 500으로
+            // 크래시하는 것을 막는다.
+            throw new OAuth2AuthenticationException(
+                    new OAuth2Error("email_conflict", "이미 사용 중인 이메일입니다.", null), e);
         }
     }
 }
