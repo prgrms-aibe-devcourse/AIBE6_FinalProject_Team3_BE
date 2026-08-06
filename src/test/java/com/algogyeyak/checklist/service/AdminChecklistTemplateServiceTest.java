@@ -268,10 +268,34 @@ class AdminChecklistTemplateServiceTest {
         ChecklistItemTemplate existing = template(1L, 2, 1);
         when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
         when(checklistItemTemplateRepository.count()).thenReturn(2L);
+        // 이 테스트는 물리 삭제 자체를 검증하는 것이 목적이므로, 다른 활성 문항이 남아있는 상태로
+        // 스텁해 마지막 활성 문항 보호(validateNotDeactivatingLastActiveTemplate)에 걸리지 않게 한다.
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(existing, template(2L, 2, 2)));
 
         adminChecklistTemplateService.delete(1L);
 
         verify(checklistItemTemplateRepository).delete(existing);
+    }
+
+    @Test
+    @DisplayName("비활성 문항이 남아있어도 마지막 활성 문항을 삭제하려 하면 ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM 예외가 발생한다")
+    void deleteThrowsWhenDeletingTheLastActiveTemplateEvenIfInactiveTemplatesRemain() {
+        // count() <= 1 검사는 "테이블 전체가 비어버리는 것"만 막는다 - 비활성 문항이 하나 더
+        // 있으면 count()는 2를 반환해 통과하지만, 삭제 대상이 마지막 활성 문항이면 활성 문항이
+        // 0개가 되는 회귀 테스트.
+        ChecklistItemTemplate activeTemplate = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(activeTemplate));
+        when(checklistItemTemplateRepository.count()).thenReturn(2L);
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(activeTemplate));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.delete(1L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
+
+        verify(checklistItemTemplateRepository, org.mockito.Mockito.never()).delete(any(ChecklistItemTemplate.class));
     }
 
     @Test

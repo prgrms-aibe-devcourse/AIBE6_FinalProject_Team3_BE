@@ -189,6 +189,11 @@ public class AdminChecklistTemplateService {
         if (checklistItemTemplateRepository.count() <= 1) {
             throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM);
         }
+        // 위 count() 검사는 "테이블 전체가 비어버리는 것"만 막는다 - 비활성 문항이 하나 더 있는
+        // 상태에서 마지막 활성 문항을 삭제하면 count()는 통과하지만 활성 문항이 0개가 되어,
+        // update()의 validateNotDeactivatingLastActiveTemplate가 막으려던 것과 동일한 문제
+        // (ChecklistService.createChecklist()가 문항 0개로 조용히 생성됨)가 다른 경로로 발생한다.
+        validateNotDeactivatingLastActiveTemplate(template, false);
         checklistItemTemplateRepository.delete(template);
     }
 
