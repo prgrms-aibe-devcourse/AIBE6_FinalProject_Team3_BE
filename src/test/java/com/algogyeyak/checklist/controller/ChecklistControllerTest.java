@@ -264,7 +264,9 @@ class ChecklistControllerTest {
                 20L, null, "서울특별시 마포구 월드컵로 1", null, "MULTI_FAMILY", "MONTHLY_RENT", ChecklistStatus.NOT_STARTED,
                 java.time.LocalDateTime.of(2026, 6, 1, 12, 0)
         );
-        when(checklistService.listMyChecklists(1L)).thenReturn(List.of(started, notStarted));
+        when(checklistService.listMyChecklists(1L, org.springframework.data.domain.PageRequest.of(0, 20)))
+                .thenReturn(new com.algogyeyak.global.response.PageResponse<>(
+                        List.of(started, notStarted), 0, 20, 2, 1, false));
 
         mockMvc.perform(get("/checklists")
                         .cookie(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))

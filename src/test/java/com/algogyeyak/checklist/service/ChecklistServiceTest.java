@@ -180,86 +180,65 @@ class ChecklistServiceTest {
                 );
     }
 
+    // 정렬(최종 점검일 기준 내림차순)은 이제 DB 쿼리(ChecklistRepository.findOverviewByUserId())가
+    // 담당한다 - ChecklistRepositoryTest에서 검증함. 여기서는 리포지토리가 돌려준 Page<Object[]>를
+    // PageResponse<ChecklistOverviewResponse>로 올바르게 매핑하는지만 확인한다.
     @Test
-    @DisplayName("매물마다 체크리스트 유무에 따라 상태를 매칭해 목록을 반환한다")
+    @DisplayName("매물마다 체크리스트 유무에 따라 상태를 매칭해 페이지 응답을 반환한다")
     void listMyChecklistsMatchesEachPropertyWithItsChecklist() {
         Property started = property(10L, 1L);
         Property notStarted = property(20L, 1L);
-        ReflectionTestUtils.setField(notStarted, "updatedAt", LocalDateTime.of(2026, 1, 1, 0, 0));
-        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
-                .thenReturn(List.of(started, notStarted));
 
         Checklist checklist = checklistWithOneCheckItem(user(1L));
         ReflectionTestUtils.setField(checklist, "id", 100L);
-        ReflectionTestUtils.setField(checklist, "updatedAt", LocalDateTime.of(2026, 7, 1, 0, 0));
         checklist.getItems().get(0).check(true);
         checklist.refreshStatus();
-        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of(checklist));
 
-        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        org.springframework.data.domain.Page<Object[]> page = new org.springframework.data.domain.PageImpl<>(
+                List.of(new Object[]{started, checklist}, new Object[]{notStarted, null}),
+                pageable, 2);
+        when(checklistRepository.findOverviewByUserId(1L, PropertyStatus.ACTIVE, pageable)).thenReturn(page);
 
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).propertyId()).isEqualTo(10L);
-        assertThat(result.get(0).checklistId()).isEqualTo(100L);
-        assertThat(result.get(0).status()).isEqualTo(ChecklistStatus.COMPLETED);
-        assertThat(result.get(1).propertyId()).isEqualTo(20L);
-        assertThat(result.get(1).checklistId()).isNull();
-        assertThat(result.get(1).status()).isEqualTo(ChecklistStatus.NOT_STARTED);
+        com.algogyeyak.global.response.PageResponse<ChecklistOverviewResponse> result =
+                checklistService.listMyChecklists(1L, pageable);
+
+        assertThat(result.content()).hasSize(2);
+        assertThat(result.content().get(0).propertyId()).isEqualTo(10L);
+        assertThat(result.content().get(0).checklistId()).isEqualTo(100L);
+        assertThat(result.content().get(0).status()).isEqualTo(ChecklistStatus.COMPLETED);
+        assertThat(result.content().get(1).propertyId()).isEqualTo(20L);
+        assertThat(result.content().get(1).checklistId()).isNull();
+        assertThat(result.content().get(1).status()).isEqualTo(ChecklistStatus.NOT_STARTED);
+        assertThat(result.totalElements()).isEqualTo(2);
     }
 
     @Test
-    @DisplayName("매물이 하나도 없으면 빈 목록을 반환한다")
-    void listMyChecklistsReturnsEmptyListWhenNoProperties() {
-        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
-                .thenReturn(List.of());
-        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of());
+    @DisplayName("매물이 하나도 없으면 빈 페이지를 반환한다")
+    void listMyChecklistsReturnsEmptyPageWhenNoProperties() {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(checklistRepository.findOverviewByUserId(1L, PropertyStatus.ACTIVE, pageable))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(), pageable, 0));
 
-        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
+        com.algogyeyak.global.response.PageResponse<ChecklistOverviewResponse> result =
+                checklistService.listMyChecklists(1L, pageable);
 
-        assertThat(result).isEmpty();
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isZero();
     }
 
     @Test
-    @DisplayName("최종 점검일(lastCheckedAt) 최신순으로 정렬한다")
-    void listMyChecklistsSortsByLastCheckedAtDescending() {
-        Property older = property(10L, 1L);
-        Property newer = property(20L, 1L);
-        // 매물 조회 자체는 항상 createdAt DESC로 오지만(=매물 등록순), 응답은 lastCheckedAt 기준으로 재정렬돼야 한다.
-        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
-                .thenReturn(List.of(older, newer));
+    @DisplayName("클라이언트가 sort를 지정해도 무시하고 page/size만 리포지토리에 넘긴다")
+    void listMyChecklistsIgnoresClientSuppliedSort() {
+        org.springframework.data.domain.Pageable clientPageable = org.springframework.data.domain.PageRequest.of(
+                1, 10, org.springframework.data.domain.Sort.by("propertyId"));
+        org.springframework.data.domain.Pageable expectedPageable = org.springframework.data.domain.PageRequest.of(1, 10);
+        when(checklistRepository.findOverviewByUserId(1L, PropertyStatus.ACTIVE, expectedPageable))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(), expectedPageable, 0));
 
-        Checklist olderChecklist = Checklist.createFrom(user(1L), older, 1, List.of());
-        ReflectionTestUtils.setField(olderChecklist, "id", 100L);
-        ReflectionTestUtils.setField(olderChecklist, "updatedAt", LocalDateTime.of(2026, 1, 1, 0, 0));
+        checklistService.listMyChecklists(1L, clientPageable);
 
-        Checklist newerChecklist = Checklist.createFrom(user(1L), newer, 1, List.of());
-        ReflectionTestUtils.setField(newerChecklist, "id", 200L);
-        ReflectionTestUtils.setField(newerChecklist, "updatedAt", LocalDateTime.of(2026, 7, 1, 0, 0));
-
-        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of(olderChecklist, newerChecklist));
-
-        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
-
-        assertThat(result).extracting(ChecklistOverviewResponse::propertyId)
-                .containsExactly(20L, 10L);
-    }
-
-    @Test
-    @DisplayName("lastCheckedAt이 같으면 매물 조회 순서(등록일 최신순)를 그대로 유지한다")
-    void listMyChecklistsKeepsOriginalOrderWhenLastCheckedAtTies() {
-        Property first = property(10L, 1L);
-        Property second = property(20L, 1L);
-        LocalDateTime sameTime = LocalDateTime.of(2026, 5, 1, 0, 0);
-        ReflectionTestUtils.setField(first, "updatedAt", sameTime);
-        ReflectionTestUtils.setField(second, "updatedAt", sameTime);
-        when(propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(1L, PropertyStatus.ACTIVE))
-                .thenReturn(List.of(first, second));
-        when(checklistRepository.findAllByUserId(1L)).thenReturn(List.of());
-
-        List<ChecklistOverviewResponse> result = checklistService.listMyChecklists(1L);
-
-        assertThat(result).extracting(ChecklistOverviewResponse::propertyId)
-                .containsExactly(10L, 20L);
+        verify(checklistRepository).findOverviewByUserId(1L, PropertyStatus.ACTIVE, expectedPageable);
     }
 
     private Checklist checklistWithOneCheckItem(User user) {

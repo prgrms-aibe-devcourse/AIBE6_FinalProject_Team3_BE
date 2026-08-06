@@ -85,11 +85,16 @@ public class ChecklistController {
 
     /**
      * 내 매물 전체 + 매물별 체크리스트 현황을 조회한다.
+     * TODO: 서비스 레이어는 페이지네이션(Pageable/PageResponse)으로 이미 전환됐지만, 컨트롤러는
+     * 아직 이전 계약(List, 최대 20건 고정)을 그대로 유지 중인 임시 상태 - 컨트롤러/API 명세를
+     * PageResponse로 전환하는 작업이 남아있다.
      */
     @GetMapping("/checklists")
     public ApiResponse<List<ChecklistOverviewResponse>> listMyChecklists(
             @AuthenticationPrincipal JwtUserPrincipal userDetails
     ) {
-        return ApiResponse.success(checklistService.listMyChecklists(userDetails.userId()));
+        return ApiResponse.success(
+                checklistService.listMyChecklists(userDetails.userId(), org.springframework.data.domain.PageRequest.of(0, 20))
+                        .content());
     }
 }
