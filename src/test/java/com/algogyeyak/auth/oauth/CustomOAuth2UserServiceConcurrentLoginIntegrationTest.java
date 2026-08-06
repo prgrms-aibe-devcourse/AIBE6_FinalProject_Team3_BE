@@ -118,17 +118,24 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
             return committed;
         });
 
-        User aUser = aResult.get(10, TimeUnit.SECONDS);
-        User bUser = bResult.get(10, TimeUnit.SECONDS);
-        executor.shutdown();
+        User aUser;
+        User bUser;
+        try {
+            aUser = aResult.get(10, TimeUnit.SECONDS);
+            bUser = bResult.get(10, TimeUnit.SECONDS);
+        } finally {
+            // get()이 타임아웃/예외로 먼저 던지면 shutdown()이 실행되지 않아 스레드가 남을 수 있다 -
+            // 정상/실패 어느 쪽이든 반드시 정리되도록 finally에서 shutdownNow()로 강제 종료한다.
+            executor.shutdownNow();
+        }
 
         // 세션 오염 없이 예외가 전파되지 않고 회복되어야 하고, 두 결과 모두 같은(먼저 커밋된) row를 가리켜야 한다.
         assertEquals(bUser.getId(), aUser.getId());
 
         transactionTemplate.executeWithoutResult(status -> {
-            // 이 테스트의 kakaoOAuth2User 픽스처는 is_email_verified를 채우지 않아 실제로는
-            // email이 검증 안 됨(null 저장)으로 처리되므로, email 대신 이 테스트에서만 유일한
-            // nickname으로 식별한다.
+            // 이 테스트의 kakaoOAuth2User 픽스처는 is_email_verified=true라 email은 정상 저장된다 -
+            // 그래도 email 대신 이 테스트에서만 쓰는 고유 nickname으로 식별해, 다른 테스트가 같은
+            // 이메일을 우연히 재사용해도 서로 영향받지 않게 한다.
             long userCount = userRepository.findAll().stream()
                     .filter(u -> "동시로그인유저".equals(u.getNickname()))
                     .count();
@@ -192,9 +199,14 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
             return committed;
         });
 
-        User aUser = aResult.get(10, TimeUnit.SECONDS);
-        User bUser = bResult.get(10, TimeUnit.SECONDS);
-        executor.shutdown();
+        User aUser;
+        User bUser;
+        try {
+            aUser = aResult.get(10, TimeUnit.SECONDS);
+            bUser = bResult.get(10, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
 
         assertEquals(bUser.getId(), aUser.getId());
     }
