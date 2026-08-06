@@ -29,6 +29,8 @@ import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -49,6 +51,8 @@ import java.time.ZoneId;
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final CookieUtils cookieUtils;
     private final UserRepository userRepository;
@@ -237,7 +241,9 @@ public class AuthController {
                     .toLocalDateTime();
             accessTokenRevocationService.revoke(claims.getId(), expiresAt);
         } catch (JwtException | IllegalArgumentException e) {
-            // 무시: 이미 무효한 토큰이라 블랙리스트에 올릴 대상이 없다.
+            // 무시: 이미 무효한 토큰이라 블랙리스트에 올릴 대상이 없다. 로그아웃 자체는 계속
+            // 진행되므로 warn/error는 과하고, 원인 진단이 필요할 때 확인할 수 있게 debug만 남긴다.
+            log.debug("로그아웃 시 access token 무효화를 건너뜁니다(이미 무효한 토큰)", e);
         }
     }
 
