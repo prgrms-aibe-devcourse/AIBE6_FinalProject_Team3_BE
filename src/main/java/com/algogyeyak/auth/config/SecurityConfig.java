@@ -76,6 +76,11 @@ public class SecurityConfig {
                                 "/auth/signup", "/auth/login", "/auth/dev-login",
                                 "/auth/password-policy"
                         ).permitAll()
+                        // 회원가입 화면(로그인 전)에서도 닉네임 중복 확인을 호출하므로 인증을 요구하지 않는다.
+                        // 로그인된 사용자가 호출하면(프로필 수정 화면) UserController가 여전히 본인 제외
+                        // 검사를 하도록 처리한다 - permitAll은 인증 여부만 면제할 뿐, 인증 정보 자체가
+                        // 없어지는 건 아니다.
+                        .requestMatchers("/users/nickname-check").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
