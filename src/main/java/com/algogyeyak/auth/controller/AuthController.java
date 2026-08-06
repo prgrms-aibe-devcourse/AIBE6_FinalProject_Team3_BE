@@ -25,6 +25,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -37,6 +38,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -60,6 +62,22 @@ public class AuthController {
 
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
+
+    // 운영에서도 devLoginEnabled를 켤 수 있게 되면서(스위치 하나만으로는 "아무나" 이 엔드포인트를
+    // 호출해 admin이 될 수 있다) 추가한 공유 비밀 값 — 이 값을 아는 사람만 dev-login을 쓸 수 있다.
+    @Value("${app.dev-login.secret:}")
+    private String devLoginSecret;
+
+    // enabled=true인데 secret이 비어있으면, 스위치만 켜졌을 뿐 아무런 잠금도 없는 상태로 조용히
+    // 뜬다 - JWT_SECRET 등과 같은 이유로 이 조합은 기동 자체를 막는다(운영 배포 시 DEV_LOGIN_ENABLED만
+    // 켜고 DEV_LOGIN_SECRET을 깜빡하는 실수를 막기 위함).
+    @PostConstruct
+    private void validateDevLoginConfig() {
+        if (devLoginEnabled && !StringUtils.hasText(devLoginSecret)) {
+            throw new IllegalStateException(
+                    "app.dev-login.enabled=true requires app.dev-login.secret to be set");
+        }
+    }
 
     public AuthController(
             CookieUtils cookieUtils,
@@ -167,12 +185,15 @@ public class AuthController {
     }
 
     // 개발 편의용 "관리자로 로그인" 버튼. AdminAccountSeeder가 만들어둔 admin 계정으로 자격 증명
-    // 없이 바로 로그인시킨다 — devLoginEnabled가 false(운영 등)면 엔드포인트가 존재하는지조차
-    // 드러내지 않도록 404로 응답한다.
+    // 없이 바로 로그인시킨다 — devLoginEnabled가 false(운영 등)면, 그리고 key가 devLoginSecret과
+    // 일치하지 않으면 엔드포인트가 존재하는지조차 드러내지 않도록 둘 다 동일하게 404로 응답한다.
+    // key는 쿼리 파라미터가 아니라 헤더로 받는다 - 쿼리스트링은 서버 액세스 로그, 프록시/LB 로그,
+    // APM, 브라우저 히스토리 등에 평문으로 남기 쉬워 공유 비밀값을 싣기에 적절하지 않다.
     @Hidden
     @PostMapping("/dev-login")
-    public ResponseEntity<ApiResponse<MeResponse>> devLogin(HttpServletResponse response) {
-        if (!devLoginEnabled) {
+    public ResponseEntity<ApiResponse<MeResponse>> devLogin(
+            @RequestHeader(value = "X-Dev-Login-Key", required = false) String key, HttpServletResponse response) {
+        if (!devLoginEnabled || !devLoginSecret.equals(key)) {
             throw new BusinessException(ErrorCode.NOT_FOUND);
         }
 

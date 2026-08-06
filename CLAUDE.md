@@ -33,7 +33,7 @@ Use `gradlew.bat` (Windows). On the wrapper, Gradle 9.5.1 is pinned via `gradle/
 - **API docs**: `springdoc-openapi-starter-webmvc-ui` — Swagger UI is available once controllers exist.
 - **Observability**: `spring-boot-starter-actuator` + `micrometer-registry-prometheus` for metrics/health endpoints.
 - **Lombok**: enabled via `compileOnly` + `annotationProcessor` (and test equivalents) — expected for entities/DTOs.
-- **Config profiles**: `application.yml` plus `application-{dev,prod,test}.yml`, selected via Spring profiles. Common config (OAuth2 client id/secret, JWT, CORS, cookies, dev-login) already lives in `application.yml`; `application-prod.yml` overrides it for production (disables H2 console/Swagger, drops dummy defaults so missing env vars fail fast, hard-codes `DEV_LOGIN_ENABLED=false`). `application-dev.yml`/`application-test.yml` still only set `spring.application.name`.
+- **Config profiles**: `application.yml` plus `application-{dev,prod,test}.yml`, selected via Spring profiles. Common config (OAuth2 client id/secret, JWT, CORS, cookies, dev-login) already lives in `application.yml`; `application-prod.yml` overrides it for production (disables H2 console/Swagger, drops dummy defaults so missing env vars fail fast). `application-dev.yml`/`application-test.yml` still only set `spring.application.name`.
 
 ### Package convention
 

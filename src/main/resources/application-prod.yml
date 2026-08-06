@@ -56,7 +56,10 @@ app:
     # 맞출 수 없으므로 비워둔다(host-only).
     same-site: ${COOKIE_SAME_SITE}
     domain: ${COOKIE_DOMAIN:}
-  # 개발 편의용 로그인 우회 기능은 운영에서 절대 켜지면 안 되므로, 환경변수를 참조하지 않고
-  # 값 자체를 고정한다 — 배포 환경에 DEV_LOGIN_ENABLED=true가 잘못 설정돼도 이 값이 이긴다.
+  # 운영에서도 dev-login을 켤 수 있다 — 단, DEV_LOGIN_SECRET을 아는 요청만 통과한다
+  # (AuthController.validateDevLoginConfig가 enabled=true인데 secret이 비어있으면 기동 자체를
+  # 막는다). secret은 다른 운영 비밀값과 같은 이유로 기본값을 두지 않는다 — DEV_LOGIN_ENABLED만
+  # 켜고 이 값을 깜빡하면 배포가 아예 뜨지 않아야, "잠금 없이 조용히 열림" 상태를 막을 수 있다.
   dev-login:
-    enabled: false
+    enabled: ${DEV_LOGIN_ENABLED:false}
+    secret: ${DEV_LOGIN_SECRET:}
