@@ -39,13 +39,19 @@ public class UserService {
         return toResponse(user, preference);
     }
 
+    // userId는 로그인된 사용자가 프로필 수정 화면에서 호출하면 채워지고(본인 제외 검사),
+    // 회원가입 화면(로그인 전)에서 호출하면 null이다. existsByNicknameAndIdNot(nickname, null)을
+    // 그대로 쓰면 SQL의 "id <> NULL"이 항상 거짓으로 평가돼 무조건 available=true가 나와버리므로,
+    // null일 때는 본인 제외 없이 전체 중복만 검사하는 existsByNickname으로 분기해야 한다.
     public NicknameCheckResponse checkNicknameAvailable(Long userId, String nickname) {
         if (!StringUtils.hasText(nickname)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "닉네임을 입력해 주세요.");
         }
 
-        boolean available = !userRepository.existsByNicknameAndIdNot(nickname, userId);
-        return NicknameCheckResponse.builder().available(available).build();
+        boolean exists = userId != null
+                ? userRepository.existsByNicknameAndIdNot(nickname, userId)
+                : userRepository.existsByNickname(nickname);
+        return NicknameCheckResponse.builder().available(!exists).build();
     }
 
     @Transactional

@@ -73,10 +73,10 @@ dotenv는 원래 JVM의 working directory 기준으로 `.env`를 찾습니다. �
 | `KAKAO_CLIENT_ID` / `KAKAO_CLIENT_SECRET` | Kakao Developers에서 발급 |
 | `JWT_SECRET` | HS256 서명용 시크릿 (최소 32바이트 랜덤 문자열) |
 | `OAUTH2_STATE_SIGNING_KEY` | OAuth2 인가 요청을 담는 쿠키(`oauth2_auth_request`)의 HMAC 서명 키 (최소 32바이트 랜덤 문자열, `JWT_SECRET`과는 다른 값 권장) |
-| `OAUTH2_REDIRECT_URI` | 로그인 성공 후 리다이렉트할 프론트엔드 콜백 URL (기본값 `http://localhost:3000/oauth/callback`) |
+| `OAUTH2_REDIRECT_URI` | 로그인 성공 후 리다이렉트할 프론트엔드 콜백 URL (dev 기본값 `http://localhost:3000/oauth/callback`, prod는 기본값 없이 fail-fast — 빠뜨리면 로그인 성공 후 localhost로 조용히 리다이렉트되는 것을 막기 위함) |
 | `CORS_ALLOWED_ORIGINS` | 허용할 프론트엔드 origin (기본값 `http://localhost:3000`) |
 | `COOKIE_SECURE` | `access_token` 등 쿠키의 Secure 속성 (dev 기본값 `false`, prod 기본값 `true`) |
-| `COOKIE_SAME_SITE` | 쿠키의 SameSite 속성 (기본값 `Lax`) |
+| `COOKIE_SAME_SITE` | 쿠키의 SameSite 속성 (dev 기본값 `Lax`, prod는 기본값 없이 fail-fast — 배포 시나리오에 맞게 반드시 명시) |
 | `COOKIE_DOMAIN` | 쿠키의 Domain 속성 — 커스텀 서브도메인 배포 시에만 `.example.com`처럼 지정 (dev/prod 기본값 모두 비어있음=host-only) |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | access token blacklist/refresh token 저장소용 Redis 연결 정보 (dev 기본값 `localhost:6379`/비밀번호 없음, prod는 기본값 없이 fail-fast) |
 
@@ -90,9 +90,13 @@ dotenv는 원래 JVM의 working directory 기준으로 `.env`를 찾습니다. �
 | --- | --- | --- | --- | --- |
 | **A. 커스텀 서브도메인** (`app.example.com` + `api.example.com`, 같은 등록 도메인) | `true` | `Lax` (기본값) | `.example.com` | 지금 코드가 이 시나리오를 전제로 만들어져 있음 — 로컬의 `.localhost` 설정과 동일한 구조 |
 | **B. Vercel rewrite** (`/api/*`를 EC2로 프록시, 브라우저는 Vercel origin만 봄) | `true` | `Lax` (기본값) | 비워둠(host-only) | 브라우저 입장에서 이미 같은 origin이라 `Domain` 지정이 필요 없음. 단, `proxy.ts`/`oauth/callback`이 지금처럼 EC2를 직접 부르는 구조라 rewrite에 맞춰 손봐야 함 (검토 예정) |
-| **C. 도메인 공유 없음** (완전히 별개 호스트, 위 둘 다 아닌 경우) | `true` | `None` | 비워둠(host-only, 어차피 못 맞춤) | ⚠️ `SameSite=None`만으로는 안 풀림 — 쿠키의 `Domain`이 EC2 자체 호스트로 고정돼 있어서, 프론트 미들웨어(`proxy.ts`)가 `/home` 같은 요청에서 쿠키를 여전히 못 봄. `SameSite=None; Secure`는 브라우저→EC2 API 호출 자체는 되게 해주지만, "로그인 게이트"/자동 refresh 로직은 별도로 재설계해야 함 |
+| **C. 도메인 공유 없음** (완전히 별개 호스트, 위 둘 다 아닌 경우) | `true` | `None` | 비워둠(host-only, 어차피 못 맞춤) | `SameSite=None`만으로는 프론트 서버가 쿠키를 볼 수 없다(Domain이 EC2 호스트로 고정) — 프론트가 `NEXT_PUBLIC_CROSS_ORIGIN_AUTH=true`로 배포돼야 로그인 게이트/데이터 조회가 브라우저 크로스오리진 fetch 방식으로 동작한다(아래 2026-08-04 항목 참고) |
 
-시나리오 A/B는 둘 다 `SameSite=Lax`로 충분하고, `SameSite=None`은 시나리오 C에서만, 그것도 부분적으로만 문제를 해결합니다. 지금은 시나리오 A를 기본값으로 잡아뒀습니다 — 실제 배포 전략(A/B/C 중 어느 것)이 확정되면 이 표를 기준으로 환경변수만 바꾸면 됩니다.
+시나리오 A/B는 둘 다 `SameSite=Lax`로 충분하고, `SameSite=None`은 시나리오 C에서만, 그것도 부분적으로만 문제를 해결합니다.
+
+**(2026-08-04 확정)** AWS 배포는 시나리오 C(프론트 Vercel, 백엔드 EC2 — 도메인 공유 없음)로 결정됐습니다. `application-prod.yml`의 `COOKIE_SAME_SITE`는 `JWT_SECRET`/`OAUTH2_STATE_SIGNING_KEY`/`CORS_ALLOWED_ORIGINS`와 같은 패턴으로 **기본값을 아예 두지 않습니다** — `Lax`를 기본값으로 두면 시나리오 C에 이 값을 빠뜨렸을 때 로그인이 조용히 깨지고, `None`을 기본값으로 두면 반대로 시나리오 A/B 배포 때 불필요하게 느슨해지기 때문입니다. **배포 시 `COOKIE_SAME_SITE` 환경변수를 반드시 명시**하세요(시나리오 C라면 `None`) — 빠뜨리면 기동 자체가 실패해 바로 드러납니다. `CookieUtils`는 기동 시점에 `same-site=None`인데 `secure=false`면 즉시 실패하도록도 막아둬서, `COOKIE_SECURE`를 켜지 않은 채 조용히 뜨는 상황(브라우저가 쿠키를 버려 로그인이 전부 깨지는데 원인이 안 보임)을 방지합니다.
+
+**(2026-08-04 완료)** 프론트 쪽도 이 시나리오에 맞춰 전환 완료했습니다. `proxy.ts`의 쿠키 기반 게이트, `(main)/layout.tsx`, 그리고 로그인 상태가 필요한 나머지 보호 페이지·OAuth 콜백·랜딩 페이지까지 전부 서버에서 쿠키를 포워딩하는 방식 대신 브라우저가 직접 `credentials:'include'`로 백엔드 `/auth/me` 등을 호출해 확인하는 방식으로 바뀌었습니다(`NEXT_PUBLIC_CROSS_ORIGIN_AUTH=true` 필요 — frontend/README.md 참고). 로컬/서브도메인 공유 배포(시나리오 A/B)는 이 플래그 없이 기존 서버측 게이트를 그대로 씁니다.
 
 ## Docs
 

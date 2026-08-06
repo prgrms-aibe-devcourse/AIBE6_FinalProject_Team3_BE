@@ -173,7 +173,8 @@ class PropertyControllerTest {
                 "서울특별시 강남구 역삼동 123-45",
                 "ACTIVE",
                 LocalDateTime.of(2026, 7, 23, 10, 0),
-                75
+                75,
+                null
         );
 
         Pageable pageable = PageRequest.of(0, 20);

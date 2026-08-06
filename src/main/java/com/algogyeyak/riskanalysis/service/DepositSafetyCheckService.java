@@ -16,9 +16,13 @@ import com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason;
 import com.algogyeyak.riskanalysis.enums.DepositSafetyStatus;
 import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
 import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
-import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -32,7 +36,7 @@ import java.util.Optional;
  * 정밀 재계산한다 - 둘 다 같은 calculate()를 공유하고 seniorDeposit/maxClaimAmount만 다르다.
  */
 @Service
-@RequiredArgsConstructor
+@Slf4j
 public class DepositSafetyCheckService {
 
     private final DepositSafetyCheckRepository depositSafetyCheckRepository;
@@ -40,6 +44,23 @@ public class DepositSafetyCheckService {
     private final PropertyRepository propertyRepository;
     private final ChecklistItemRepository checklistItemRepository;
     private final RiskPolicyConfig policyConfig;
+    private final TransactionTemplate requiresNewTransactionTemplate;
+
+    public DepositSafetyCheckService(
+            DepositSafetyCheckRepository depositSafetyCheckRepository,
+            MarketSaleDataClient marketSaleDataClient,
+            PropertyRepository propertyRepository,
+            ChecklistItemRepository checklistItemRepository,
+            RiskPolicyConfig policyConfig,
+            PlatformTransactionManager transactionManager) {
+        this.depositSafetyCheckRepository = depositSafetyCheckRepository;
+        this.marketSaleDataClient = marketSaleDataClient;
+        this.propertyRepository = propertyRepository;
+        this.checklistItemRepository = checklistItemRepository;
+        this.policyConfig = policyConfig;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     /**
      * 매물의 보증금 안전성 체크 결과를 조회한다. checklist/risk-signals와 동일한 패턴으로 매물
@@ -164,24 +185,75 @@ public class DepositSafetyCheckService {
         return "이 집 전세가율은 %d%%예요. 매우 높은 수치라 입력값을 다시 확인해보시는 게 좋아요.".formatted(ratio);
     }
 
+    // "없으면 insert, 있으면 update"인데 조회와 insert 사이에 갭이 있어, 같은 매물에 대한 두 요청이
+    // 동시에 들어오면(POST /risk-analysis와 POST /deposit-safety/recalculate가 겹치는 경우 등) 둘 다
+    // "기존 행 없음"을 보고 동시에 insert를 시도해 property_id 유니크 제약을 위반할 수 있다
+    // (DataIntegrityViolationException). insert를 REQUIRES_NEW로 격리해서, 위반이 나도 그 임시
+    // 트랜잭션의 세션만 버려지고 이 메서드가 속한 바깥 트랜잭션의 세션은 정상 상태로 남게 한다 -
+    // 같은 세션에서 saveAndFlush가 유니크 제약 위반으로 실패한 뒤 그 세션으로 쿼리를 이어가면
+    // Hibernate가 "세션이 예외 이후 flush됨(AssertionFailure)"을 던지는 문제를 피하기 위함
+    // (CustomOAuth2UserService.createUser()와 동일한 이유·동일한 패턴). 실패하면 그 사이 먼저 커밋된
+    // 행을 재조회해서 덮어쓴다.
     private DepositSafetyCheck upsertUnavailable(Property property, BigDecimal seniorDeposit, BigDecimal maxClaimAmount, DepositSafetyCheckReason reason) {
-        return depositSafetyCheckRepository.findByPropertyId(property.getId())
-                .map(existing -> {
-                    existing.overwrite(null, seniorDeposit, maxClaimAmount, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
-                    return existing;
-                })
-                .orElseGet(() -> depositSafetyCheckRepository.save(
-                        DepositSafetyCheck.unavailable(property, seniorDeposit, maxClaimAmount, reason, policyConfig.getVersion())));
+        Optional<DepositSafetyCheck> existing = depositSafetyCheckRepository.findByPropertyId(property.getId());
+        if (existing.isPresent()) {
+            existing.get().overwrite(null, seniorDeposit, maxClaimAmount, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
+            return existing.get();
+        }
+
+        DepositSafetyCheck newCheck = DepositSafetyCheck.unavailable(property, seniorDeposit, maxClaimAmount, reason, policyConfig.getVersion());
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> depositSafetyCheckRepository.saveAndFlush(newCheck));
+            return newCheck;
+        } catch (DataIntegrityViolationException e) {
+            // 재조회도 REQUIRES_NEW로 새 트랜잭션에서 한다 - 바깥 트랜잭션에서 그대로 재조회하면,
+            // MySQL InnoDB의 기본 격리수준(REPEATABLE READ)에서는 이 트랜잭션이 이미 앞서 읽은 시점의
+            // 스냅샷에 갇혀 있어 방금 다른 트랜잭션이 커밋한 승자 행이 안 보일 수 있다(H2는 기본이
+            // READ_COMMITTED라 로컬 테스트에서는 드러나지 않는다). 새 트랜잭션은 항상 새 스냅샷을
+            // 잡으므로 격리수준과 무관하게 승자를 확실히 볼 수 있다.
+            DepositSafetyCheck winner = requiresNewTransactionTemplate.execute(status ->
+                    depositSafetyCheckRepository.findByPropertyId(property.getId())
+                            .map(found -> {
+                                found.overwrite(null, seniorDeposit, maxClaimAmount, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
+                                depositSafetyCheckRepository.saveAndFlush(found);
+                                return found;
+                            })
+                            .orElse(null));
+            if (winner == null) {
+                log.error("DepositSafetyCheck 동시 insert 경쟁 복구 실패 - propertyId={}", property.getId(), e);
+                throw e;
+            }
+            return winner;
+        }
     }
 
     private DepositSafetyCheck upsertCalculated(Property property, BigDecimal ratio, BigDecimal seniorDeposit, BigDecimal maxClaimAmount,
                                                  LocalDate referenceDate, String explanation) {
-        return depositSafetyCheckRepository.findByPropertyId(property.getId())
-                .map(existing -> {
-                    existing.overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
-                    return existing;
-                })
-                .orElseGet(() -> depositSafetyCheckRepository.save(
-                        DepositSafetyCheck.calculated(property, ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, policyConfig.getVersion())));
+        Optional<DepositSafetyCheck> existing = depositSafetyCheckRepository.findByPropertyId(property.getId());
+        if (existing.isPresent()) {
+            existing.get().overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
+            return existing.get();
+        }
+
+        DepositSafetyCheck newCheck = DepositSafetyCheck.calculated(property, ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, policyConfig.getVersion());
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> depositSafetyCheckRepository.saveAndFlush(newCheck));
+            return newCheck;
+        } catch (DataIntegrityViolationException e) {
+            // upsertUnavailable()과 동일한 이유로 재조회도 REQUIRES_NEW 새 트랜잭션에서 한다.
+            DepositSafetyCheck winner = requiresNewTransactionTemplate.execute(status ->
+                    depositSafetyCheckRepository.findByPropertyId(property.getId())
+                            .map(found -> {
+                                found.overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
+                                depositSafetyCheckRepository.saveAndFlush(found);
+                                return found;
+                            })
+                            .orElse(null));
+            if (winner == null) {
+                log.error("DepositSafetyCheck 동시 insert 경쟁 복구 실패 - propertyId={}", property.getId(), e);
+                throw e;
+            }
+            return winner;
+        }
     }
 }

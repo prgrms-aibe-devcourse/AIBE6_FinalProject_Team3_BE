@@ -373,6 +373,38 @@ class PropertyServiceTest {
     }
 
     @Test
+    void 매물_목록조회_응답에_매물별_시세비교_결과가_포함된다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 1L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
+
+        MarketComparisonResponse comparison = MarketComparisonResponse.available(
+                28_000_000L, 0.07, 5, "2026-06-20", 300
+        );
+        when(marketComparisonService.compare(property)).thenReturn(comparison);
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).marketComparison()).isEqualTo(comparison);
+    }
+
+    @Test
     void 매물_목록조회_응답에_체크리스트_진행률이_매물별로_포함된다() {
         Property propertyWithChecklist = Property.builder()
                 .userId(USER_ID)
