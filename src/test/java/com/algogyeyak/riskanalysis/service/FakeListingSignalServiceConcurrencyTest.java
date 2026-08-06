@@ -32,7 +32,8 @@ import static org.mockito.Mockito.when;
  * PropertyUpdatedEvent 배치 재계산이 겹치는 경우 등으로) 정말 동시에 들어오면, 둘 다 "기존 행 없음"을
  * 보고 동시에 insert를 시도해 property_risk_checks의 (property_id, signal_type) 유니크 제약을
  * 위반하는 DataIntegrityViolationException이 실제로 났었다. 이 테스트는 실제 H2 DB + 실제 리포지토리로
- * PropertyRepository.findByIdForRiskCheckUpdate()의 쓰기 잠금이 이 경쟁을 실제로 막는지 확인한다.
+ * upsertCheck()/upsertRisk()가 insert를 REQUIRES_NEW 트랜잭션으로 격리해 이 경쟁을 실제로 막는지
+ * 확인한다(외부 API 호출 중 잠금을 오래 들고 있는 PESSIMISTIC_WRITE 락 방식은 폐기됨).
  */
 @SpringBootTest
 class FakeListingSignalServiceConcurrencyTest {
