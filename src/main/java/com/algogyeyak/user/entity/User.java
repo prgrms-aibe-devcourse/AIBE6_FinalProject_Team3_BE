@@ -10,17 +10,25 @@ import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.DynamicUpdate;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
 
+// @DynamicUpdate: 기본값(정적 UPDATE, 매핑된 모든 컬럼을 포함)이면 한 트랜잭션이 필드 하나만
+// 바꿔도 그 시점 스냅샷의 나머지 모든 컬럼 값을 그대로 다시 써넣는다 - 동시에 다른 트랜잭션이
+// 다른 필드를 바꿔 먼저 커밋했다면, 나중에 커밋하는 쪽이 그 변경을 조용히 되돌려버린다(예: 관리자가
+// role을 바꾸는 사이 사용자가 본인 탈퇴(withdraw)를 먼저 커밋하면, 관리자 쪽 UPDATE가 익명화된
+// email/nickname/passwordHash/status를 탈퇴 전 값으로 되돌려 PII를 되살릴 수 있었다). 실제로
+// 변경된 컬럼만 UPDATE에 포함시켜 이 클래스를 막는다.
 @Entity
 @Table(name = "users")
 @EntityListeners(AuditingEntityListener.class)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
+@DynamicUpdate
 public class User {
     private static final String WITHDRAWN_NICKNAME_PREFIX = "탈퇴회원_";
     private static final String WITHDRAWN_EMAIL_DOMAIN = "withdrawn.algogyeyak.local";
