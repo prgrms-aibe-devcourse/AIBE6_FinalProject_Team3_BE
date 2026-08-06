@@ -2,17 +2,13 @@ package com.algogyeyak.auth.config;
 
 import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
-import com.algogyeyak.user.repository.UserSocialAccountRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
-
-import java.util.Optional;
 
 /**
  * 개발 편의용 "관리자로 로그인" 버튼(POST /auth/dev-login)이 로그인시킬 admin 계정을 앱 시작
@@ -31,7 +27,6 @@ public class AdminAccountSeeder implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(AdminAccountSeeder.class);
 
     private final UserRepository userRepository;
-    private final UserSocialAccountRepository userSocialAccountRepository;
 
     @Value("${app.dev-login.enabled}")
     private boolean devLoginEnabled;
@@ -39,9 +34,8 @@ public class AdminAccountSeeder implements ApplicationRunner {
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
 
-    public AdminAccountSeeder(UserRepository userRepository, UserSocialAccountRepository userSocialAccountRepository) {
+    public AdminAccountSeeder(UserRepository userRepository) {
         this.userRepository = userRepository;
-        this.userSocialAccountRepository = userSocialAccountRepository;
     }
 
     @Override
@@ -51,43 +45,23 @@ public class AdminAccountSeeder implements ApplicationRunner {
         }
 
         String normalizedEmail = EmailNormalizer.normalize(devLoginEmail);
-        Optional<User> existing = userRepository.findByEmail(normalizedEmail);
 
-        if (existing.isPresent()) {
-            User user = existing.get();
-
-            // DEV_LOGIN_EMAIL이 실수로 실제 소셜 로그인 사용자의 이메일과 겹치면(공유 DB에 오타 등으로
-            // 잘못 설정된 경우) 아래 healing 로직이 그 실제 계정의 비밀번호를 지우고 ADMIN으로
-            // 승격시켜버릴 수 있다 — 이 시더가 만드는 계정은 소셜 계정을 연동한 적이 없으므로, 소셜
-            // 계정이 하나라도 연동된 기존 계정이 걸리면 절대 건드리지 않는다. 여기서 예외를 던지면
-            // ApplicationRunner라 애플리케이션 기동 자체가 실패하는데, 계정 하나의 이메일 충돌 때문에
-            // 배포 전체가 못 뜨는 건 지나치다 — 대신 이 계정만 건드리지 않고 넘어가고(dev-login은
-            // ADMIN role만 로그인시키므로 이 계정으로는 계속 로그인 안 됨), 설정을 고칠 수 있도록
-            // 크게 로그를 남긴다.
-            if (userSocialAccountRepository.existsByUserId(user.getId())) {
-                log.error(
-                        "app.dev-login.email({})이 소셜 계정이 연동된 기존 계정과 일치합니다 — 실수로 실제 사용자"
-                                + " 이메일과 겹쳤을 수 있어 이 계정은 건드리지 않고 건너뜁니다."
-                                + " DEV_LOGIN_EMAIL 설정을 확인하세요.",
-                        normalizedEmail);
-                return;
-            }
-
-            // 예전 버전의 시더가 비밀번호를 넣어 만들어뒀거나, ADMIN이 아닌 상태로 남아있을 수 있다 —
-            // 매 기동마다 다시 안전한 상태(비밀번호 없음, ADMIN)로 되돌려 놓는다. 그냥 건너뛰기만
-            // 하면 과거 버그의 흔적이 영구 DB에서는 계속 남아있게 된다.
-            boolean changed = false;
-            if (user.getPasswordHash() != null) {
-                user.updatePasswordHash(null);
-                changed = true;
-            }
-            if (user.getRole() != Role.ADMIN) {
-                user.grantAdminRole();
-                changed = true;
-            }
-            if (changed) {
-                userRepository.save(user);
-            }
+        // 예전에는 이 이메일에 이미 계정이 있으면 "치유"한다며 비밀번호를 지우고 ADMIN으로
+        // 승격시켰다 - DEV_LOGIN_ENABLED가 로컬/dev에서만 켜질 수 있던 시절엔 안전했지만, 운영에서도
+        // 이 스위치를 켤 수 있게 되면서(DEV_LOGIN_SECRET로 보호) 이 healing 로직은 secret을 전혀
+        // 거치지 않는 권한 상승 경로가 됐다: DEV_LOGIN_EMAIL과 같은 이메일로 실제 가입된 로컬
+        // 계정이 있으면 매 기동마다 그 계정을 조용히 ADMIN으로 승격시켰고, JwtAuthenticationFilter가
+        // 매 요청 DB에서 role을 다시 읽으므로 그 사용자가 이미 로그인 중이었다면 secret 없이도
+        // 그 세션이 즉시 ADMIN 권한을 갖게 됐다. 이 계정이 시더 자신이 예전에 만든 것인지, 우연히
+        // 이메일이 겹친 진짜 사용자 계정인지 안전하게 구분할 방법이 없으므로, 이미 존재하면 어떤
+        // 이유로든 무조건 건드리지 않고 건너뛴다 - 시딩은 계정이 아직 없을 때만 일어난다.
+        if (userRepository.findByEmail(normalizedEmail).isPresent()) {
+            log.warn(
+                    "app.dev-login.email({})에 이미 계정이 존재해 시딩을 건너뜁니다 - 기존 계정은 그대로 둡니다"
+                            + "(운영에서 실제 사용자 계정이 이 이메일과 겹쳐 있어도 조용히 ADMIN으로"
+                            + " 승격되지 않도록 하기 위함). dev-login으로 로그인하려면 이 이메일에 계정이"
+                            + " 없는 상태에서 기동해야 합니다.",
+                    normalizedEmail);
             return;
         }
 
