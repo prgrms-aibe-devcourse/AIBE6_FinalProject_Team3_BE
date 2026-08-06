@@ -123,7 +123,14 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             requiresNewTransactionTemplate.executeWithoutResult(status ->
                     userSocialAccountRepository.saveAndFlush(UserSocialAccount.of(user, provider, providerId)));
         } catch (DataIntegrityViolationException e) {
-            if (userSocialAccountRepository.findByProviderAndProviderId(provider, providerId).isEmpty()) {
+            // 이 재조회도 createUser()의 winner 재조회와 같은 이유로 REQUIRES_NEW(새 스냅샷)에서 해야
+            // 한다 - 바깥(findOrCreateUser) 트랜잭션은 이미 findByProviderAndProviderId 등을 먼저 읽어
+            // 스냅샷을 확보해둔 상태라(MySQL InnoDB 기본 격리수준 REPEATABLE READ 기준), 그 스냅샷으로
+            // 재조회하면 방금 경쟁에서 이긴 다른 트랜잭션의 커밋이 안 보여 "이미 연동됨"을 놓치고
+            // 실제로는 정상 상황인데도 이 예외가 그대로 흘러나갈 수 있다.
+            boolean alreadyLinked = Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(status ->
+                    userSocialAccountRepository.findByProviderAndProviderId(provider, providerId).isPresent()));
+            if (!alreadyLinked) {
                 throw e;
             }
         }
@@ -170,19 +177,27 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         } catch (DataIntegrityViolationException e) {
             // 같은 provider+providerId로 동시에 첫 로그인이 들어와 유니크 제약에 걸린 경우, 또는
             // 검증된 이메일로 동시에 가입/연동이 먼저 커밋된 경우 — 먼저 커밋된 쪽의 row를 그대로
-            // 사용한다(드문 동시 레이스 대비). 그마저도 못 찾으면(검증 안 된 이메일이라 위 조회가
-            // 애초에 empty를 준 경우 포함) 이 예외를 raw로 흘려보내는 대신 AuthenticationException으로
-            // 감싼다 — 그래야 OAuth2LoginAuthenticationFilter가 이를 잡아
-            // OAuth2AuthenticationFailureHandler로 정상적으로 프론트에 에러 리다이렉트를 보내고,
-            // 서블릿까지 예외가 올라가 500으로 크래시하는 것을 막는다.
-            return userSocialAccountRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
-                    .map(UserSocialAccount::getUser)
-                    .or(() -> findVerifiedEmailMatch(userInfo))
-                    .map(winner -> {
+            // 사용한다(드문 동시 레이스 대비). 이 재조회는 REQUIRES_NEW(새 스냅샷)에서 해야 한다 -
+            // 이 메서드를 호출한 findOrCreateUser()의 바깥 트랜잭션은 이미 findByProviderAndProviderId
+            // 등을 먼저 읽어 스냅샷을 확보해둔 상태라(MySQL InnoDB 기본 격리수준 REPEATABLE READ
+            // 기준), 그 스냅샷으로 재조회하면 방금 경쟁에서 이긴 다른 트랜잭션의 커밋이 안 보여
+            // winner를 못 찾고, 실제로는 계정이 있는데도 email_conflict로 로그인이 실패할 수 있다.
+            // 그마저도 못 찾으면(검증 안 된 이메일이라 위 조회가 애초에 empty를 준 경우 포함) 이
+            // 예외를 raw로 흘려보내는 대신 AuthenticationException으로 감싼다 — 그래야
+            // OAuth2LoginAuthenticationFilter가 이를 잡아 OAuth2AuthenticationFailureHandler로
+            // 정상적으로 프론트에 에러 리다이렉트를 보내고, 서블릿까지 예외가 올라가 500으로
+            // 크래시하는 것을 막는다.
+            Optional<User> winner = requiresNewTransactionTemplate.execute(status ->
+                    userSocialAccountRepository.findByProviderAndProviderId(provider, userInfo.getProviderId())
+                            .map(UserSocialAccount::getUser)
+                            .or(() -> findVerifiedEmailMatch(userInfo)));
+
+            return winner
+                    .map(found -> {
                         // 동시 레이스로 복구된 winner도 다른 모든 경로와 동일하게 정지/탈퇴 여부를
                         // 확인해야 한다 - 그렇지 않으면 이 레이스 케이스만 그 검사를 우회하게 된다.
-                        rejectIfBlocked(winner);
-                        return winner;
+                        rejectIfBlocked(found);
+                        return found;
                     })
                     .orElseThrow(() -> new OAuth2AuthenticationException(
                             new OAuth2Error("email_conflict", "이미 사용 중인 이메일입니다.", null), e));
