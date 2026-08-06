@@ -111,7 +111,7 @@
 
 ## 요구사항에 없던 추가 구현
 
-- `GET /users/nickname-check?nickname=` — 닉네임 중복을 사전에 확인할 수 있는 별도 엔드포인트 (요구사항엔 명시 안 됐지만 프로필 등록/수정 UX상 필요했을 것으로 추정)
+- `GET /users/nickname-check?nickname=` — 닉네임 중복을 사전에 확인할 수 있는 별도 엔드포인트 (요구사항엔 명시 안 됐지만 프로필 등록/수정 UX상 필요했을 것으로 추정). **(2026-08-06 회원가입 화면 인증 오류 수정)** 회원가입 화면(로그인 전)에서도 이 엔드포인트를 호출하는데, 원래 인증을 요구하도록 되어 있어 비로그인 상태로는 호출 자체가 막혀 있었음. `SecurityConfig`에 `permitAll`을 추가해 로그인 여부와 무관하게 호출 가능하도록 열었고, `UserController.checkNickname`은 비로그인 요청에서 `@AuthenticationPrincipal`이 `null`로 주입되는 것에 대응해 `userId`를 null-safe하게 꺼내도록, `UserService.checkNicknameAvailable`은 `userId`가 null이면(비로그인) 본인 제외 없이 `existsByNickname`으로 전체 중복만 검사하고 `userId`가 있으면(로그인 후 프로필 수정 화면) 기존처럼 `existsByNicknameAndIdNot`으로 본인을 제외하고 검사하도록 분기 처리했다 — 이 분기가 없던 이전 코드는 비로그인 호출 시 `userDetails.userId()`에서 NPE가 나거나, null을 그대로 `existsByNicknameAndIdNot`에 넘기면 SQL의 `id <> NULL`이 항상 거짓이 되어 중복이어도 무조건 `available=true`로 잘못 판정되는 문제가 있었음.
 - `UserProfileResponse`에 `hasPassword`(boolean) 필드 — 소셜 전용 계정인지 로컬 비밀번호가 있는지 프론트가 판단할 수 있게 해줌 (auth 쪽 기능과 연결됨)
 - 프로필 이미지 변경이 presign/confirm 2단계 API로 분리됨 — 요구사항엔 "이미지 업로드" 정도로만 명시돼 있고, 이 기술적 플로우(presigned URL 발급 → 클라이언트 직접 업로드 → 서버 확정) 자체는 구현 세부사항
 - `DELETE /users/me/profile-image` — 기본 이미지로 초기화하는 엔드포인트도 요구사항에 명시된 케이스는 아님
