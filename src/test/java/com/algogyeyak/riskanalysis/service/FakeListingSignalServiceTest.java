@@ -239,6 +239,12 @@ class FakeListingSignalServiceTest {
                 );
     }
 
+    // checkAndSummarize()는 더 이상 저장 직후 riskCheckRepository/riskRepository를 재조회해서
+    // signalCount를 만들지 않는다(REQUIRES_NEW로 커밋된 신규 행이 MySQL REPEATABLE READ 하에서
+    // 같은 트랜잭션의 재조회에 안 보일 수 있는 문제 때문 - FakeListingSignalService.checkAndSummarize()
+    // 주석 참고). 대신 checkAndSave()가 감지기 판정 결과를 그 자리에서 직접 세어 반환한 값을 그대로
+    // 쓰므로, 아래 두 테스트는 repository mock이 아니라 감지기(SignalDetector) mock으로 시나리오를
+    // 구성한다.
     @Test
     @DisplayName("checkAndSummarize()는 실행 후 리스크가 발견된 신호 개수와 정책 버전을 요약해 반환한다")
     void checkAndSummarizeReturnsSignalCountAndPolicyVersion() {
@@ -246,13 +252,22 @@ class FakeListingSignalServiceTest {
         Property property = property(10L, 1L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
 
-        PropertyRiskCheck foundCheck = PropertyRiskCheck.success(property, RiskSignalType.DUPLICATE_LISTING, "v1.0");
-        PropertyRisk foundRisk = PropertyRisk.of(property, RiskSignalType.DUPLICATE_LISTING, "동일 주소로 등록된 다른 매물이 있어요");
-        PropertyRiskCheck cleanCheck = PropertyRiskCheck.success(property, RiskSignalType.SHORT_TERM_RELISTING, "v1.0");
-        when(riskCheckRepository.findAllByPropertyId(10L)).thenReturn(List.of(foundCheck, cleanCheck));
-        when(riskRepository.findAllByPropertyId(10L)).thenReturn(List.of(foundRisk));
+        SignalDetector foundDetector = mock(SignalDetector.class);
+        when(foundDetector.isEnabled()).thenReturn(true);
+        when(foundDetector.type()).thenReturn(RiskSignalType.DUPLICATE_LISTING);
+        when(foundDetector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.success("동일 주소로 등록된 다른 매물이 있어요"));
+        SignalDetector cleanDetector = mock(SignalDetector.class);
+        when(cleanDetector.isEnabled()).thenReturn(true);
+        when(cleanDetector.type()).thenReturn(RiskSignalType.SHORT_TERM_RELISTING);
+        when(cleanDetector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.success(null));
 
-        RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
+        FakeListingSignalService serviceWithDetectors = new FakeListingSignalService(
+                List.of(foundDetector, cleanDetector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        RiskAnalysisSummaryResponse result = serviceWithDetectors.checkAndSummarize(1L, 10L);
 
         assertThat(result.propertyId()).isEqualTo(10L);
         assertThat(result.signalCount()).isEqualTo(1);
@@ -267,11 +282,17 @@ class FakeListingSignalServiceTest {
         Property property = property(10L, 1L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
 
-        PropertyRiskCheck cleanCheck = PropertyRiskCheck.success(property, RiskSignalType.DUPLICATE_LISTING, "v1.0");
-        when(riskCheckRepository.findAllByPropertyId(10L)).thenReturn(List.of(cleanCheck));
-        when(riskRepository.findAllByPropertyId(10L)).thenReturn(List.of());
+        SignalDetector cleanDetector = mock(SignalDetector.class);
+        when(cleanDetector.isEnabled()).thenReturn(true);
+        when(cleanDetector.type()).thenReturn(RiskSignalType.DUPLICATE_LISTING);
+        when(cleanDetector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.success(null));
 
-        RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
+        FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
+                List.of(cleanDetector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        RiskAnalysisSummaryResponse result = serviceWithDetector.checkAndSummarize(1L, 10L);
 
         assertThat(result.propertyId()).isEqualTo(10L);
         assertThat(result.signalCount()).isEqualTo(0);

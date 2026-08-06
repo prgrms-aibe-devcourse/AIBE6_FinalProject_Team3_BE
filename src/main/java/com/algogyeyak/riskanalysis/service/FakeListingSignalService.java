@@ -96,10 +96,11 @@ public class FakeListingSignalService {
      * checkAndSave(Property)와 동일하지만, 컨트롤러에서 호출하기 위해 매물 존재/삭제/소유권을 먼저
      * 확인한다(getSignals()와 동일한 패턴) - 최초 실행과 재계산 모두 이 메서드 하나로 처리된다
      * (checkAndSave(Property)가 이미 upsert 구조라 있으면 덮어쓰고 없으면 새로 만들기 때문에
-     * "최초 실행"과 "재계산"을 구분할 이유가 없다).
+     * "최초 실행"과 "재계산"을 구분할 이유가 없다). 반환값(리스크가 발견된 신호 수)은
+     * checkAndSummarize()가 사용한다 - 이유는 그 메서드의 주석 참고.
      */
     @Transactional
-    public void checkAndSave(Long userId, Long propertyId) {
+    public int checkAndSave(Long userId, Long propertyId) {
         Property property = propertyRepository.findById(propertyId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
         if (property.isDeleted()) {
@@ -109,45 +110,56 @@ public class FakeListingSignalService {
             throw new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED);
         }
 
-        checkAndSave(property);
+        return checkAndSave(property);
     }
 
     /**
      * checkAndSave(userId, propertyId)를 실행한 뒤, 상세 목록(GET /risk-signals가 담당) 대신
      * "리스크가 실제로 발견된 신호가 몇 건인지" 요약만 반환한다 - POST 응답이 너무 무거워지지 않게
-     * 상세는 별도 GET 호출로 분리하는 설계.
+     * 상세는 별도 GET 호출로 분리하는 설계. checkAndSave()가 반환한 개수를 그대로 쓰고, 저장 직후
+     * getSignals()로 DB를 다시 조회하지 않는다 - checkAndSave() 안에서 신규로 발견된 신호는
+     * PropertyRiskCheck/PropertyRisk에 REQUIRES_NEW(별도 트랜잭션)로 insert되는데, MySQL의 기본
+     * 격리수준(REPEATABLE READ)에서는 이 메서드가 속한 바깥 트랜잭션이 이미 그 전에(예: 매물 조회
+     * 시점) 스냅샷을 고정해뒀다면 방금 다른 트랜잭션이 커밋한 그 행이 같은 트랜잭션의 이후 조회에서
+     * 안 보일 수 있다 - 즉 첫 계산 때 signalCount가 실제로는 신호가 있는데도 0으로 나올 수 있는
+     * 문제였다(H2를 REPEATABLE_READ로 강제해 직접 재현 확인함). checkAndSave()가 이미 판정한 결과를
+     * 그대로 세면 이 문제를 원천적으로 피한다.
      */
     @Transactional
     public RiskAnalysisSummaryResponse checkAndSummarize(Long userId, Long propertyId) {
-        checkAndSave(userId, propertyId);
-        RiskSignalListResponse signals = getSignals(userId, propertyId);
-        return new RiskAnalysisSummaryResponse(propertyId, signals.signalCount(), policyConfig.getVersion(), LocalDateTime.now());
+        int signalCount = checkAndSave(userId, propertyId);
+        return new RiskAnalysisSummaryResponse(propertyId, signalCount, policyConfig.getVersion(), LocalDateTime.now());
     }
 
     /**
      * 신호 4종을 각각 독립적으로 판정·저장한다. 시세비교(comparison)를 한 번만 조회해 각 탐지기에
      * 넘기되, 그 결과를 어떻게 쓸지는(혹은 아예 무시할지는) 각 SignalDetector가 결정한다 —
      * 시세비교가 실패/판정불가여도 이를 필요로 하지 않는 신호(중복매물/동일계정/재등록)는
-     * 자체적으로 판정을 계속 시도한다.
+     * 자체적으로 판정을 계속 시도한다. 반환값은 실제로 리스크가 발견된(SUCCESS + 설명 존재) 신호
+     * 개수 - checkAndSummarize()의 signalCount로 그대로 쓰인다.
      */
     @Transactional
-    public void checkAndSave(Property property) {
+    public int checkAndSave(Property property) {
         MarketComparison comparison = marketDataClient.getComparison(property.getId())
                 .orElse(null);
 
-        detectors.stream()
+        int foundSignalCount = (int) detectors.stream()
                 .filter(SignalDetector::isEnabled)
-                .forEach(detector -> checkAndSaveSignal(property, comparison, detector));
+                .filter(detector -> checkAndSaveSignal(property, comparison, detector))
+                .count();
 
         depositSafetyCheckService.checkAndSave(property);
+        return foundSignalCount;
     }
 
-    private void checkAndSaveSignal(Property property, MarketComparison comparison, SignalDetector detector) {
+    private boolean checkAndSaveSignal(Property property, MarketComparison comparison, SignalDetector detector) {
         RiskSignalType signalType = detector.type();
         SignalCheckResult result = detector.detect(property, comparison);
 
         upsertCheck(property, signalType, result.status(), result.reason());
         upsertRisk(property, signalType, result);
+
+        return result.status() == RiskCheckStatus.SUCCESS && result.description() != null;
     }
 
     // "없으면 insert, 있으면 update"인데 조회와 insert 사이에 갭이 있어, 같은 매물에 대한 두 요청이
