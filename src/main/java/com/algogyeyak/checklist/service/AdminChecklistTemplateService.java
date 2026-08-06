@@ -9,6 +9,8 @@ import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.property.entity.PropertyType;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +55,7 @@ public class AdminChecklistTemplateService {
     public AdminChecklistItemTemplateResponse create(AdminChecklistItemTemplateCreateRequest request) {
         // 새로 만드는 문항은 항상 active=true라, 다른 활성 문항과의 code 중복도 그 기준으로 검사한다.
         validateCode(request.code(), request.itemType(), true, null);
+        validateApplicablePropertyTypes(request.applicablePropertyTypes());
 
         int version = checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc().stream()
                 .mapToInt(ChecklistItemTemplate::getVersion)
@@ -81,6 +84,7 @@ public class AdminChecklistTemplateService {
         ChecklistItemTemplate template = findTemplate(templateId);
         validateCode(request.code(), request.itemType(), request.active(), templateId);
         validateNotDeactivatingLastActiveTemplate(template, request.active());
+        validateApplicablePropertyTypes(request.applicablePropertyTypes());
 
         template.update(
                 request.category(),
@@ -131,6 +135,24 @@ public class AdminChecklistTemplateService {
                     ErrorCode.ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE,
                     "이미 다른 활성 문항이 %s 코드를 사용하고 있습니다.".formatted(code)
             );
+        }
+    }
+
+    // ChecklistItemTemplate.isApplicableTo()는 콤마로 구분된 토큰을 PropertyType.name()과 단순
+    // 문자열 비교만 하므로, Swagger/직접 API 호출로 오타나 존재하지 않는 값이 들어와도 그 자체로는
+    // 에러가 나지 않고 그 문항이 모든 매물유형에서 조용히 노출되지 않게 될 뿐이다(관리자 화면은
+    // 체크박스라 정상 입력만 보내지만, API 레벨에는 그 보장이 없었다). 저장 시점에 막아 그
+    // 조용한 실패를 방지한다.
+    private void validateApplicablePropertyTypes(String applicablePropertyTypes) {
+        if (applicablePropertyTypes == null || applicablePropertyTypes.isBlank()) {
+            return;
+        }
+        boolean hasUnknownToken = Arrays.stream(applicablePropertyTypes.split(","))
+                .map(String::trim)
+                .anyMatch(token -> Arrays.stream(PropertyType.values())
+                        .noneMatch(propertyType -> propertyType.name().equals(token)));
+        if (hasUnknownToken) {
+            throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE);
         }
     }
 

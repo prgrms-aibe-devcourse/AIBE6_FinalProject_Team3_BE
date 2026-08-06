@@ -110,6 +110,23 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
+    @DisplayName("존재하지 않는 매물유형으로 생성하면 ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE 예외가 발생한다")
+    void createThrowsWhenApplicablePropertyTypeIsUnknown() {
+        // 관리자 화면은 체크박스라 정상 값만 보내지만, Swagger/직접 API 호출은 그 보장이 없다 -
+        // 저장 시점에 막지 않으면 ChecklistItemTemplate.isApplicableTo()가 이 토큰을 어떤
+        // 매물유형과도 매칭시키지 못해 그 문항이 조용히 전체 매물유형에서 노출되지 않게 된다.
+        assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,TYPO"
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
+    }
+
+    @Test
     @DisplayName("존재하는 문항을 수정하면 변경된 필드가 반영된다")
     void updateChangesExistingTemplateFields() {
         ChecklistItemTemplate existing = template(1L, 2, 1);
@@ -133,6 +150,24 @@ class AdminChecklistTemplateServiceTest {
         assertThat(result.displayOrder()).isEqualTo(9);
         assertThat(result.active()).isFalse();
         assertThat(result.version()).isEqualTo(2); // 수정으로 버전이 바뀌지 않는다
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 매물유형으로 수정하면 ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE 예외가 발생한다")
+    void updateThrowsWhenApplicablePropertyTypeIsUnknown() {
+        ChecklistItemTemplate existing = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.update(
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, "TYPO", true
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
     }
 
     @Test

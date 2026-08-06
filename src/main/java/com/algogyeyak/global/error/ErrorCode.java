@@ -98,6 +98,7 @@ public enum ErrorCode {
     ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE(HttpStatus.BAD_REQUEST, "ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE", "이 코드는 선택한 응답 방식과 맞지 않습니다."),
     ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE", "이미 다른 활성 문항이 같은 코드를 사용하고 있습니다."),
     ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM", "마지막 문항은 삭제할 수 없습니다. 노출 여부를 꺼서 숨겨주세요."),
+    ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE(HttpStatus.BAD_REQUEST, "ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE", "존재하지 않는 매물유형입니다."),
 
     // 파일 업로드(S3) 공통 - profile/property/contract 이미지 업로드가 전부 이 코드를 공유한다.
     FILE_EXTENSION_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "FILE_EXTENSION_NOT_ALLOWED", "허용되지 않는 파일 확장자입니다."),
