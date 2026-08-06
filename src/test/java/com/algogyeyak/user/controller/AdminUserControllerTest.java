@@ -164,6 +164,57 @@ class AdminUserControllerTest {
     }
 
     @Test
+    void 마지막_남은_활성_관리자는_강등할_수_없다() throws Exception {
+        // 관리자 두 명이 서로 실수로/의도적으로 유일하게 남은 관리자를 강등시키면, 그 순간부터
+        // 아무도 /admin/**에 접근할 수 없게 되고 AdminAccountSeeder는 기존 계정을 절대 다시
+        // 승격시키지 않으므로 앱 안에서 되돌릴 방법이 없다 - 그 경로를 막는 회귀 테스트.
+        User target = buildUser(TARGET_ID, "target@example.com", "관리자타겟", Role.ADMIN);
+        when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+        when(userRepository.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).thenReturn(1L);
+
+        mockMvc.perform(patch("/admin/users/{userId}/role", TARGET_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"role":"USER"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_LAST_ADMIN_ACCOUNT"));
+    }
+
+    @Test
+    void 다른_활성_관리자가_남아있으면_강등할_수_있다() throws Exception {
+        User target = buildUser(TARGET_ID, "target@example.com", "관리자타겟", Role.ADMIN);
+        when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+        when(userRepository.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).thenReturn(2L);
+
+        mockMvc.perform(patch("/admin/users/{userId}/role", TARGET_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"role":"USER"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.role").value("USER"));
+    }
+
+    @Test
+    void 마지막_남은_활성_관리자는_정지할_수_없다() throws Exception {
+        User target = buildUser(TARGET_ID, "target@example.com", "관리자타겟", Role.ADMIN);
+        when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+        when(userRepository.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).thenReturn(1L);
+
+        mockMvc.perform(patch("/admin/users/{userId}/status", TARGET_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_LAST_ADMIN_ACCOUNT"));
+    }
+
+    @Test
     void 정지된_유저는_로그인_경로에서_거부되어야_하므로_상태변경_API가_SUSPENDED를_반영한다() throws Exception {
         User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
