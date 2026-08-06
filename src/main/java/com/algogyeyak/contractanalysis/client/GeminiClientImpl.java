@@ -56,6 +56,8 @@ public class GeminiClientImpl implements GeminiClient {
                고지 문구는 explanation에 포함하지 마세요. 해당 고지는 응답 레벨에서
                별도 필드로 항상 함께 내려가므로, explanation에는 조항 자체에 대한
                설명만 담으세요.
+            7. explanation/question/suggestedText에는 마크다운 문법(**볼드**, -/* 목록,
+               # 제목 등)을 쓰지 말고 일반 텍스트로만 답하세요.
             """;
 
     private static final String CHAT_SYSTEM_INSTRUCTION_TEMPLATE = """
@@ -65,6 +67,8 @@ public class GeminiClientImpl implements GeminiClient {
             "이 답변은 AI가 생성한 참고용 정보입니다", "법적 효력이 없습니다" 같은
             고지 문구는 답변에 포함하지 마세요. 해당 고지는 응답 레벨에서 별도
             필드로 항상 함께 내려가므로, 답변에는 질문에 대한 내용만 담으세요.
+            마크다운 문법(**볼드**, -/* 목록, # 제목 등)을 쓰지 말고 일반 텍스트로만
+            답변하세요.
 
             [분석 대상 조항]
             원문: %s
