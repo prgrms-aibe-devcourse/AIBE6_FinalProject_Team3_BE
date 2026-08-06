@@ -99,6 +99,15 @@ public class UserService {
         return new PresignedUploadResponse(uploadUrl, key, S3PresignService.PENDING_UPLOAD_TAG);
     }
 
+    /**
+     * 알려진 한계(조회 후 저장 방식이라 원자적이지 않음): 같은 유저가 두 탭에서 거의 동시에
+     * confirmProfileImageUpload()/resetProfileImage()를 각각 호출하면, 나중에 커밋하는 쪽이
+     * profileImageUrl 컬럼을 그대로 덮어써 먼저 커밋된 쪽의 결과가 조용히 사라질 수 있다(진
+     * 쪽이 confirm이었다면 그 S3 객체는 이미 PENDING_UPLOAD_TAG가 지워진 뒤라 이후로도 참조하는
+     * 행이 없어 영구 orphan이 된다). 본인 계정 내 자기 자신과의 레이스라 다른 사용자에게 영향이
+     * 없고, 실제로 두 탭에서 거의 동시에 프로필 사진을 바꾸는 빈도가 매우 낮아 감수하기로 함 -
+     * AdminChecklistTemplateService.validateCode와 동일한 판단 기준.
+     */
     @Transactional
     public UserProfileResponse confirmProfileImageUpload(Long userId, String key) {
         User user = getActiveUserOrThrow(userId);
@@ -173,7 +182,12 @@ public class UserService {
     @Transactional
     public void withdraw(Long userId) {
         User user = getActiveUserOrThrow(userId);
+        // User.withdraw()가 profileImageUrl을 직접 null로 비우기 전에 먼저 캡처해둔다 - 안 그러면
+        // resetProfileImage()/confirmProfileImageUpload()와 달리 이 S3 객체를 정리할 방법이 없어,
+        // 탈퇴할 때마다 실제 소유자가 없는 이미지가 영구적으로 S3에 남는다.
+        String previousImageUrl = user.getProfileImageUrl();
         user.withdraw();
+        deletePreviousProfileImageIfOwned(userId, previousImageUrl);
         // TODO: user_social_accounts(OAuth 연동 정보, UserSocialAccount 엔티티) 처리 정책 적용 필요 — 확인 필요
         // TODO: 탈퇴한 사용자의 Property/ContractAnalysis 등 연관 데이터 처리 방식 적용 필요 — 확인 필요
     }

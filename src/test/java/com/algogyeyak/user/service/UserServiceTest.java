@@ -143,6 +143,22 @@ class UserServiceTest {
     }
 
     @Test
+    void withdrawDeletesOwnedProfileImage() {
+        // User.withdraw()가 profileImageUrl을 직접 null로 비우기 때문에, resetProfileImage()와
+        // 달리 이 정리를 명시적으로 해주지 않으면 탈퇴할 때마다 소유자 없는 이미지가 S3에 영구적으로
+        // 남는 회귀 테스트.
+        User user = activeUser(1L);
+        user.updateProfileImageUrl("https://bucket.s3.ap-northeast-2.amazonaws.com/profile-images/1/old.jpg");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(s3PresignService.extractOwnedKey("https://bucket.s3.ap-northeast-2.amazonaws.com/profile-images/1/old.jpg"))
+                .thenReturn(Optional.of("profile-images/1/old.jpg"));
+
+        userService.withdraw(1L);
+
+        verify(s3PresignService).deleteReplacedObject("profile-images/1/old.jpg");
+    }
+
+    @Test
     void resetProfileImageClearsUrlAndDeletesOwnedS3Object() {
         User user = activeUser(1L);
         user.updateProfileImageUrl("https://bucket.s3.ap-northeast-2.amazonaws.com/profile-images/1/old.jpg");
