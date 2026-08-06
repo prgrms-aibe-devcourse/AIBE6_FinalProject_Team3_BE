@@ -19,6 +19,8 @@ import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import com.algogyeyak.riskanalysis.signal.SignalDetector;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -26,6 +28,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,7 +44,7 @@ class FakeListingSignalServiceTest {
     private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
     private final FakeListingSignalService service = new FakeListingSignalService(
             List.of(mock(SignalDetector.class)), marketDataClient, riskCheckRepository, riskRepository,
-            propertyRepository, depositSafetyCheckService, policyConfig);
+            propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
 
     private Property property(Long id, Long ownerId) {
         Property property = Property.builder()
@@ -135,6 +138,61 @@ class FakeListingSignalServiceTest {
         service.checkAndSave(1L, 10L);
 
         verify(depositSafetyCheckService).checkAndSave(property);
+    }
+
+    @Test
+    @DisplayName("PropertyRiskCheck 동시 insert로 유니크 제약을 위반하면 재조회해서 덮어쓰는 방식으로 복구한다")
+    void upsertCheckRecoversFromConcurrentInsertRace() {
+        Property property = property(10L, 1L);
+        com.algogyeyak.riskanalysis.signal.SignalDetector detector = mock(com.algogyeyak.riskanalysis.signal.SignalDetector.class);
+        when(detector.isEnabled()).thenReturn(true);
+        when(detector.type()).thenReturn(RiskSignalType.PRICE_ANOMALY);
+        when(detector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.undeterminable(com.algogyeyak.riskanalysis.enums.RiskCheckReason.NO_COMPARABLE_TRANSACTION));
+
+        FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
+                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        // 첫 조회 시점엔 아직 아무도 없다고 나오지만(레이스), saveAndFlush 시도 시 다른 트랜잭션이
+        // 먼저 커밋해서 유니크 제약 위반이 난다 - 재조회하면 그 사이 커밋된 행이 보인다.
+        when(riskCheckRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.PRICE_ANOMALY))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(PropertyRiskCheck.success(property, RiskSignalType.PRICE_ANOMALY, "v1.0")));
+        when(riskCheckRepository.saveAndFlush(any(PropertyRiskCheck.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+
+        serviceWithDetector.checkAndSave(property);
+
+        // 예외가 밖으로 안 새어 나오면 성공 - 재조회한 기존 행에 overwrite()로 복구됐다는 뜻.
+        verify(riskCheckRepository).saveAndFlush(any(PropertyRiskCheck.class));
+    }
+
+    @Test
+    @DisplayName("PropertyRisk 동시 insert로 유니크 제약을 위반하면 재조회해서 덮어쓰는 방식으로 복구한다")
+    void upsertRiskRecoversFromConcurrentInsertRace() {
+        Property property = property(10L, 1L);
+        com.algogyeyak.riskanalysis.signal.SignalDetector detector = mock(com.algogyeyak.riskanalysis.signal.SignalDetector.class);
+        when(detector.isEnabled()).thenReturn(true);
+        when(detector.type()).thenReturn(RiskSignalType.DUPLICATE_LISTING);
+        when(detector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.success("동일 주소로 등록된 다른 매물이 있어요"));
+
+        FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
+                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        when(riskCheckRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.DUPLICATE_LISTING))
+                .thenReturn(Optional.empty());
+        when(riskRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.DUPLICATE_LISTING))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(PropertyRisk.of(property, RiskSignalType.DUPLICATE_LISTING, "동일 주소로 등록된 다른 매물이 있어요")));
+        when(riskRepository.saveAndFlush(any(PropertyRisk.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+
+        serviceWithDetector.checkAndSave(property);
+
+        verify(riskRepository).saveAndFlush(any(PropertyRisk.class));
     }
 
     @Test

@@ -19,18 +19,21 @@ import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
 import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
 import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import com.algogyeyak.riskanalysis.signal.SignalDetector;
-import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class FakeListingSignalService {
     private final List<SignalDetector> detectors;
     private final MarketDataClient marketDataClient;
@@ -39,6 +42,27 @@ public class FakeListingSignalService {
     private final PropertyRepository propertyRepository;
     private final DepositSafetyCheckService depositSafetyCheckService;
     private final RiskPolicyConfig policyConfig;
+    private final TransactionTemplate requiresNewTransactionTemplate;
+
+    public FakeListingSignalService(
+            List<SignalDetector> detectors,
+            MarketDataClient marketDataClient,
+            PropertyRiskCheckRepository riskCheckRepository,
+            PropertyRiskRepository riskRepository,
+            PropertyRepository propertyRepository,
+            DepositSafetyCheckService depositSafetyCheckService,
+            RiskPolicyConfig policyConfig,
+            PlatformTransactionManager transactionManager) {
+        this.detectors = detectors;
+        this.marketDataClient = marketDataClient;
+        this.riskCheckRepository = riskCheckRepository;
+        this.riskRepository = riskRepository;
+        this.propertyRepository = propertyRepository;
+        this.depositSafetyCheckService = depositSafetyCheckService;
+        this.policyConfig = policyConfig;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     /**
      * 매물의 신호 4종 현재 상태를 조회한다. checklist 도메인과 동일한 패턴으로 매물 존재/삭제/소유권을
@@ -106,13 +130,6 @@ public class FakeListingSignalService {
      */
     @Transactional
     public void checkAndSave(Property property) {
-        // 아래 upsertCheck/upsertRisk가 "없으면 insert" check-then-act라, 같은 매물에 대한 두 요청이
-        // 동시에 여기 들어오면 유니크 제약 위반이 날 수 있다 - 매물 행에 쓰기 잠금을 걸어 뒤에 온
-        // 트랜잭션이 앞선 트랜잭션의 커밋을 기다리게 한다(PropertyRepository.findByIdForRiskCheckUpdate
-        // 참고). depositSafetyCheckService.checkAndSave()도 내부에서 같은 잠금을 다시 걸지만, 같은
-        // 트랜잭션 안에서 이미 보유한 잠금을 재요청하는 것뿐이라 안전하다.
-        propertyRepository.findByIdForRiskCheckUpdate(property.getId());
-
         MarketComparison comparison = marketDataClient.getComparison(property.getId())
                 .orElse(null);
 
@@ -131,36 +148,63 @@ public class FakeListingSignalService {
         upsertRisk(property, signalType, result);
     }
 
+    // "없으면 insert, 있으면 update"인데 조회와 insert 사이에 갭이 있어, 같은 매물에 대한 두 요청이
+    // 동시에 들어오면(예: React 개발 모드가 useEffect를 두 번 실행하는 경우, 사용자 요청과
+    // RiskRecalculationService의 배치 재계산이 겹치는 경우) 둘 다 "기존 행 없음"을 보고 동시에 insert를
+    // 시도해 (property_id, signal_type) 유니크 제약을 위반할 수 있다(DataIntegrityViolationException).
+    // insert를 REQUIRES_NEW로 격리해서, 위반이 나도 그 임시 트랜잭션의 세션만 버려지고 이 메서드가
+    // 속한 바깥 트랜잭션의 세션은 정상 상태로 남게 한다 - 같은 세션에서 saveAndFlush가 유니크 제약
+    // 위반으로 실패한 뒤 그 세션으로 쿼리를 이어가면 Hibernate가 "세션이 예외 이후 flush됨
+    // (AssertionFailure)"을 던지는 문제를 피하기 위함(CustomOAuth2UserService.createUser()와 동일한
+    // 이유·동일한 패턴). 실패하면 그 사이 먼저 커밋된 행을 재조회해서 덮어쓴다.
     private void upsertCheck(Property property, RiskSignalType signalType, RiskCheckStatus status, RiskCheckReason reason) {
-        PropertyRiskCheck check = riskCheckRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
-                .orElse(null);
-
-        if (check == null) {
-            PropertyRiskCheck newCheck = switch (status) {
-                case SUCCESS -> PropertyRiskCheck.success(property, signalType, policyConfig.getVersion());
-                case UNDETERMINABLE -> PropertyRiskCheck.undeterminable(property, signalType, reason, policyConfig.getVersion());
-                case FAILED -> PropertyRiskCheck.failed(property, signalType, reason, policyConfig.getVersion());
-            };
-            riskCheckRepository.save(newCheck);
+        Optional<PropertyRiskCheck> existing = riskCheckRepository.findByPropertyIdAndSignalType(property.getId(), signalType);
+        if (existing.isPresent()) {
+            existing.get().overwrite(status, reason, policyConfig.getVersion());
             return;
         }
 
-        check.overwrite(status, reason, policyConfig.getVersion());
+        PropertyRiskCheck newCheck = switch (status) {
+            case SUCCESS -> PropertyRiskCheck.success(property, signalType, policyConfig.getVersion());
+            case UNDETERMINABLE -> PropertyRiskCheck.undeterminable(property, signalType, reason, policyConfig.getVersion());
+            case FAILED -> PropertyRiskCheck.failed(property, signalType, reason, policyConfig.getVersion());
+        };
+
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status2 -> riskCheckRepository.saveAndFlush(newCheck));
+        } catch (DataIntegrityViolationException e) {
+            riskCheckRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
+                    .ifPresentOrElse(
+                            winner -> winner.overwrite(status, reason, policyConfig.getVersion()),
+                            () -> { throw e; }
+                    );
+        }
     }
 
     // status=SUCCESS이고 설명이 있는 경우에만 리스크 1건을 upsert하고, 그 외(신호 해소·판정불가·실패)에는
     // 이전에 저장해둔 리스크가 있다면 지운다 — property_risks는 (property_id, signal_type)당 최신 판정
-    // 결과 1건만 유지한다.
+    // 결과 1건만 유지한다. insert 경쟁 대비는 upsertCheck()와 동일한 이유·동일한 패턴.
     private void upsertRisk(Property property, RiskSignalType signalType, SignalCheckResult result) {
         if (result.status() != RiskCheckStatus.SUCCESS || result.description() == null) {
             riskRepository.deleteByPropertyIdAndSignalType(property.getId(), signalType);
             return;
         }
 
-        riskRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
-                .ifPresentOrElse(
-                        risk -> risk.overwrite(result.description()),
-                        () -> riskRepository.save(PropertyRisk.of(property, signalType, result.description()))
-                );
+        Optional<PropertyRisk> existing = riskRepository.findByPropertyIdAndSignalType(property.getId(), signalType);
+        if (existing.isPresent()) {
+            existing.get().overwrite(result.description());
+            return;
+        }
+
+        PropertyRisk newRisk = PropertyRisk.of(property, signalType, result.description());
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> riskRepository.saveAndFlush(newRisk));
+        } catch (DataIntegrityViolationException e) {
+            riskRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
+                    .ifPresentOrElse(
+                            winner -> winner.overwrite(result.description()),
+                            () -> { throw e; }
+                    );
+        }
     }
 }
