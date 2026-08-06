@@ -83,7 +83,7 @@ public class UserService {
                 .currentStage(request.getCurrentStage())
                 .build();
 
-        userPreferenceRepository.save(preference);
+        savePreferenceOrThrowIfAlreadyRegistered(userId, preference);
 
         return toResponse(user, preference);
     }
@@ -155,8 +155,7 @@ public class UserService {
         }
 
         UserPreference preference = userPreferenceRepository.findByUserId(userId)
-                .orElseGet(() -> userPreferenceRepository.save(
-                        UserPreference.builder().user(user).build()));
+                .orElseGet(() -> saveOrFetchExistingPreference(userId, user));
 
         if (request.getInterestRegion() != null) {
             preference.updateInterestRegion(request.getInterestRegion());
@@ -220,6 +219,36 @@ public class UserService {
             throw e;
         }
         user.updateNickname(newNickname);
+    }
+
+    // registerProfile()의 사전 검사(existsByUserId) 통과 이후에도, 커밋 전에 동시에 같은 유저로
+    // 먼저 등록을 마친 다른 요청(중복 클릭 등)이 있으면 user_id 유니크 제약에 걸릴 수 있다 -
+    // changeNickname()과 동일한 이유로 INSERT/재확인 둘 다 REQUIRES_NEW로 분리한다.
+    private void savePreferenceOrThrowIfAlreadyRegistered(Long userId, UserPreference preference) {
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> userPreferenceRepository.saveAndFlush(preference));
+        } catch (DataIntegrityViolationException e) {
+            boolean alreadyRegistered = Boolean.TRUE.equals(
+                    requiresNewTransactionTemplate.execute(status -> userPreferenceRepository.existsByUserId(userId)));
+            if (alreadyRegistered) {
+                throw new BusinessException(ErrorCode.USER_PROFILE_ALREADY_EXISTS);
+            }
+            throw e;
+        }
+    }
+
+    // updateMyProfile()의 이 경로는 "미리 온보딩하지 않은 기존 유저도 그냥 되게 하자"는 편의
+    // 처리라, registerProfile()과 달리 유니크 제약에 걸려도 에러로 막을 이유가 없다 - 동시에
+    // 같은 유저로 처음 preference를 만드는 레이스에서 진 쪽은, 이긴 쪽이 방금 커밋한 행을 그냥
+    // 재사용한다. 재조회도 REQUIRES_NEW로 해야 한다(changeNickname()과 동일한 이유).
+    private UserPreference saveOrFetchExistingPreference(Long userId, User user) {
+        UserPreference candidate = UserPreference.builder().user(user).build();
+        try {
+            return requiresNewTransactionTemplate.execute(status -> userPreferenceRepository.saveAndFlush(candidate));
+        } catch (DataIntegrityViolationException e) {
+            return requiresNewTransactionTemplate.execute(status -> userPreferenceRepository.findByUserId(userId)
+                    .orElseThrow(() -> e));
+        }
     }
 
     private UserProfileResponse toResponse(User user, UserPreference preference) {
