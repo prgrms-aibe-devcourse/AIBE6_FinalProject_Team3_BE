@@ -272,12 +272,31 @@ class ChecklistControllerTest {
                         .cookie(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data[0].propertyId").value(10))
-                .andExpect(jsonPath("$.data[0].checklistId").value(100))
-                .andExpect(jsonPath("$.data[0].status").value("IN_PROGRESS"))
-                .andExpect(jsonPath("$.data[1].propertyId").value(20))
-                .andExpect(jsonPath("$.data[1].checklistId").doesNotExist())
-                .andExpect(jsonPath("$.data[1].status").value("NOT_STARTED"));
+                .andExpect(jsonPath("$.data.content[0].propertyId").value(10))
+                .andExpect(jsonPath("$.data.content[0].checklistId").value(100))
+                .andExpect(jsonPath("$.data.content[0].status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.data.content[1].propertyId").value(20))
+                .andExpect(jsonPath("$.data.content[1].checklistId").doesNotExist())
+                .andExpect(jsonPath("$.data.content[1].status").value("NOT_STARTED"))
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.size").value(20))
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.totalPages").value(1))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+    }
+
+    @Test
+    @DisplayName("page/size 쿼리 파라미터를 그대로 서비스에 전달한다")
+    void listMyChecklistsPassesPageAndSizeToService() throws Exception {
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        when(checklistService.listMyChecklists(1L, org.springframework.data.domain.PageRequest.of(1, 5)))
+                .thenReturn(new com.algogyeyak.global.response.PageResponse<>(List.of(), 1, 5, 0, 0, false));
+
+        mockMvc.perform(get("/checklists?page=1&size=5")
+                        .cookie(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.page").value(1))
+                .andExpect(jsonPath("$.data.size").value(5));
     }
 
     @Test

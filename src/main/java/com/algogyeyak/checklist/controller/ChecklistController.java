@@ -11,8 +11,10 @@ import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.entity.ChecklistResult;
 import com.algogyeyak.checklist.service.ChecklistService;
 import com.algogyeyak.global.response.ApiResponse;
-import java.util.List;
+import com.algogyeyak.global.response.PageResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -84,17 +86,15 @@ public class ChecklistController {
     }
 
     /**
-     * 내 매물 전체 + 매물별 체크리스트 현황을 조회한다.
-     * TODO: 서비스 레이어는 페이지네이션(Pageable/PageResponse)으로 이미 전환됐지만, 컨트롤러는
-     * 아직 이전 계약(List, 최대 20건 고정)을 그대로 유지 중인 임시 상태 - 컨트롤러/API 명세를
-     * PageResponse로 전환하는 작업이 남아있다.
+     * 내 매물 전체 + 매물별 체크리스트 현황을 페이지네이션으로 조회한다. 정렬(최종 점검일 최신순)은
+     * 항상 고정이라 sort 쿼리 파라미터는 받지 않는다(보내도 서비스에서 무시함) - page/size만
+     * 매물 목록(GET /properties)과 동일한 기본값(20, 최대 100)으로 받는다.
      */
     @GetMapping("/checklists")
-    public ApiResponse<List<ChecklistOverviewResponse>> listMyChecklists(
-            @AuthenticationPrincipal JwtUserPrincipal userDetails
+    public ApiResponse<PageResponse<ChecklistOverviewResponse>> listMyChecklists(
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
+            @PageableDefault(size = 20) Pageable pageable
     ) {
-        return ApiResponse.success(
-                checklistService.listMyChecklists(userDetails.userId(), org.springframework.data.domain.PageRequest.of(0, 20))
-                        .content());
+        return ApiResponse.success(checklistService.listMyChecklists(userDetails.userId(), pageable));
     }
 }
