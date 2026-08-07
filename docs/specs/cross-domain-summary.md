@@ -14,7 +14,7 @@
 | `property` | 부분 구현, 명세보다 크게 좁음 | 시세·위험신호·체크리스트 연동 전무, 검색/페이지네이션 없음 |
 | `contract-analysis` | 부분 구현(진행 중) | 핵심 단계인 AI 분석(`/analyze`) 자체가 없음 |
 | `market-data` | 거의 완전 구현 | 반경 기반 실거래가 비교 로직 동작, `property`에 실제 연결됨. 남은 건 FE 연동, 실시간재계산→캐싱 전환 여부 등 4개 |
-| `risk-analysis` | 거의 완전 구현 | **(2026-08-03 갱신)** 신호 탐지기 4종 전부 + `RiskAnalysisController`(실행/재계산/조회 2개 엔드포인트) + market-data 어댑터(`MarketDataClientImpl`) 구현 완료. 남은 건 `DepositSafetyCheckService`/`RiskRecalculationService`(전세가율 계산·매물 수정 시 재계산 트리거) 뿐 |
+| `risk-analysis` | 완전 구현 | **(2026-08-04 완료)** 신호 탐지기 4종, API 4개(`POST /risk-analysis`, `GET /risk-signals`, `GET /deposit-safety`, `POST /deposit-safety/recalculate`), market-data 어댑터(전세+매매), `DepositSafetyCheckService`(전세가율), checklist 연계 보조 신호, 매물 수정 시 자동 재계산 트리거(이벤트 기반)까지 전부 구현 완료. 완전 미해결 이슈 없음 — 남은 건 "동일 계정 다수 등록" 활성화 여부·선순위보증금 입력 화면 배치 등 팀/FE 결정 2건뿐 |
 
 ## 반복적으로 나타난 패턴
 
@@ -29,17 +29,17 @@
 
 ### 2. market-data는 해소됨, risk-analysis에는 아직 같은 흔적이 남아있음
 
-`market-data`는 실제로 구현되어 `property`에 연결되었고, `property`의 `marketComparison` 필드도 이제 조건에 따라 실제 시세 값을 채웁니다(더 이상 "항상 UNAVAILABLE 고정값"이 아님). **(2026-08-03 완료)** `risk-analysis`도 이제 신호 탐지기 4종 + 컨트롤러 + market-data 어댑터(`MarketDataClientImpl`)까지 전부 실제로 동작합니다 — 남은 건 `DepositSafetyCheckService`(전세가율 계산)뿐이라, 이걸 미리 참조하려던 다른 도메인 코드에도 이제 자리표시자가 아닌 실제 데이터 소스가 생겼습니다.
+`market-data`는 실제로 구현되어 `property`에 연결되었고, `property`의 `marketComparison` 필드도 이제 조건에 따라 실제 시세 값을 채웁니다(더 이상 "항상 UNAVAILABLE 고정값"이 아님). **(2026-08-04 완료)** `risk-analysis`도 신호 탐지기 4종 + 컨트롤러 + market-data 어댑터(전세+매매)에 이어 `DepositSafetyCheckService`(전세가율 계산)까지 전부 실제로 동작합니다 — 이걸 미리 참조하려던 다른 도메인 코드에도 이제 자리표시자가 아닌 실제 데이터 소스가 생겼습니다.
 
-- **(2026-08-03 갱신)** `property`의 매물 상세 응답엔 위험 신호·안전성 정보를 담을 필드가 여전히 없음 — 다만 `risk-analysis` 쪽 컨트롤러(`GET /properties/{propertyId}/risk-signals`)는 이제 생겼으니 데이터 소스는 있고, `property` 쪽에서 이걸 가져다 쓰는 연동만 하면 됨
-- `checklist`의 소유권취득일 문항에 "risk-analysis 전세가율과 연계"라는 주석만 있고 실제 연동 코드는 없음 — `DepositSafetyCheckService`가 아직 빈 스텁이라 여전히 유효한 이슈
+- `property`의 매물 상세 응답엔 위험 신호·안전성 정보를 담을 필드가 여전히 없음 — `risk-analysis` 쪽 데이터 소스(`GET /risk-signals`, `GET /deposit-safety`)는 이제 완전히 갖춰졌으니, `property` 쪽에서 이걸 가져다 쓰는 연동(응답에 필드 추가하거나 프론트가 두 API를 따로 호출하거나)만 하면 됨 — 아직 안 함
+- **(2026-08-04 완전 해결)** `checklist`의 소유권취득일 문항에 남아있던 "risk-analysis 전세가율과 연계"라는 주석이 실제 코드로 이어짐 — `DepositSafetyCheckService`가 `ChecklistItemRepository`에 추가된 문항 단건 조회 쿼리로 직접 읽어와 "최근 소유권 변경 + 높은 전세가율" 보조 신호를 계산함
 - **(2026-08-03 완전 해결)** `risk-analysis` 내부의 `MarketDataClient`가 market-data 실 구현체(`MarketComparisonService`)와 형태가 안 맞아 연결할 수 없던 문제 — `MarketDataClientImpl` 어댑터로 상태 모델(2단계→3단계) 변환, 메서드 시그니처 변환, 사유 코드 매핑까지 전부 처리해 해결. 이전에 꽂혀 있던 `TemporaryMarketDataClient`(임시로 항상 `UNDETERMINABLE`만 반환하던 자리표시자)는 삭제됨. `property`가 예전에 쓰던 "항상 UNAVAILABLE" 고정값과 비슷한 임시방편이었지만, 이번엔 데이터가 없어서가 아니라 **형태가 안 맞아서** 생긴 자리표시자였다는 점이 달랐음(`risk-analysis-design.md`의 'market-data 도메인 연동' 참고).
 
-셋 다 결국 risk-analysis 쪽의 미구현·형태 불일치가 원인이었는데, 이제 `DepositSafetyCheckService`(전세가율 계산)만 다음 우선 과제로 남았습니다.
+셋 다 결국 risk-analysis 쪽의 미구현·형태 불일치가 원인이었는데, **(2026-08-04)** 세 이슈 전부 해결됐습니다. 남은 건 `property` 상세 응답에 위험 신호/전세가율을 실제로 노출하는 연동뿐입니다.
 
-### 3. "매물 수정 시 재계산/무효화" 훅 — market-data는 해소, risk-analysis는 여전히 없음
+### 3. "매물 수정 시 재계산/무효화" 훅 — 이제 두 도메인 다 해소, 서로 다른 방식을 택함
 
-요구사항 명세서 3곳(`property`, `market-data`, `risk-analysis`)이 공통으로 "가격/거래유형이 바뀌면 기존 시세·위험신호 결과를 무효화하고 재계산한다"를 요구했지만, 실제로는 두 도메인이 서로 다르게 해소됐습니다. `market-data`는 비교 결과를 아예 저장하지 않고 매물 조회/수정 때마다 즉시 재계산하므로(`MarketComparisonService.compare()`), "무효화할 저장된 상태" 자체가 없어 이 요구사항이 사실상 N/A가 되었습니다(`market-data-design.md` 비기능요구사항 참고). 반면 `risk-analysis`는 결과를 `PropertyRisk`/`PropertyRiskCheck`에 스냅샷으로 저장하는 구조라 재계산 트리거가 여전히 필요하고, `RiskRecalculationService`가 빈 스텁으로 자리만 마련된 채 `property` 수정(`PATCH /properties/{id}`)에도 훅이 없는 상태입니다. 나중에 risk-analysis를 구현할 팀원이 `property` 코드에도 훅을 추가해야 합니다.
+요구사항 명세서 3곳(`property`, `market-data`, `risk-analysis`)이 공통으로 "가격/거래유형이 바뀌면 기존 시세·위험신호 결과를 무효화하고 재계산한다"를 요구했는데, 두 도메인이 서로 다른 방식으로 해소했습니다. `market-data`는 비교 결과를 아예 저장하지 않고 매물 조회/수정 때마다 즉시 재계산하므로(`MarketComparisonService.compare()`), "무효화할 저장된 상태" 자체가 없어 이 요구사항이 사실상 N/A가 되었습니다(`market-data-design.md` 비기능요구사항 참고). `risk-analysis`는 결과를 `PropertyRisk`/`PropertyRiskCheck`/`DepositSafetyCheck`에 스냅샷으로 저장하는 구조라 재계산 트리거가 꼭 필요했는데, **(2026-08-04 해결)** `property` 담당자와 협의해 **이벤트 기반**으로 풀었습니다 — `PropertyService.update()`가 `PropertyUpdatedEvent`를 발행하고, `RiskRecalculationService`가 `@TransactionalEventListener(AFTER_COMMIT)`로 구독해 재계산을 실행합니다. `property` 패키지는 risk-analysis를 전혀 import하지 않습니다(direct injection 대신 이벤트를 택한 이유는 트랜잭션 롤백 위험 회피 + 도메인 결합 방지 둘 다 — `risk-analysis-design.md` 남은 이슈 8번 참고). 두 도메인이 같은 문제("변경 시 무효화")를 "캐싱 자체를 안 함" vs "이벤트로 비동기 위임"이라는 서로 다른 전략으로 풀었다는 점이, 향후 비슷한 요구사항(예: contract-analysis)이 생겼을 때 참고할 만한 사례입니다.
 
 ### 4. 매물 삭제 이후 접근 차단 — checklist는 해소, contract-analysis는 아직 통합 전
 
@@ -79,4 +79,4 @@
 | market-data | 4개 |
 | checklist | 1개 (8개 중 7개 처리 완료, 남은 건 거래유형별 분기 여부뿐) |
 | contract-analysis | 8개 |
-| risk-analysis | 4개 (2026-08-03 갱신, 9개 중 5개 완전 해결 — 탐지기 4종, 컨트롤러, market-data 연동, 중복매물 쿼리 분리, 정책값 미사용 문제. 남은 4개는 `DepositSafetyCheckService`/재계산 트리거 등 `risk-analysis-design.md` 참고) |
+| risk-analysis | 0개 (2026-08-04 완료, 원본 9개 전부 해결 + 신규 발견 1개도 해결. 남은 건 팀/FE 결정 대기 2건뿐 — `risk-analysis-design.md` 참고) |

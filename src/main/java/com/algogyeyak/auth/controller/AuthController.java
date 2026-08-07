@@ -249,9 +249,19 @@ public class AuthController {
         cookieUtils.addCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, accessToken,
                 (int) jwtProvider.getAccessTokenValiditySeconds());
 
-        String refreshToken = refreshTokenService.issue(user);
-        cookieUtils.addCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, refreshToken,
-                (int) refreshTokenService.getValiditySeconds());
+        try {
+            String refreshToken = refreshTokenService.issue(user);
+            cookieUtils.addCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, refreshToken,
+                    (int) refreshTokenService.getValiditySeconds());
+        } catch (BusinessException e) {
+            // refresh token 발급 실패(Redis 장애 등 AUTH_TOKEN_STORE_UNAVAILABLE) 시 access token
+            // 쿠키만 남으면, 응답은 실패(503)인데 브라우저에는 30분짜리 반쪽 로그인 세션이 남는
+            // 문제가 있다 - GlobalExceptionHandler는 새 ResponseEntity만 만들 뿐 이미 추가된
+            // Set-Cookie 헤더는 지우지 않으므로, OAuth2AuthenticationSuccessHandler와 동일하게
+            // 실패로 확정하는 이 경로에서 access 쿠키를 지워 깨끗한 상태로 되돌린다.
+            cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
+            throw e;
+        }
     }
 
     private MeResponse toMeResponse(User user) {

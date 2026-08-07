@@ -16,6 +16,8 @@ import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
 import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
@@ -26,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,9 +38,12 @@ class DepositSafetyCheckServiceTest {
     private final DepositSafetyCheckRepository depositSafetyCheckRepository = mock(DepositSafetyCheckRepository.class);
     private final MarketSaleDataClient marketSaleDataClient = mock(MarketSaleDataClient.class);
     private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
+    private final com.algogyeyak.checklist.repository.ChecklistItemRepository checklistItemRepository =
+            mock(com.algogyeyak.checklist.repository.ChecklistItemRepository.class);
     private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
-    private final DepositSafetyCheckService service =
-            new DepositSafetyCheckService(depositSafetyCheckRepository, marketSaleDataClient, propertyRepository, policyConfig);
+    private final DepositSafetyCheckService service = new DepositSafetyCheckService(
+            depositSafetyCheckRepository, marketSaleDataClient, propertyRepository, checklistItemRepository,
+            policyConfig, mock(PlatformTransactionManager.class));
 
     private Property property(Long id, TransactionType transactionType, Long deposit) {
         Property property = Property.builder()
@@ -69,7 +75,7 @@ class DepositSafetyCheckServiceTest {
         service.checkAndSave(property);
 
         var captor = org.mockito.ArgumentCaptor.forClass(DepositSafetyCheck.class);
-        verify(depositSafetyCheckRepository).save(captor.capture());
+        verify(depositSafetyCheckRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(DepositSafetyStatus.UNAVAILABLE);
         assertThat(captor.getValue().getReason()).isEqualTo(DepositSafetyCheckReason.TRANSACTION_TYPE_UNSUPPORTED);
         verifyNoMarketLookup();
@@ -85,7 +91,7 @@ class DepositSafetyCheckServiceTest {
         service.checkAndSave(property);
 
         var captor = org.mockito.ArgumentCaptor.forClass(DepositSafetyCheck.class);
-        verify(depositSafetyCheckRepository).save(captor.capture());
+        verify(depositSafetyCheckRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getReason()).isEqualTo(DepositSafetyCheckReason.DEPOSIT_INFO_MISSING);
         verifyNoMarketLookup();
     }
@@ -101,7 +107,7 @@ class DepositSafetyCheckServiceTest {
         service.checkAndSave(property);
 
         var captor = org.mockito.ArgumentCaptor.forClass(DepositSafetyCheck.class);
-        verify(depositSafetyCheckRepository).save(captor.capture());
+        verify(depositSafetyCheckRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(DepositSafetyStatus.UNAVAILABLE);
         assertThat(captor.getValue().getReason()).isEqualTo(DepositSafetyCheckReason.ESTIMATED_PRICE_MISSING);
     }
@@ -118,7 +124,7 @@ class DepositSafetyCheckServiceTest {
         service.checkAndSave(property);
 
         var captor = org.mockito.ArgumentCaptor.forClass(DepositSafetyCheck.class);
-        verify(depositSafetyCheckRepository).save(captor.capture());
+        verify(depositSafetyCheckRepository).saveAndFlush(captor.capture());
         DepositSafetyCheck saved = captor.getValue();
         assertThat(saved.getStatus()).isEqualTo(DepositSafetyStatus.CALCULATED);
         assertThat(saved.getJeonseRatio()).isEqualByComparingTo(BigDecimal.valueOf(78));
@@ -151,7 +157,7 @@ class DepositSafetyCheckServiceTest {
         service.checkAndSave(property);
 
         var captor = org.mockito.ArgumentCaptor.forClass(DepositSafetyCheck.class);
-        verify(depositSafetyCheckRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        verify(depositSafetyCheckRepository, org.mockito.Mockito.atLeastOnce()).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getExplanation()).contains(expectedKeyword);
     }
 
@@ -168,7 +174,31 @@ class DepositSafetyCheckServiceTest {
         service.checkAndSave(property);
 
         verify(existing).overwrite(any(), any(), any(), any(), any(), any(), any(), any());
-        verify(depositSafetyCheckRepository, org.mockito.Mockito.never()).save(any());
+        verify(depositSafetyCheckRepository, org.mockito.Mockito.never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("DepositSafetyCheck 동시 insert로 유니크 제약을 위반하면 재조회해서 덮어쓰는 방식으로 복구한다")
+    void checkAndSaveRecoversFromConcurrentInsertRace() {
+        setPolicy();
+        Property property = property(10L, TransactionType.MONTHLY_RENT, 10_000_000L);
+        DepositSafetyCheck winner = mock(DepositSafetyCheck.class);
+
+        // 첫 조회 시점엔 아직 아무도 없다고 나오지만(레이스), saveAndFlush 시도 시 다른 트랜잭션이
+        // 먼저 커밋해서 유니크 제약(property_id) 위반이 난다 - 재조회하면 그 사이 커밋된 행이 보인다.
+        when(depositSafetyCheckRepository.findByPropertyId(10L))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        // 첫 saveAndFlush(신규 insert)만 유니크 제약 위반으로 실패하고, 복구 과정에서 재조회한
+        // 기존 행을 저장하는 두 번째 saveAndFlush(update)는 정상 처리된다.
+        when(depositSafetyCheckRepository.saveAndFlush(any()))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"))
+                .thenReturn(winner);
+
+        service.checkAndSave(property);
+
+        verify(winner).overwrite(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(depositSafetyCheckRepository, times(2)).saveAndFlush(any());
     }
 
     private void verifyNoMarketLookup() {
@@ -189,6 +219,50 @@ class DepositSafetyCheckServiceTest {
         assertThat(response.propertyId()).isEqualTo(10L);
         assertThat(response.status()).isEqualTo(DepositSafetyStatus.CALCULATED);
         assertThat(response.jeonseRatio()).isEqualTo(82);
+    }
+
+    @Test
+    @DisplayName("get()은 전세가율이 위험 구간이고 소유권 취득일이 최근이면 recentOwnershipChangeWarning을 true로 반환한다")
+    void getReturnsRecentOwnershipChangeWarningWhenBothConditionsMet() {
+        setPolicy();
+        ReflectionTestUtils.setField(policyConfig, "ownershipRecentChangeMonths", 6);
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        DepositSafetyCheck check = DepositSafetyCheck.calculated(
+                property, BigDecimal.valueOf(120), null, null, LocalDate.of(2026, 7, 31), "설명", "v1.0");
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
+
+        com.algogyeyak.checklist.entity.ChecklistItem ownershipItem = mock(com.algogyeyak.checklist.entity.ChecklistItem.class);
+        when(ownershipItem.getValue()).thenReturn(LocalDate.now().minusMonths(3).toString());
+        when(checklistItemRepository.findByChecklist_Property_IdAndCode(
+                10L, com.algogyeyak.checklist.entity.ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE))
+                .thenReturn(Optional.of(ownershipItem));
+
+        DepositSafetyCheckResponse response = service.get(1L, 10L);
+
+        assertThat(response.recentOwnershipChangeWarning()).isTrue();
+    }
+
+    @Test
+    @DisplayName("get()은 전세가율이 위험 구간이어도 소유권 취득일이 오래됐으면 recentOwnershipChangeWarning을 false로 반환한다")
+    void getReturnsNoWarningWhenOwnershipIsOld() {
+        setPolicy();
+        ReflectionTestUtils.setField(policyConfig, "ownershipRecentChangeMonths", 6);
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        DepositSafetyCheck check = DepositSafetyCheck.calculated(
+                property, BigDecimal.valueOf(120), null, null, LocalDate.of(2026, 7, 31), "설명", "v1.0");
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
+
+        com.algogyeyak.checklist.entity.ChecklistItem ownershipItem = mock(com.algogyeyak.checklist.entity.ChecklistItem.class);
+        when(ownershipItem.getValue()).thenReturn(LocalDate.now().minusMonths(24).toString());
+        when(checklistItemRepository.findByChecklist_Property_IdAndCode(
+                10L, com.algogyeyak.checklist.entity.ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE))
+                .thenReturn(Optional.of(ownershipItem));
+
+        DepositSafetyCheckResponse response = service.get(1L, 10L);
+
+        assertThat(response.recentOwnershipChangeWarning()).isFalse();
     }
 
     @Test
@@ -257,7 +331,7 @@ class DepositSafetyCheckServiceTest {
         Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
-        when(depositSafetyCheckRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(depositSafetyCheckRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(marketSaleDataClient.getSalePrice(10L)).thenReturn(
                 Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31))));
 
@@ -276,7 +350,7 @@ class DepositSafetyCheckServiceTest {
         Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
-        when(depositSafetyCheckRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(depositSafetyCheckRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(marketSaleDataClient.getSalePrice(10L)).thenReturn(
                 Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31))));
 

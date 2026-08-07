@@ -22,6 +22,7 @@ import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
+import com.algogyeyak.property.dto.PropertyImageRequest;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
@@ -32,6 +33,7 @@ import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.event.PropertyUpdatedEvent;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import java.util.List;
@@ -42,6 +44,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -69,6 +72,9 @@ class PropertyServiceTest {
     @Mock
     private PropertyReportRepository propertyReportRepository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private PropertyService propertyService;
 
     private static final Long USER_ID = 1L;
@@ -77,7 +83,7 @@ class PropertyServiceTest {
     void setUp() {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
-                checklistRepository, checklistItemRepository, propertyReportRepository
+                checklistRepository, checklistItemRepository, propertyReportRepository, eventPublisher
         );
     }
 
@@ -102,7 +108,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 "역세권 오피스텔",
-                List.of("https://cdn.algogyeyak.com/img/abc.jpg")
+                List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.jpg", null))
         );
 
         when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
@@ -241,7 +247,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
-                List.of("https://cdn.algogyeyak.com/img/abc.bmp")
+                List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.bmp", null))
         );
 
         assertThatThrownBy(() -> propertyService.register(USER_ID, request))
@@ -261,7 +267,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
-                List.of("ftp://cdn.algogyeyak.com/img/abc.jpg")
+                List.of(new PropertyImageRequest("ftp://cdn.algogyeyak.com/img/abc.jpg", null))
         );
 
         assertThatThrownBy(() -> propertyService.register(USER_ID, request))
@@ -272,8 +278,8 @@ class PropertyServiceTest {
 
     @Test
     void 이미지가_10장을_초과하면_예외가_발생한다() {
-        List<String> tooManyImages = IntStream.range(0, 11)
-                .mapToObj(i -> "https://cdn.algogyeyak.com/img/" + i + ".jpg")
+        List<PropertyImageRequest> tooManyImages = IntStream.range(0, 11)
+                .mapToObj(i -> new PropertyImageRequest("https://cdn.algogyeyak.com/img/" + i + ".jpg", null))
                 .toList();
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
@@ -364,6 +370,38 @@ class PropertyServiceTest {
         assertThat(result.content().get(0).transactionType()).isEqualTo("JEONSE");
         assertThat(result.totalElements()).isEqualTo(1);
         assertThat(result.hasNext()).isFalse();
+    }
+
+    @Test
+    void 매물_목록조회_응답에_매물별_시세비교_결과가_포함된다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 1L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
+
+        MarketComparisonResponse comparison = MarketComparisonResponse.available(
+                28_000_000L, 0.07, 5, "2026-06-20", 300
+        );
+        when(marketComparisonService.compare(property)).thenReturn(comparison);
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).marketComparison()).isEqualTo(comparison);
     }
 
     @Test
@@ -628,7 +666,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, "수정된 설명");
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, "수정된 설명", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -638,13 +676,16 @@ class PropertyServiceTest {
         // 가격/면적이 바뀌었으니 예전 시세비교 결과 캐시를 비우고 재계산해야 한다 - 안 비우면
         // 캐시 히트로 수정 전 결과가 그대로 반환된다.
         verify(marketComparisonService).evictCache(1L);
+        // risk-analysis가 위험 신호·전세가율을 재계산할 수 있도록 이벤트를 발행한다 - property는
+        // risk-analysis를 직접 참조하지 않고 이벤트로만 알린다(도메인 결합 방지).
+        verify(eventPublisher).publishEvent(new PropertyUpdatedEvent(1L));
     }
 
     @Test
     void 존재하지_않는_매물을_수정하면_예외가_발생한다() {
         when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 999L, request))
                 .isInstanceOf(BusinessException.class);
@@ -667,7 +708,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
@@ -689,7 +730,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);

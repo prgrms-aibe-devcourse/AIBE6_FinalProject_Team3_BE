@@ -7,6 +7,7 @@ import com.algogyeyak.riskanalysis.dto.DepositSafetyCheckResponse;
 import com.algogyeyak.riskanalysis.dto.DepositSafetyRecalculateRequest;
 import com.algogyeyak.riskanalysis.enums.DepositSafetyStatus;
 import com.algogyeyak.riskanalysis.service.DepositSafetyCheckService;
+import com.algogyeyak.testsupport.CsrfHeaderMockMvcCustomizer;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -34,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(CsrfHeaderMockMvcCustomizer.class)
 @DisplayName("DepositSafetyController")
 class DepositSafetyControllerTest {
 
@@ -72,7 +75,7 @@ class DepositSafetyControllerTest {
         DepositSafetyCheckResponse response = new DepositSafetyCheckResponse(
                 10L, DepositSafetyStatus.CALCULATED, 82, false, null, null,
                 "이 집 전세가율은 82%예요.", java.time.LocalDate.of(2026, 7, 31), null,
-                LocalDateTime.now(), DepositSafetyCheckResponse.DISCLAIMER);
+                LocalDateTime.now(), DepositSafetyCheckResponse.DISCLAIMER, false);
         when(depositSafetyCheckService.get(1L, 10L)).thenReturn(response);
 
         mockMvc.perform(get("/properties/10/deposit-safety")
@@ -94,7 +97,7 @@ class DepositSafetyControllerTest {
         DepositSafetyCheckResponse response = new DepositSafetyCheckResponse(
                 10L, DepositSafetyStatus.CALCULATED, 87, true, 50_000_000L, 10_000_000L,
                 "이 집 전세가율은 87%예요.", java.time.LocalDate.of(2026, 7, 31), null,
-                LocalDateTime.now(), DepositSafetyCheckResponse.DISCLAIMER);
+                LocalDateTime.now(), DepositSafetyCheckResponse.DISCLAIMER, false);
         when(depositSafetyCheckService.recalculate(1L, 10L, 50_000_000L, 10_000_000L)).thenReturn(response);
 
         mockMvc.perform(post("/properties/10/deposit-safety/recalculate")

@@ -41,6 +41,8 @@ public enum ErrorCode {
     // 유효한지 확신할 수 없다"를 "유효하다"로 오인하지 않기 위해, 인증을 통과시키는 대신 503으로
     // 명시적으로 실패시킨다. 재시도하면 복구될 수 있는 일시 장애라는 걸 알리기 위해 401이 아닌 503을 쓴다.
     AUTH_TOKEN_STORE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AUTH_TOKEN_STORE_UNAVAILABLE", "인증 저장소에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해주세요."),
+    // CookieUtils.SameSite=None 전환(크로스오리진 배포) 이후 최소 CSRF 방어로 추가 - CsrfHeaderFilter 참고.
+    CSRF_HEADER_MISSING(HttpStatus.FORBIDDEN, "CSRF_HEADER_MISSING", "잘못된 요청입니다."),
 
     // User 도메인
     USER_PROFILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_PROFILE_ALREADY_EXISTS", "이미 프로필이 등록되어 있습니다."),
@@ -85,12 +87,17 @@ public enum ErrorCode {
     CONTRACT_ANALYSIS_AI_RESPONSE_INVALID(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_RESPONSE_INVALID", "AI 응답 형식이 올바르지 않습니다."),
     CONTRACT_ANALYSIS_AI_HALLUCINATION(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_HALLUCINATION", "AI가 입력에 없는 내용을 생성했습니다."),
     CONTRACT_ANALYSIS_AI_API_ERROR(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_API_ERROR", "AI 분석 서비스 연동 중 오류가 발생했습니다."),
+    CONTRACT_ANALYSIS_QUESTION_REQUIRED(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_QUESTION_REQUIRED", "질문을 입력해주세요."),
 
     // Admin 도메인
     ADMIN_USER_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_USER_NOT_FOUND", "존재하지 않는 사용자입니다."),
     ADMIN_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "ADMIN_INVALID_STATUS_TRANSITION", "허용되지 않는 상태 변경입니다."),
     ADMIN_PROPERTY_REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_PROPERTY_REPORT_NOT_FOUND", "존재하지 않는 신고입니다."),
     ADMIN_INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "ADMIN_INVALID_DATE_RANGE", "조회 기간이 올바르지 않습니다."),
+    ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND", "존재하지 않는 체크리스트 문항입니다."),
+    ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE(HttpStatus.BAD_REQUEST, "ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE", "이 코드는 선택한 응답 방식과 맞지 않습니다."),
+    ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE", "이미 다른 활성 문항이 같은 코드를 사용하고 있습니다."),
+    ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM", "마지막 문항은 삭제할 수 없습니다. 노출 여부를 꺼서 숨겨주세요."),
 
     // 파일 업로드(S3) 공통 - profile/property/contract 이미지 업로드가 전부 이 코드를 공유한다.
     FILE_EXTENSION_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "FILE_EXTENSION_NOT_ALLOWED", "허용되지 않는 파일 확장자입니다."),

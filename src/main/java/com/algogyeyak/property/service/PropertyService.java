@@ -12,6 +12,7 @@ import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
 import com.algogyeyak.property.dto.PropertyDetailResponse;
+import com.algogyeyak.property.dto.PropertyImageRequest;
 import com.algogyeyak.property.dto.PropertyListResponse;
 import com.algogyeyak.property.dto.PropertyRegisterRequest;
 import com.algogyeyak.property.dto.PropertyRegisterResponse;
@@ -23,6 +24,7 @@ import com.algogyeyak.property.entity.PropertyImage;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.algogyeyak.property.event.PropertyUpdatedEvent;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import java.util.List;
@@ -30,6 +32,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -46,19 +49,21 @@ public class PropertyService {
     private final ChecklistRepository checklistRepository;
     private final ChecklistItemRepository checklistItemRepository;
     private final PropertyReportRepository propertyReportRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     // 목록 조회 정렬 허용 필드 - PageableUtils.validateSort가 이 밖의 필드는 INVALID_SORT_FIELD로 막는다.
     private static final Set<String> SORTABLE_PROPERTIES = Set.of("createdAt", "deposit", "area");
 
-    // 이미지 URL 검증 - 확장자 화이트리스트 + 개수 상한. 실제 업로드 인프라(S3 등)가 아직 없어
-    // URL을 그대로 받는 구조라 바이트 단위 파일 크기 검증은 여기서 할 수 없다 - 확장자/개수만 막는다.
+    // 이미지 검증 - 확장자 화이트리스트 + 개수 상한. 파일 크기/컨텐츠타입은 업로드 API
+    // (PropertyImageUploadController → S3PresignService)에서 S3ImagePurpose.PROPERTY 기준으로
+    // 이미 검증되므로, 여기서는 최종 imageUrl 형식과 개수만 방어적으로 한 번 더 확인한다.
     private static final Set<String> ALLOWED_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp", "gif");
     private static final int MAX_IMAGE_COUNT = 10;
 
     @Transactional
     public PropertyRegisterResponse register(Long userId, PropertyRegisterRequest request) {
         validatePriceCombination(request.transactionType(), request.deposit(), request.monthlyRent());
-        validateImageUrls(request.imageUrls());
+        validateImages(request.images());
 
         AddressResolutionResult addressResult = kakaoAddressClient.resolve(request.address());
         if (!addressResult.isResolved()) {
@@ -88,12 +93,7 @@ public class PropertyService {
                 .build();
         property.assignAddress(address);
 
-        List<String> imageUrls = request.imageUrls();
-        if (imageUrls != null) {
-            for (String imageUrl : imageUrls) {
-                property.addImage(PropertyImage.builder().imageUrl(imageUrl).build());
-            }
-        }
+        applyImages(property, request.images());
 
         Property saved = propertyRepository.save(property);
 
@@ -143,7 +143,11 @@ public class PropertyService {
 
         return PageResponse.from(
                 properties,
-                property -> PropertyListResponse.from(property, checklistProgressByPropertyId.get(property.getId()))
+                property -> PropertyListResponse.from(
+                        property,
+                        checklistProgressByPropertyId.get(property.getId()),
+                        marketComparisonService.compare(property)
+                )
         );
     }
 
@@ -216,15 +220,27 @@ public class PropertyService {
         }
 
         validatePriceCombination(property.getTransactionType(), request.deposit(), request.monthlyRent());
+        validateImages(request.images());
 
         property.updateTitle(request.title());
         property.updatePriceInfo(request.deposit(), request.monthlyRent());
         property.updateArea(request.area());
         property.updateDescription(request.description());
 
+        // images가 null이면 "이미지 변경 없음"(기존 유지) - null이 아니면(빈 리스트 포함) 통째로 교체.
+        // 부분 추가/삭제 API가 없으므로 매번 전체 목록을 다시 제출해야 한다.
+        if (request.images() != null) {
+            property.clearImages();
+            applyImages(property, request.images());
+        }
+
         // 가격/면적이 바뀌었으니 캐시된 예전 시세비교 결과를 비우고 재계산한다 - 안 비우면
         // compare()가 캐시 히트로 수정 전 결과를 그대로 반환해버린다.
         marketComparisonService.evictCache(propertyId);
+
+        // risk-analysis가 위험 신호·전세가율을 재계산할 수 있도록 이벤트만 발행한다 - 이 도메인은
+        // risk-analysis를 몰라도 된다(누가 구독하는지, 구독자가 있는지조차 관심 없음).
+        eventPublisher.publishEvent(new PropertyUpdatedEvent(propertyId));
 
         return PropertyDetailResponse.from(
                 property,
@@ -283,26 +299,40 @@ public class PropertyService {
     }
 
     /**
-     * 이미지 URL 검증. http(s) 프로토콜 + 허용된 확장자(jpg/jpeg/png/webp/gif)인지, 개수가
-     * MAX_IMAGE_COUNT(10)를 넘지 않는지만 확인한다. 실제 업로드 인프라(S3 등)가 아직 없어
-     * 클라이언트가 이미지 URL을 직접 넘기는 구조이므로 바이트 단위 파일 크기 검증은
-     * 이 단계에서 불가능 - 업로드 인프라가 붙으면 그쪽에서 크기 제한을 걸어야 한다.
+     * 이미지 검증. http(s) 프로토콜 + 허용된 확장자(jpg/jpeg/png/webp/gif)인지, 개수가
+     * MAX_IMAGE_COUNT(10)를 넘지 않는지 확인한다. imageUrl은 업로드 API(POST /properties/images/*)를
+     * 거쳐 이미 S3ImagePurpose.PROPERTY 기준(확장자/컨텐츠타입/용량)으로 검증된 값이 들어오는 게
+     * 정상이지만, 여기서도 형식/개수만큼은 한 번 더 방어적으로 확인한다 - roomType은 선택값이라
+     * 별도 검증 없음(enum 자체가 잘못된 값이면 역직렬화 단계에서 400).
      */
-    private void validateImageUrls(List<String> imageUrls) {
-        if (imageUrls == null || imageUrls.isEmpty()) {
+    private void validateImages(List<PropertyImageRequest> images) {
+        if (images == null || images.isEmpty()) {
             return;
         }
-        if (imageUrls.size() > MAX_IMAGE_COUNT) {
+        if (images.size() > MAX_IMAGE_COUNT) {
             throw new BusinessException(
                     ErrorCode.PROPERTY_IMAGE_INVALID, "이미지는 최대 " + MAX_IMAGE_COUNT + "장까지 등록할 수 있습니다."
             );
         }
-        for (String imageUrl : imageUrls) {
+        for (PropertyImageRequest image : images) {
+            String imageUrl = image.imageUrl();
             if (imageUrl == null || !hasValidImageExtension(imageUrl) || !hasHttpProtocol(imageUrl)) {
                 throw new BusinessException(
                         ErrorCode.PROPERTY_IMAGE_INVALID, "지원하지 않는 이미지 형식입니다: " + imageUrl
                 );
             }
+        }
+    }
+
+    private void applyImages(Property property, List<PropertyImageRequest> images) {
+        if (images == null) {
+            return;
+        }
+        for (PropertyImageRequest image : images) {
+            property.addImage(PropertyImage.builder()
+                    .imageUrl(image.imageUrl())
+                    .roomType(image.roomType())
+                    .build());
         }
     }
 

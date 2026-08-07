@@ -118,17 +118,24 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
             return committed;
         });
 
-        User aUser = aResult.get(10, TimeUnit.SECONDS);
-        User bUser = bResult.get(10, TimeUnit.SECONDS);
-        executor.shutdown();
+        User aUser;
+        User bUser;
+        try {
+            aUser = aResult.get(10, TimeUnit.SECONDS);
+            bUser = bResult.get(10, TimeUnit.SECONDS);
+        } finally {
+            // get()이 타임아웃/예외로 먼저 던지면 shutdown()이 실행되지 않아 스레드가 남을 수 있다 -
+            // 정상/실패 어느 쪽이든 반드시 정리되도록 finally에서 shutdownNow()로 강제 종료한다.
+            executor.shutdownNow();
+        }
 
         // 세션 오염 없이 예외가 전파되지 않고 회복되어야 하고, 두 결과 모두 같은(먼저 커밋된) row를 가리켜야 한다.
         assertEquals(bUser.getId(), aUser.getId());
 
         transactionTemplate.executeWithoutResult(status -> {
-            // 이 테스트의 kakaoOAuth2User 픽스처는 is_email_verified를 채우지 않아 실제로는
-            // email이 검증 안 됨(null 저장)으로 처리되므로, email 대신 이 테스트에서만 유일한
-            // nickname으로 식별한다.
+            // 이 테스트의 kakaoOAuth2User 픽스처는 is_email_verified=true라 email은 정상 저장된다 -
+            // 그래도 email 대신 이 테스트에서만 쓰는 고유 nickname으로 식별해, 다른 테스트가 같은
+            // 이메일을 우연히 재사용해도 서로 영향받지 않게 한다.
             long userCount = userRepository.findAll().stream()
                     .filter(u -> "동시로그인유저".equals(u.getNickname()))
                     .count();
@@ -141,6 +148,67 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
                     .count();
             assertEquals(1, socialAccountCount);
         });
+    }
+
+    // 위 테스트의 바깥 트랜잭션은 명시적 격리수준이 없어 H2 기본값(READ_COMMITTED)으로 뜨는데, 이
+    // 격리수준에서는 문장마다 항상 최신 커밋을 보므로 "재조회가 stale한 스냅샷을 본다"는 문제 자체가
+    // 재현되지 않는다. 운영 DB(MySQL InnoDB)의 기본 격리수준은 REPEATABLE READ라 사정이 다르다 -
+    // 트랜잭션이 첫 조회 시점에 스냅샷을 고정하므로, 그 이후 다른 트랜잭션이 커밋해도 같은 트랜잭션의
+    // 재조회에는 계속 안 보일 수 있다. 이 테스트는 바깥 트랜잭션 격리수준을 REPEATABLE_READ로 명시해
+    // 그 조건을 그대로 재현하고, createUser()의 winner 재조회가 REQUIRES_NEW(새 스냅샷)로 분리돼
+    // 있어야만 이 상황에서도 winner를 제대로 찾는다는 것을 확인한다 - 그 분리가 없으면(고친 기능을
+    // 되돌리면) A의 재조회가 바깥 트랜잭션의 오래된(B 커밋 이전) 스냅샷을 그대로 써서 winner를 못
+    // 찾고, 실제로는 계정이 있는데도 email_conflict로 로그인이 실패한다.
+    @Test
+    @Timeout(15)
+    void secondLoginRecoversEvenWhenOuterTransactionSnapshotPredatesWinnerCommit() throws Exception {
+        // 555는 이 클래스의 다른 테스트가, 777은 CustomOAuth2UserServiceLazyLoadingIntegrationTest가
+        // 이미 쓰고 있다 - 모든 @SpringBootTest가 같은 gradle 실행 안에서 컨텍스트(및 H2 DB)를
+        // 공유하고 이 테스트들은 실제로 커밋하므로, providerId가 겹치면 남의 테스트가 이미 심어둔
+        // 행과 유니크 제약이 충돌해 이 테스트와 무관한 이유로 실패한다.
+        long kakaoNumericId = 918_273_645L;
+        String providerId = String.valueOf(kakaoNumericId);
+        OAuth2User oAuth2User = kakaoOAuth2User(kakaoNumericId, "스냅샷유저", "http://img", "snapshot-race@example.com");
+
+        CountDownLatch aHasReadEmpty = new CountDownLatch(1);
+        CountDownLatch bHasCommitted = new CountDownLatch(1);
+        TransactionTemplate repeatableReadOuterTransactionTemplate = new TransactionTemplate(transactionManager);
+        repeatableReadOuterTransactionTemplate.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        // 스레드 A: 실제 운영 코드(processOAuth2User)를 REPEATABLE READ 바깥 트랜잭션 안에서 그대로
+        // 호출한다. 맨 앞의 조회(운영에서 findOrCreateUser()가 하는 것과 동일)가 이 트랜잭션의
+        // 스냅샷을 "아직 아무도 없음" 상태로 고정시킨 뒤, B가 커밋하기를 기다렸다가 진행한다.
+        Future<User> aResult = executor.submit(() -> repeatableReadOuterTransactionTemplate.execute(status -> {
+            userSocialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, providerId);
+            aHasReadEmpty.countDown();
+
+            awaitOrFail(bHasCommitted, "B가 커밋을 완료하지 않았습니다.");
+
+            OAuth2User result = customOAuth2UserService.processOAuth2User("kakao", oAuth2User);
+            return ((CustomOAuth2User) result).getUser();
+        }));
+
+        // 스레드 B: A가 스냅샷을 고정한 뒤에만 실제로 커밋해, A의 INSERT 시도가 유니크 제약 위반을
+        // 겪게 만든다.
+        Future<User> bResult = executor.submit(() -> {
+            awaitOrFail(aHasReadEmpty, "A가 먼저 조회를 마치지 않았습니다.");
+            OAuth2User result = customOAuth2UserService.processOAuth2User("kakao", oAuth2User);
+            User committed = ((CustomOAuth2User) result).getUser();
+            bHasCommitted.countDown();
+            return committed;
+        });
+
+        User aUser;
+        User bUser;
+        try {
+            aUser = aResult.get(10, TimeUnit.SECONDS);
+            bUser = bResult.get(10, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertEquals(bUser.getId(), aUser.getId());
     }
 
     private static void awaitOrFail(CountDownLatch latch, String timeoutMessage) {

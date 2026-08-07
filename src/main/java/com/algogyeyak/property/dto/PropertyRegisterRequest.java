@@ -42,6 +42,6 @@ public record PropertyRegisterRequest(
 
         String description,
 
-        List<String> imageUrls
+        List<PropertyImageRequest> images
 ) {
 }

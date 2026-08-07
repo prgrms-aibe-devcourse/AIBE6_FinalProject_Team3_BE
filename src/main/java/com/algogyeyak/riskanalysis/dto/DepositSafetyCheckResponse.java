@@ -24,15 +24,16 @@ public record DepositSafetyCheckResponse(
         LocalDate referenceDate,         // CALCULATED일 때만
         DepositSafetyCheckReason reason, // UNAVAILABLE/FAILED일 때만
         LocalDateTime calculatedAt,
-        String disclaimer
+        String disclaimer,
+        boolean recentOwnershipChangeWarning // 최근 소유권 변경 + 높은 전세가율(jeonseRatioWarnFrom 이상) 조합일 때만 true
 ) {
     public static final String DISCLAIMER = "확정 판단이 아닌 참고용 정보이며, 법률·등기 검토를 대체하지 않습니다.";
 
     // check가 null이면 아직 한 번도 checkAndSave()가 실행된 적 없다는 뜻 - status도 null로 둔다.
-    public static DepositSafetyCheckResponse from(Long propertyId, DepositSafetyCheck check) {
+    public static DepositSafetyCheckResponse from(Long propertyId, DepositSafetyCheck check, boolean recentOwnershipChangeWarning) {
         if (check == null) {
             return new DepositSafetyCheckResponse(
-                    propertyId, null, null, false, null, null, null, null, null, null, DISCLAIMER);
+                    propertyId, null, null, false, null, null, null, null, null, null, DISCLAIMER, false);
         }
 
         boolean calculated = check.getStatus() == DepositSafetyStatus.CALCULATED;
@@ -47,7 +48,8 @@ public record DepositSafetyCheckResponse(
                 calculated ? check.getReferenceDate() : null,
                 calculated ? null : check.getReason(),
                 check.getCalculatedAt(),
-                DISCLAIMER
+                DISCLAIMER,
+                calculated && recentOwnershipChangeWarning
         );
     }
 }
