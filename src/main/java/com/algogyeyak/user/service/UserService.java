@@ -71,9 +71,11 @@ public class UserService {
             throw new BusinessException(ErrorCode.USER_PROFILE_ALREADY_EXISTS);
         }
 
+        String newNickname = null;
         if (StringUtils.hasText(request.getNickname())
                 && !request.getNickname().equals(user.getNickname())) {
-            changeNickname(user, userId, request.getNickname());
+            validateNicknameNotDuplicated(userId, request.getNickname());
+            newNickname = request.getNickname();
         }
 
         UserPreference preference = UserPreference.builder()
@@ -83,7 +85,15 @@ public class UserService {
                 .currentStage(request.getCurrentStage())
                 .build();
 
-        savePreferenceOrThrowIfAlreadyRegistered(userId, preference);
+        // 닉네임 변경과 preference 최초 등록을 하나의 트랜잭션으로 묶어서 커밋한다(아래 메서드 참고) -
+        // 둘을 changeNickname()/savePreferenceOrThrowIfAlreadyRegistered()처럼 각자 별도의
+        // REQUIRES_NEW로 커밋하면, 닉네임 변경이 먼저 커밋된 뒤 preference 저장만 실패해도 실패한
+        // 요청의 닉네임 변경만 그대로 남는 부분 실패가 생긴다.
+        registerProfileAtomically(userId, newNickname, preference);
+
+        if (newNickname != null) {
+            user.updateNickname(newNickname);
+        }
 
         return toResponse(user, preference);
     }
@@ -235,13 +245,32 @@ public class UserService {
         user.updateNickname(newNickname);
     }
 
-    // registerProfile()의 사전 검사(existsByUserId) 통과 이후에도, 커밋 전에 동시에 같은 유저로
-    // 먼저 등록을 마친 다른 요청(중복 클릭 등)이 있으면 user_id 유니크 제약에 걸릴 수 있다 -
-    // changeNickname()과 동일한 이유로 INSERT/재확인 둘 다 REQUIRES_NEW로 분리한다.
-    private void savePreferenceOrThrowIfAlreadyRegistered(Long userId, UserPreference preference) {
+    // registerProfile()의 사전 검사(existsByUserId/닉네임 중복) 통과 이후에도, 커밋 전에 동시에
+    // 같은 유저로 먼저 등록을 마친 다른 요청(중복 클릭 등)이 있으면 user_id 유니크 제약에, 동시에
+    // 같은 닉네임으로 바꾼 다른 요청이 있으면 닉네임 유니크 제약에 걸릴 수 있다. 닉네임 변경(있는
+    // 경우)과 preference INSERT를 같은 REQUIRES_NEW 트랜잭션 안에서 함께 시도해, 어느 한쪽이라도
+    // 실패하면 둘 다 롤백되게 한다 - 그래야 "닉네임만 바뀌고 preference 등록은 실패"하는 부분
+    // 실패가 생기지 않는다. 재확인도 REQUIRES_NEW(별도 세션)로 최신 커밋 상태를 봐야 한다(changeNickname()과
+    // 동일한 이유).
+    private void registerProfileAtomically(Long userId, String newNickname, UserPreference preference) {
         try {
-            requiresNewTransactionTemplate.executeWithoutResult(status -> userPreferenceRepository.saveAndFlush(preference));
+            requiresNewTransactionTemplate.executeWithoutResult(status -> {
+                if (newNickname != null) {
+                    User managed = userRepository.findById(userId)
+                            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+                    managed.updateNickname(newNickname);
+                    userRepository.saveAndFlush(managed);
+                }
+                userPreferenceRepository.saveAndFlush(preference);
+            });
         } catch (DataIntegrityViolationException e) {
+            if (newNickname != null) {
+                boolean nicknameTaken = Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(
+                        status -> userRepository.existsByNicknameAndIdNot(newNickname, userId)));
+                if (nicknameTaken) {
+                    throw new BusinessException(ErrorCode.USER_NICKNAME_ALREADY_EXISTS);
+                }
+            }
             boolean alreadyRegistered = Boolean.TRUE.equals(
                     requiresNewTransactionTemplate.execute(status -> userPreferenceRepository.existsByUserId(userId)));
             if (alreadyRegistered) {
