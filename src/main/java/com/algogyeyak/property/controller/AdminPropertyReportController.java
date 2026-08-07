@@ -12,6 +12,7 @@ import com.algogyeyak.property.entity.PropertyReportStatus;
 import com.algogyeyak.property.service.AdminPropertyReportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 관리자 전용 매물 신고 검토 API. /admin/** 는 SecurityConfig에서 ROLE_ADMIN으로만 접근 가능하다.
  */
+@Slf4j
 @RestController
 @RequestMapping("/admin/property-reports")
 @RequiredArgsConstructor
@@ -58,6 +60,10 @@ public class AdminPropertyReportController {
     ) {
         AdminPropertyReportDetailResponse response =
                 adminPropertyReportService.review(principal.userId(), reportId, request.status(), request.memo());
+        // 감사 로그: 신고 처리 결과는 재조회 시 reviewerId/reviewedAt으로 남지만, 나중에 다른 관리자가
+        // 덮어쓰면(review() javadoc의 알려진 한계) 이전 처리자 기록이 사라진다 - 최소한 로그로는 남긴다.
+        log.info("관리자 액션: actorId={} action=REVIEW_PROPERTY_REPORT reportId={} newStatus={}",
+                principal.userId(), reportId, request.status());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 }

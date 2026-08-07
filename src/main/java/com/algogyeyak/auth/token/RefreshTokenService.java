@@ -129,6 +129,17 @@ public class RefreshTokenService {
         return rawToken;
     }
 
+    /**
+     * 알려진 한계: 이 메서드가 반환하는 새 refresh token은 ROTATE_SCRIPT가 Redis에 커밋된
+     * "직후"에 유효하다는 보장일 뿐, 이 메서드가 리턴하고 {@link com.algogyeyak.auth.controller.AuthController#refresh}가
+     * 그 값을 쿠키로 실어 응답을 완료하는 그 사이에, 같은 유저에 대한 {@link #issue}(새 로그인)가
+     * 끼어들면 by-user 포인터가 그 issue() 쪽으로 넘어가고 방금 만든 새 refresh token의
+     * by-hash 항목은 지워진다 - 클라이언트는 200과 함께 쿠키를 받지만 그 쿠키는 이미 죽어있어
+     * 다음 요청에서 AUTH_REFRESH_TOKEN_INVALID를 보게 된다. "유저당 세션 1개"라는 불변식 자체는
+     * 깨지지 않고(정확히 하나의 세션만 살아남음, 보안 우회 없음) 실제로는 "동시에 로그인 vs 갱신"이라는
+     * 극히 드문 타이밍에서만 발생하므로, rotate/issue 두 Lua 스크립트를 하나로 묶는 등의 복잡도를
+     * 들이지 않고 감수하기로 함(AdminUserService.rejectIfLastActiveAdmin과 같은 종류의 판단).
+     */
     public RotationResult rotate(String rawToken) {
         String tokenHash = hash(rawToken);
         String newRawToken = generateRawToken();

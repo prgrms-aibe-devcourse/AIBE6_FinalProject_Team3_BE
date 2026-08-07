@@ -183,6 +183,29 @@ class AdminPropertyReportControllerTest {
     }
 
     @Test
+    void 본인이_등록한_신고를_직접_처리하면_409이다() throws Exception {
+        // PropertyReport는 매물 소유자 본인이 등록하는 자가 신고다 - 그 소유자가 ADMIN이면
+        // 자기 신고를 자기가 확정해버릴 수 있으므로(제3자 검토 절차 무력화) 반드시 막혀야 한다.
+        PropertyReport ownReport = PropertyReport.builder()
+                .propertyId(PROPERTY_ID)
+                .reporterId(ADMIN_ID)
+                .reason(PropertyReportReason.PRICE_MISMATCH)
+                .detail(null)
+                .build();
+        ReflectionTestUtils.setField(ownReport, "id", REPORT_ID);
+        when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(ownReport));
+
+        mockMvc.perform(patch("/admin/property-reports/{reportId}/review", REPORT_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"RESOLVED"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_PROPERTY_REPORT_SELF_REVIEW"));
+    }
+
+    @Test
     void 존재하지_않는_신고_상세조회는_404이다() throws Exception {
         when(propertyReportRepository.findById(999L)).thenReturn(Optional.empty());
 

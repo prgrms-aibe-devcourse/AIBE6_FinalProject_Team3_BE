@@ -59,6 +59,16 @@ public class AdminPropertyReportService {
         return toDetailResponse(report);
     }
 
+    /**
+     * 알려진 한계(조회 후 저장 방식이라 원자적이지 않음): PropertyReport.transitionTo()의
+     * RECEIVED 상태 가드는 메모리상의 값만 확인하므로, 관리자 두 명이 같은 신고를 동시에 열어
+     * 서로 다른 결과(RESOLVED/REJECTED)로 처리하면 둘 다 그 가드를 통과해 나중에 커밋한 쪽이
+     * 조용히 덮어쓸 수 있다. AdminChecklistTemplateService.validateCode와 같은 이유로
+     * 감수하기로 함(관리자 전용 화면, 동시 처리 빈도 매우 낮음, 데이터 손상이 아니라 검토
+     * 결과 하나가 재확정되는 정도) - 실제로 강한 불변식이 필요해지면 @Version(낙관적 락)이나
+     * 비관적 락이 필요하지만, 지금은 그 정도의 스키마/락 복잡도를 들일 만큼의 위험이 아니라고
+     * 판단했다.
+     */
     @Transactional
     public AdminPropertyReportDetailResponse review(Long reviewerId, Long reportId, PropertyReportStatus status, String memo) {
         if (status != PropertyReportStatus.RESOLVED && status != PropertyReportStatus.REJECTED) {
@@ -66,6 +76,13 @@ public class AdminPropertyReportService {
         }
 
         PropertyReport report = findReport(reportId);
+        // PropertyReport는 매물 소유자 본인이 직접 등록하는 자가 신고다(클래스 주석 참고) - 그
+        // 소유자가 ADMIN 권한도 갖고 있으면 아무 제약 없이는 자기 매물에 대한 자신의 신고를
+        // 스스로 검토/확정할 수 있어, AdminUserController.rejectSelf와 같은 이유로 이 경로도
+        // 막아야 한다(신고 검토는 제3자 확인이 전제인 절차라 본인 확정은 그 절차를 무력화한다).
+        if (report.getReporterId().equals(reviewerId)) {
+            throw new BusinessException(ErrorCode.ADMIN_PROPERTY_REPORT_SELF_REVIEW);
+        }
         if (status == PropertyReportStatus.RESOLVED) {
             report.resolve(reviewerId, memo);
         } else {

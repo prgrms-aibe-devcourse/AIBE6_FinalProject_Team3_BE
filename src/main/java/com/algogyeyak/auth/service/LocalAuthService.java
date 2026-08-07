@@ -17,6 +17,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class LocalAuthService {
 
+    // login()이 계정 없음/소셜 전용 계정(passwordHash 없음)일 때 BCrypt 비교 자체를 건너뛰면,
+    // 그 경로가 실제 비밀번호 불일치 경로보다 눈에 띄게 빨라 응답 시간만으로 "이 이메일에 로컬
+    // 비밀번호가 있는지"를 알아낼 수 있다(에러 메시지/코드는 이미 동일하게 처리돼 있었지만 처리
+    // 시간은 갈려 있었다). 이 값은 실제 사용자의 비밀번호가 아니라 형식만 유효한 더미 해시로,
+    // 그 경로에서도 항상 같은 비용의 BCrypt 비교를 한 번 수행해 시간차를 없애는 데만 쓰인다.
+    private static final String DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY =
+            "$2a$10$CwTycUXWue0Thq9StjUM0uJ8Q0kQAr9Z6FkQx9F.C2t2CSqDNXW0e";
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final TransactionTemplate requiresNewTransactionTemplate;
@@ -61,33 +69,49 @@ public class LocalAuthService {
             // 늘어나거나 일시적인 DB 이슈로 같은 예외가 나는 경우에도 항상 "닉네임 중복"이라는
             // 틀린 응답이 나갈 수 있다.
             //
-            // 이 재확인은 REQUIRES_NEW(새 스냅샷)에서 해야 한다 - 이 메서드 맨 앞의
-            // existsByEmail/existsByNickname이 이미 바깥(signup) 트랜잭션의 스냅샷을 확보해뒀는데
+            // 이 재확인도 REQUIRES_NEW(새 스냅샷)에서 해야 한다 - 이 메서드의 바깥(signup())
+            // 트랜잭션은 이미 existsByEmail/existsByNickname을 먼저 읽어 스냅샷을 확보해둔 상태라
             // (MySQL InnoDB 기본 격리수준 REPEATABLE READ 기준), 그 스냅샷으로 재확인하면 방금
-            // 경쟁에서 이긴 다른 트랜잭션의 커밋이 안 보여 둘 다 false로 나올 수 있다 - 실제로는
-            // 정상적인 중복 상황인데도 친절한 에러 대신 이 원본 예외가 그대로 500으로 새어나간다.
-            if (Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(
-                    status -> userRepository.existsByEmail(normalizedEmail)))) {
+            // 경쟁에서 이긴 다른 트랜잭션의 커밋이 안 보여 stale한 "중복 아님" 결과가 나오고,
+            // 원래 DataIntegrityViolationException이 그대로 다시 던져져 500으로 샐 수 있다.
+            if (Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(status -> userRepository.existsByEmail(normalizedEmail)))) {
                 throw new BusinessException(ErrorCode.AUTH_EMAIL_ALREADY_EXISTS);
             }
-            if (Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(
-                    status -> userRepository.existsByNickname(nickname)))) {
+            if (Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(status -> userRepository.existsByNickname(nickname)))) {
                 throw new BusinessException(ErrorCode.AUTH_NICKNAME_ALREADY_EXISTS);
             }
             throw e;
         }
     }
 
+    /**
+     * signup() 직후 refresh token 발급(Redis 장애 등)이 실패해 세션을 만들지 못했을 때, 방금
+     * 커밋된 계정을 되돌리는 보상 트랜잭션이다({@link com.algogyeyak.auth.controller.AuthController#signup}
+     * 참고). 세션 없이 "가입만 된" 계정이 그대로 남으면, 재시도 시 AUTH_EMAIL_ALREADY_EXISTS로
+     * 막혀 사용자가 같은 이메일로 다시 가입도 로그인도 하기 어려워진다(로그인 화면으로 바꿔야
+     * 한다는 걸 알기 어려움). signup()이 방금 이 요청에서 만든 계정임이 확실한 경우에만 호출해야
+     * 한다 — login()/OAuth처럼 기존 계정을 재사용하는 경로에서는 절대 호출하면 안 된다.
+     */
+    @Transactional
+    public void deleteNewlyCreatedUserAfterSessionSetupFailure(Long userId) {
+        userRepository.deleteById(userId);
+    }
+
     @Transactional(readOnly = true)
     public User login(String email, String rawPassword) {
         User user = userRepository.findByEmail(EmailNormalizer.normalize(email))
                 .filter(found -> !found.isWithdrawn() && !found.isSuspended())
-                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS));
+                .orElse(null);
 
         // passwordHash가 없는 계정(소셜 전용 가입)은 계정 존재 여부를 드러내지 않도록 자격 증명
-        // 오류와 동일한 메시지/코드로 처리한다.
-        String passwordHash = user.getPasswordHash();
-        if (passwordHash == null || !passwordEncoder.matches(rawPassword, passwordHash)) {
+        // 오류와 동일한 메시지/코드로 처리한다. 계정이 아예 없거나 passwordHash가 없어도 항상 같은
+        // 비용의 BCrypt 비교를 한 번 수행해(DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY 참고), 그
+        // 비교를 건너뛰는 경로가 실제 비밀번호 불일치 경로보다 빨리 응답해 계정 존재 여부가
+        // 새어나가는 것을 막는다.
+        String passwordHash = user != null ? user.getPasswordHash() : null;
+        boolean matches = passwordEncoder.matches(
+                rawPassword, passwordHash != null ? passwordHash : DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY);
+        if (user == null || passwordHash == null || !matches) {
             throw new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS);
         }
 

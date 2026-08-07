@@ -9,6 +9,8 @@ import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.property.entity.PropertyType;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +55,7 @@ public class AdminChecklistTemplateService {
     public AdminChecklistItemTemplateResponse create(AdminChecklistItemTemplateCreateRequest request) {
         // 새로 만드는 문항은 항상 active=true라, 다른 활성 문항과의 code 중복도 그 기준으로 검사한다.
         validateCode(request.code(), request.itemType(), true, null);
+        validateApplicablePropertyTypes(request.applicablePropertyTypes());
 
         int version = checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc().stream()
                 .mapToInt(ChecklistItemTemplate::getVersion)
@@ -76,10 +79,21 @@ public class AdminChecklistTemplateService {
         return AdminChecklistItemTemplateResponse.from(checklistItemTemplateRepository.save(template));
     }
 
+    /**
+     * 알려진 한계: 요청 DTO가 필드 일부만 담는 부분 patch가 아니라 항상 전체 스냅샷을 요구한다
+     * (프론트가 수정 폼을 열 때 불러온 값을 그대로 다시 보냄). 관리자 두 명이 거의 동시에 같은
+     * 문항을 열어 서로 다른 필드를 고치면, 나중에 도착한 요청이 먼저 도착한 요청의 변경을
+     * 자기가 불러왔던(더 오래된) 값으로 조용히 덮어쓴다 - 낙관적 락(@Version) 없이는 막을 수
+     * 없는 전형적인 lost-update다. AdminUserService.rejectIfLastActiveAdmin과 같은 이유(관리자
+     * 전용 화면, 매우 낮은 동시 편집 빈도)로 지금은 감수하고, 실제로 문제가 되면 그때 @Version을
+     * 도입한다.
+     */
     @Transactional
     public AdminChecklistItemTemplateResponse update(Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
         ChecklistItemTemplate template = findTemplate(templateId);
         validateCode(request.code(), request.itemType(), request.active(), templateId);
+        validateNotDeactivatingLastActiveTemplate(template, request.active());
+        validateApplicablePropertyTypes(request.applicablePropertyTypes());
 
         template.update(
                 request.category(),
@@ -133,6 +147,52 @@ public class AdminChecklistTemplateService {
         }
     }
 
+    // ChecklistItemTemplate.isApplicableTo()는 콤마로 구분된 토큰을 PropertyType.name()과 단순
+    // 문자열 비교만 하므로, Swagger/직접 API 호출로 오타나 존재하지 않는 값이 들어와도 그 자체로는
+    // 에러가 나지 않고 그 문항이 모든 매물유형에서 조용히 노출되지 않게 될 뿐이다(관리자 화면은
+    // 체크박스라 정상 입력만 보내지만, API 레벨에는 그 보장이 없었다). 저장 시점에 막아 그
+    // 조용한 실패를 방지한다.
+    private void validateApplicablePropertyTypes(String applicablePropertyTypes) {
+        if (applicablePropertyTypes == null || applicablePropertyTypes.isBlank()) {
+            return;
+        }
+        List<String> tokens = Arrays.stream(applicablePropertyTypes.split(","))
+                .map(String::trim)
+                // trailing/중복 콤마("OFFICETEL,")가 만드는 빈 토큰은 오타가 아니라 구분자 사용
+                // 습관의 문제일 뿐이라, 존재하지 않는 매물유형과 같은 취급(검증 실패)을 하면 안 된다.
+                .filter(token -> !token.isBlank())
+                .toList();
+        // 필터링 후 남은 토큰이 하나도 없다는 것("," 하나만 있거나 " , "처럼 구분자뿐인 경우)은
+        // null(=전체 매물유형에 적용)과 다르다 - isApplicableTo()는 이 non-null 빈 값을 "전체 적용"
+        // 으로 봐주지 않고 빈 배열과 어떤 매물유형도 매칭시키지 못해 모든 매물유형에서 조용히
+        // 숨겨버린다. 존재하지 않는 매물유형과 동일하게 취급해 저장 자체를 막는다 - 앞서 "빈 토큰은
+        // 허용"으로만 고쳤다가 이 케이스를 새로 뚫어버렸던 회귀.
+        boolean hasInvalidToken = tokens.isEmpty()
+                || tokens.stream().anyMatch(token -> Arrays.stream(PropertyType.values())
+                        .noneMatch(propertyType -> propertyType.name().equals(token)));
+        if (hasInvalidToken) {
+            throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE);
+        }
+    }
+
+    /**
+     * delete()가 마지막 문항 물리 삭제를 막는 것과 같은 이유로, "숨기려면 active=false(수정 API)를
+     * 쓰라"는 안내 문구와 달리 그 active=false 자체가 마지막 활성 문항을 0개로 만드는 경로는 막혀
+     * 있지 않았다 - 그러면 ChecklistService.createChecklist()가 그 이후 만드는 모든 유저 체크리스트가
+     * 문항 0개로 조용히 생성된다. delete()와 동일한 원자성 한계(조회 후 저장 방식)를 그대로 감수한다.
+     */
+    private void validateNotDeactivatingLastActiveTemplate(ChecklistItemTemplate template, boolean nextActive) {
+        if (nextActive || !template.isActive()) {
+            return;
+        }
+        long remainingActiveCount = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc().stream()
+                .filter(existing -> !existing.getId().equals(template.getId()))
+                .count();
+        if (remainingActiveCount == 0) {
+            throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM);
+        }
+    }
+
     /**
      * 마지막 남은 문항까지 물리 삭제하면, 앱 재시작 시 ChecklistTemplateSeeder가 "테이블이 비어있다"고
      * 판단해 기본 시드 데이터를 다시 채워 넣는다 - 관리자가 의도적으로 전부 정리했다고 생각한 상태가
@@ -148,6 +208,11 @@ public class AdminChecklistTemplateService {
         if (checklistItemTemplateRepository.count() <= 1) {
             throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM);
         }
+        // 위 count() 검사는 "테이블 전체가 비어버리는 것"만 막는다 - 비활성 문항이 하나 더 있는
+        // 상태에서 마지막 활성 문항을 삭제하면 count()는 통과하지만 활성 문항이 0개가 되어,
+        // update()의 validateNotDeactivatingLastActiveTemplate가 막으려던 것과 동일한 문제
+        // (ChecklistService.createChecklist()가 문항 0개로 조용히 생성됨)가 다른 경로로 발생한다.
+        validateNotDeactivatingLastActiveTemplate(template, false);
         checklistItemTemplateRepository.delete(template);
     }
 
