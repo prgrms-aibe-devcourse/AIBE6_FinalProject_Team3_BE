@@ -62,6 +62,10 @@ public class Property {
     @Column(nullable = false)
     private Double area;
 
+    // 관리비 없는 매물도 있어 nullable. 선택 입력값이라 등록/수정 시 항상 넘어오지 않을 수 있음.
+    @Column(name = "maintenance_fee")
+    private Long maintenanceFee;
+
     @Column(length = 1000)
     private String description;
 
@@ -91,6 +95,7 @@ public class Property {
             Long deposit,
             Long monthlyRent,
             Double area,
+            Long maintenanceFee,
             String description
     ) {
         this.userId = userId;
@@ -100,6 +105,7 @@ public class Property {
         this.deposit = deposit;
         this.monthlyRent = monthlyRent;
         this.area = area;
+        this.maintenanceFee = maintenanceFee;
         this.description = description;
         this.status = PropertyStatus.ACTIVE;
     }
@@ -131,6 +137,10 @@ public class Property {
 
     public void updateArea(Double area) {
         this.area = area;
+    }
+
+    public void updateMaintenanceFee(Long maintenanceFee) {
+        this.maintenanceFee = maintenanceFee;
     }
 
     public void updateDescription(String description) {

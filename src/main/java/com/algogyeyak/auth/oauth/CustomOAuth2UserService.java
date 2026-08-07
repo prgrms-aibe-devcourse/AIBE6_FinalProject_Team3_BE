@@ -188,6 +188,15 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     }
 
     private FindOrCreateResult createUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {
+        return createUser(provider, userInfo, nickname, true);
+    }
+
+    // allowNicknameFallback: 닉네임 충돌로 복구 재시도를 한 번 했다면(아래 참고) 다시 재귀 호출할 때
+    // false로 넘겨 무한 재시도를 막는다 - 그 재시도에서 쓰는 provider+providerId 조합 닉네임은 이
+    // 메서드 진입 시 이미 provider+providerId 재조회를 한 번 거치므로, 그마저 충돌한다면 원인은
+    // 닉네임이 아니라 진짜 동시 레이스(같은 provider+providerId로 동시 첫 로그인)일 수밖에 없다.
+    private FindOrCreateResult createUser(
+            AuthProvider provider, OAuth2UserInfo userInfo, String nickname, boolean allowNicknameFallback) {
         // 검증되지 않은 이메일은 저장하지 않고 null로 둔다. 저장해버리면, 나중에 이 이메일의 실제
         // 소유자가 검증된 OAuth(다른 provider 포함)로 로그인할 때 findVerifiedEmailMatch가 "이미
         // 존재하는 계정"으로 착각해 이 row에 연동해버린다 — 검증 안 된 이메일로 아무나 먼저 만들어둔
@@ -213,16 +222,10 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         } catch (DataIntegrityViolationException e) {
             // 같은 provider+providerId로 동시에 첫 로그인이 들어와 유니크 제약에 걸린 경우, 또는
             // 검증된 이메일로 동시에 가입/연동이 먼저 커밋된 경우 — 먼저 커밋된 쪽의 row를 그대로
-            // 사용한다(드문 동시 레이스 대비). 그마저도 못 찾으면(검증 안 된 이메일이라 위 조회가
-            // 애초에 empty를 준 경우 포함) 이 예외를 raw로 흘려보내는 대신 AuthenticationException으로
-            // 감싼다 — 그래야 OAuth2LoginAuthenticationFilter가 이를 잡아
-            // OAuth2AuthenticationFailureHandler로 정상적으로 프론트에 에러 리다이렉트를 보내고,
-            // 서블릿까지 예외가 올라가 500으로 크래시하는 것을 막는다.
-            //
-            // 이 복구 조회도 바깥(loadUser()) 트랜잭션에서 그냥 실행하면 안 된다 - MySQL 기본
-            // REPEATABLE READ에서는 바깥 트랜잭션이 경쟁 요청의 커밋 전 스냅샷을 이미 고정하고
-            // 있을 수 있어, 방금 커밋된 winner row를 stale snapshot 때문에 못 볼 수 있다.
-            // REQUIRES_NEW(별도 세션)로 분리해 항상 최신 커밋 상태를 보게 한다.
+            // 사용한다(드문 동시 레이스 대비). 이 복구 조회도 바깥(loadUser()) 트랜잭션에서 그냥
+            // 실행하면 안 된다 - MySQL 기본 REPEATABLE READ에서는 바깥 트랜잭션이 경쟁 요청의 커밋
+            // 전 스냅샷을 이미 고정하고 있을 수 있어, 방금 커밋된 winner row를 stale snapshot
+            // 때문에 못 볼 수 있다. REQUIRES_NEW(별도 세션)로 분리해 항상 최신 커밋 상태를 보게 한다.
             RecoveredWinner recovered = requiresNewTransactionTemplate.execute(status -> {
                 Optional<User> bySocialAccount = userSocialAccountRepository
                         .findByProviderAndProviderId(provider, userInfo.getProviderId())
@@ -233,25 +236,46 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                 return findVerifiedEmailMatch(userInfo).map(user -> new RecoveredWinner(user, false)).orElse(null);
             });
 
-            if (recovered == null) {
-                throw new OAuth2AuthenticationException(
-                        new OAuth2Error("email_conflict", "이미 사용 중인 이메일입니다.", null), e);
+            if (recovered != null) {
+                // 동시 레이스로 복구된 winner도 다른 모든 경로와 동일하게 정지/탈퇴 여부를 확인해야
+                // 한다 - 그렇지 않으면 이 레이스 케이스만 그 검사를 우회하게 된다.
+                rejectIfBlocked(recovered.user());
+
+                if (recovered.alreadyLinkedToThisProvider()) {
+                    return new FindOrCreateResult(recovered.user(), false);
+                }
+
+                // provider+providerId로는 아직 연동되지 않은 상태로(검증된 이메일로만) 기존 계정을
+                // 찾은 경우 - 이 provider를 실제로 연동해야 한다. 안 그러면 user_social_accounts에
+                // 이 provider가 영영 안 남아, 다음 로그인마다 이 유니크 제약 위반 → 복구를 매번
+                // 반복하게 된다.
+                linkNewSocialAccount(recovered.user(), provider, userInfo.getProviderId());
+                return new FindOrCreateResult(recovered.user(), true);
             }
 
-            // 동시 레이스로 복구된 winner도 다른 모든 경로와 동일하게 정지/탈퇴 여부를 확인해야
-            // 한다 - 그렇지 않으면 이 레이스 케이스만 그 검사를 우회하게 된다.
-            rejectIfBlocked(recovered.user());
-
-            if (recovered.alreadyLinkedToThisProvider()) {
-                return new FindOrCreateResult(recovered.user(), false);
+            // provider+providerId도, 검증된 이메일도 못 찾았다면 이 유니크 제약 위반은 사실 닉네임
+            // 충돌일 가능성이 높다 - User 테이블의 유니크 제약은 email/nickname/(provider,providerId)
+            // 뿐이다. OAuth 가입은 로컬 가입과 달리 유저가 닉네임을 미리 고르거나 중복 확인을 거칠
+            // 기회가 없으므로, provider가 매번 내려주는 닉네임이 다른 유저와 우연히 겹치기만 해도
+            // 이 계정은 재시도해도 항상 같은 닉네임으로 다시 시도해 영원히 가입이 불가능해진다 -
+            // 아래에서 이 원인을 확인하지 않으면 "이미 사용 중인 이메일입니다"라는 잘못된 메시지로
+            // 영구 차단되는 실제 유저가 생긴다. provider+providerId로 만든 닉네임(getNickname()이
+            // null일 때 이미 쓰는 것과 같은 fallback)은 이 유저에게만 유일하므로, 그 값으로 한 번만
+            // 재시도한다.
+            boolean nicknameConflict = allowNicknameFallback && Boolean.TRUE.equals(
+                    requiresNewTransactionTemplate.execute(status -> userRepository.existsByNickname(nickname)));
+            if (nicknameConflict) {
+                String fallbackNickname = provider.name().toLowerCase() + "_" + userInfo.getProviderId();
+                return createUser(provider, userInfo, fallbackNickname, false);
             }
 
-            // provider+providerId로는 아직 연동되지 않은 상태로(검증된 이메일로만) 기존 계정을
-            // 찾은 경우 - 이 provider를 실제로 연동해야 한다. 안 그러면 user_social_accounts에
-            // 이 provider가 영영 안 남아, 다음 로그인마다 이 유니크 제약 위반 → 복구를 매번
-            // 반복하게 된다.
-            linkNewSocialAccount(recovered.user(), provider, userInfo.getProviderId());
-            return new FindOrCreateResult(recovered.user(), true);
+            // 그마저도 아니면(검증 안 된 이메일이라 위 조회가 애초에 empty를 준 경우 포함) 이 예외를
+            // raw로 흘려보내는 대신 AuthenticationException으로 감싼다 — 그래야
+            // OAuth2LoginAuthenticationFilter가 이를 잡아 OAuth2AuthenticationFailureHandler로
+            // 정상적으로 프론트에 에러 리다이렉트를 보내고, 서블릿까지 예외가 올라가 500으로
+            // 크래시하는 것을 막는다.
+            throw new OAuth2AuthenticationException(
+                    new OAuth2Error("email_conflict", "이미 사용 중인 이메일입니다.", null), e);
         }
     }
 

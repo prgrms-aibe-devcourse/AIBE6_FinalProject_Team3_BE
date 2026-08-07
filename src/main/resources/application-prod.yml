@@ -22,6 +22,9 @@ spring:
   h2:
     console:
       enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: update  # TODO: Flyway/Liquibase 전환 전까지 임시조치
 
 # 운영에서 API 문서/Swagger UI를 통해 전체 엔드포인트 구조가 노출되지 않도록 끈다.
 springdoc:

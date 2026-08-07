@@ -120,9 +120,16 @@ class CustomOAuth2UserServiceConcurrentLoginIntegrationTest {
             return committed;
         });
 
-        User aUser = aResult.get(10, TimeUnit.SECONDS);
-        User bUser = bResult.get(10, TimeUnit.SECONDS);
-        executor.shutdown();
+        User aUser;
+        User bUser;
+        try {
+            aUser = aResult.get(10, TimeUnit.SECONDS);
+            bUser = bResult.get(10, TimeUnit.SECONDS);
+        } finally {
+            // get()이 타임아웃/예외로 먼저 던지면 shutdown()이 실행되지 않아 스레드가 남을 수 있다 -
+            // 정상/실패 어느 쪽이든 반드시 정리되도록 finally에서 shutdownNow()로 강제 종료한다.
+            executor.shutdownNow();
+        }
 
         TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
 

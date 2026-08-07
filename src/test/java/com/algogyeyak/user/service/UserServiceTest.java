@@ -2,6 +2,7 @@ package com.algogyeyak.user.service;
 
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.user.dto.NicknameCheckResponse;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
@@ -19,8 +20,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -183,5 +186,28 @@ class UserServiceTest {
 
         assertNull(response.getProfileImageUrl());
         verify(s3PresignService, never()).deleteReplacedObject(any());
+    }
+
+    @Test
+    void checkNicknameAvailableExcludesSelfWhenAuthenticated() {
+        when(userRepository.existsByNicknameAndIdNot("닉네임", 1L)).thenReturn(false);
+
+        NicknameCheckResponse response = userService.checkNicknameAvailable(1L, "닉네임");
+
+        assertTrue(response.isAvailable());
+        verify(userRepository, never()).existsByNickname(any());
+    }
+
+    @Test
+    void checkNicknameAvailableChecksGloballyWhenAnonymous() {
+        // 회원가입 화면처럼 로그인 전(userId == null)에 호출되는 경우 - existsByNicknameAndIdNot에
+        // null을 그대로 넘기면 SQL의 "id <> NULL"이 항상 거짓이 되어 무조건 available=true로 잘못
+        // 판정하므로, 이 경로는 본인 제외 없이 전체 중복만 확인하는 existsByNickname을 타야 한다.
+        when(userRepository.existsByNickname("중복닉네임")).thenReturn(true);
+
+        NicknameCheckResponse response = userService.checkNicknameAvailable(null, "중복닉네임");
+
+        assertFalse(response.isAvailable());
+        verify(userRepository, never()).existsByNicknameAndIdNot(any(), any());
     }
 }

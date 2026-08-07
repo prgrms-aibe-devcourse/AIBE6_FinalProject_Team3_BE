@@ -358,6 +358,35 @@ class CustomOAuth2UserServiceTest {
                 () -> service.processOAuth2User("kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com")));
     }
 
+    @Test
+    void recoversWithFallbackNicknameWhenTheOnlyConflictIsNickname() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.empty());
+        when(repository.findByEmail("test@kakao.com")).thenReturn(Optional.empty());
+        // 첫 시도(제공자가 내려준 닉네임)는 전혀 무관한 다른 유저의 닉네임과 우연히 겹쳐 유니크 제약
+        // 위반이 나고, 재시도(provider+providerId 기반 fallback 닉네임)는 성공한다고 가정한다.
+        when(repository.existsByNickname("테스트유저")).thenReturn(true);
+        when(repository.saveAndFlush(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(socialAccountRepository.saveAndFlush(any(UserSocialAccount.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        // 예전엔 provider+providerId도 이메일도 못 찾으면 원인과 무관하게 항상 email_conflict로
+        // 영구 실패했다 - 실제 원인이 닉네임 충돌이면 이제 유일한 fallback 닉네임으로 자동
+        // 재시도해서 정상적으로 가입돼야 한다(OAuth 가입은 로컬 가입과 달리 유저가 직접 다른
+        // 닉네임을 골라 재시도할 방법이 없으므로).
+        OAuth2User result =
+                service.processOAuth2User("kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com"));
+
+        User user = ((CustomOAuth2User) result).getUser();
+        assertEquals("kakao_123", user.getNickname());
+        assertEquals("test@kakao.com", user.getEmail());
+    }
+
     // --- 다중 소셜 연동(user_social_accounts) 전용 시나리오 ---
 
     @Test

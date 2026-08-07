@@ -29,11 +29,14 @@ public class UserController {
         return ApiResponse.success(userService.getMyProfile(userDetails.userId()));
     }
 
+    // 회원가입 화면(로그인 전)에서도 호출되는 permitAll 경로라 userDetails가 null일 수 있다 -
+    // 비로그인 요청은 익명 principal(문자열)이라 JwtUserPrincipal로 캐스팅이 안 돼 null이 주입된다.
     @GetMapping("/nickname-check")
     public ApiResponse<NicknameCheckResponse> checkNickname(
             @AuthenticationPrincipal JwtUserPrincipal userDetails,
             @RequestParam String nickname) {
-        return ApiResponse.success(userService.checkNicknameAvailable(userDetails.userId(), nickname));
+        Long userId = userDetails != null ? userDetails.userId() : null;
+        return ApiResponse.success(userService.checkNicknameAvailable(userId, nickname));
     }
 
     @PostMapping("/me/profile")

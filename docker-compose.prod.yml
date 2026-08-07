@@ -1,0 +1,26 @@
+services:
+  backend:
+    environment:
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+
+  nginx-proxy-manager:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: npm
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - algogyeyak-network
+
+volumes:
+  npm-data:
+  npm-letsencrypt:
+
+networks:
+  algogyeyak-network:
+    external: true

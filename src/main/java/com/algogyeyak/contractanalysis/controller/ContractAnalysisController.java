@@ -3,6 +3,8 @@ package com.algogyeyak.contractanalysis.controller;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisAnalyzeRequest;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisAnalyzeResponse;
+import com.algogyeyak.contractanalysis.dto.ContractAnalysisChatRequest;
+import com.algogyeyak.contractanalysis.dto.ContractAnalysisChatResponse;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisInputRequest;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisInputResponse;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisMaskingRequest;
@@ -10,6 +12,7 @@ import com.algogyeyak.contractanalysis.dto.ContractAnalysisMaskingResponse;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisOcrResponse;
 import com.algogyeyak.contractanalysis.entity.InputType;
 import com.algogyeyak.contractanalysis.service.ContractAnalysisAnalyzeService;
+import com.algogyeyak.contractanalysis.service.ContractAnalysisChatService;
 import com.algogyeyak.contractanalysis.service.ContractAnalysisInputService;
 import com.algogyeyak.contractanalysis.service.ContractAnalysisMaskingService;
 import com.algogyeyak.contractanalysis.service.ContractAnalysisOcrService;
@@ -33,17 +36,20 @@ public class ContractAnalysisController {
     private final ContractAnalysisOcrService contractAnalysisOcrService;
     private final ContractAnalysisMaskingService contractAnalysisMaskingService;
     private final ContractAnalysisAnalyzeService contractAnalysisAnalyzeService;
+    private final ContractAnalysisChatService contractAnalysisChatService;
 
     public ContractAnalysisController(
             ContractAnalysisInputService contractAnalysisInputService,
             ContractAnalysisOcrService contractAnalysisOcrService,
             ContractAnalysisMaskingService contractAnalysisMaskingService,
-            ContractAnalysisAnalyzeService contractAnalysisAnalyzeService
+            ContractAnalysisAnalyzeService contractAnalysisAnalyzeService,
+            ContractAnalysisChatService contractAnalysisChatService
     ) {
         this.contractAnalysisInputService = contractAnalysisInputService;
         this.contractAnalysisOcrService = contractAnalysisOcrService;
         this.contractAnalysisMaskingService = contractAnalysisMaskingService;
         this.contractAnalysisAnalyzeService = contractAnalysisAnalyzeService;
+        this.contractAnalysisChatService = contractAnalysisChatService;
     }
 
     @PostMapping(value = "/inputs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -80,6 +86,14 @@ public class ContractAnalysisController {
             @RequestBody ContractAnalysisAnalyzeRequest request
     ) {
         ContractAnalysisAnalyzeResponse response = contractAnalysisAnalyzeService.analyze(request);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PostMapping("/chat")
+    public ResponseEntity<ApiResponse<ContractAnalysisChatResponse>> chat(
+            @RequestBody ContractAnalysisChatRequest request
+    ) {
+        ContractAnalysisChatResponse response = contractAnalysisChatService.chat(request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 }
