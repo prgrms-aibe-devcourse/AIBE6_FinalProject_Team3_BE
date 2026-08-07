@@ -1,3 +1,3 @@
 # AGENTS.md
 
-This project's agent instructions (build/test commands, architecture notes) live in [CLAUDE.md](./CLAUDE.md). Read that file first — it applies to any AI coding agent working in this repository, not just Claude Code.
+이 프로젝트의 에이전트 안내(빌드/테스트 명령어, 아키텍처 노트)는 [CLAUDE.md](./CLAUDE.md)에 있습니다. Claude Code뿐 아니라 이 저장소에서 작업하는 모든 AI 코딩 에이전트에게 적용되니, 먼저 그 파일을 읽으세요.
