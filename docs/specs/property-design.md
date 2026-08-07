@@ -56,7 +56,7 @@
 | 접근 권한 확인 | ✅ 403(`PROPERTY_ACCESS_DENIED`) |
 | 매물 기본 정보 + 주소 정보 조회 | ✅ |
 | 실거래가 비교 결과 조회 | ✅ 등록 때와 동일하게 `MarketComparisonService.compare()`를 조회 시점마다 다시 계산해 반환(결과를 저장해두지 않고 매번 실시간 재계산 — `market-data-design.md` 참고) |
-| 위험 신호와 안전성 정보 조회 | ⚠️ **목록 조회(위 표)에는 연동됨.** 상세 응답(`PropertyDetailResponse`)에는 여전히 관련 필드가 없음 — 위험 신호 상세는 별도 엔드포인트(`GET /properties/{id}/risk-signals`, `GET /properties/{id}/deposit-safety`, risk-analysis 도메인)로만 조회 가능 |
+| 위험 신호와 안전성 정보 조회 | ✅ **목록은 `PropertyListResponse` 요약 필드로, 상세는 FE가 별도 엔드포인트를 호출하는 방식으로 연동됨.** `PropertyDetailResponse` 자체엔 관련 필드가 없지만, FE `PropertyDetailClient`가 매물 상세를 불러올 때 `GET /properties/{id}/risk-signals`·`GET /properties/{id}/deposit-safety`를 추가로 호출해 화면을 채운다(FE `property-design.md` 참고) — 상세는 매물 1건만 다루면 되므로 목록처럼 응답에 필드를 욱여넣지 않고 API 호출을 나눈 구조로 보임 |
 | 임장 체크리스트 생성 여부 확인 | ✅ `PropertyDetailResponse.checklistCreated`(boolean) 추가 — `ChecklistRepository.findByPropertyId(propertyId).isPresent()`로 조회 시점마다 판단 |
 | 누적 신고 여부(존재 유무) 조회 | ✅ `PropertyDetailResponse.reported`(boolean) 추가 — `PropertyReportRepository.existsByPropertyIdAndReporterId(propertyId, userId)`로 판단(본인이 신고했는지 기준 — 아래 "자가 플래그 구조" 참고) |
 | 실패: 존재하지 않는 매물 | ✅ 404 |
@@ -142,7 +142,7 @@
 
 1. 매매(SALE) 거래유형과 `askingPrice`가 아예 없음 — 전월세만 지원. 서비스 타겟에 맞춘 의도적 축소인지 확인
 2. ~~국토부 실거래가 연동 자체가 미구현~~ → `market-data` 도메인으로 해소됨(`market-data-design.md` 참고). 남은 건 매물 조회마다 실시간 재계산하는 구조라 트래픽 늘면 캐싱/저장 전환이 필요할 수 있다는 점
-3. ~~risk-analysis(위험 신호·안전성 정보) 도메인 자체는 별도로 존재하지만, 매물 상세 응답과는 아직 연동되어 있지 않음~~ → **목록 조회는 `checkSignalCount`/`signalSummary`/`jeonseRatio` 추가로 해소됨.** 상세 응답(`PropertyDetailResponse`)에는 여전히 연동되어 있지 않음(별도 엔드포인트로만 조회 가능) — 필요하면 후속 이슈로
+3. ~~risk-analysis(위험 신호·안전성 정보) 도메인 자체는 별도로 존재하지만, 매물 상세 응답과는 아직 연동되어 있지 않음~~ → **해소됨.** 목록은 `PropertyListResponse`에 `checkSignalCount`/`signalSummary`/`jeonseRatio`를 추가하는 방식으로, 상세는 FE가 `GET /risk-signals`·`GET /deposit-safety`를 별도로 호출하는 방식으로 각각 연동됨(BE `PropertyDetailResponse` 자체엔 필드가 없지만 실제 화면엔 정상 표시됨 — 위 상세조회 표 참고)
 4. ~~매물 상세 응답에 임장 체크리스트 생성 여부가 포함되지 않음~~ → `checklistCreated` 필드 추가로 해소됨
 5. ~~매물 상세 응답에 누적 신고 여부가 포함되지 않음~~ → `reported` 필드 추가로 해소됨(단, 아래 6번의 자가 플래그 구조라 "본인이 신고했는지" 기준)
 6. 매물 신고가 "본인 매물을 본인이 신고"하는 자가 플래그 구조 — 원래 의도(마켓플레이스식 신고였는지)를 확인 필요

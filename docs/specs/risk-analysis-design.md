@@ -51,7 +51,7 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 
 ## 다른 도메인에 남아있는 연계 흔적
 
-- `property` 도메인의 매물 상세조회(`PropertyDetailResponse`)엔 위험 신호·안전성 정보를 담을 필드가 아직 없음(`property-design.md` 확인 필요 항목 #3과 동일 사안). **(2026-08-03 갱신)** `RiskAnalysisController`(`GET /properties/{propertyId}/risk-signals`)는 이제 생겼으니 데이터 소스 자체는 있음 — 다만 `PropertyDetailResponse`가 이 별도 엔드포인트를 호출/포함하도록 연동하는 코드는 아직 없음.
+- `property` 도메인의 매물 상세조회(`PropertyDetailResponse`)엔 위험 신호·안전성 정보를 담을 필드가 없음(`property-design.md` 확인 필요 항목 #3과 동일 사안). **(2026-08-07 확인)** 다만 BE가 이 필드를 채워주는 대신, FE `PropertyDetailClient`가 매물 상세 페이지 로드 시 `GET /properties/{propertyId}/risk-signals`·`GET /properties/{propertyId}/deposit-safety`를 별도로 호출해 화면을 채우고 있어 기능적으로는 이미 연동돼 있음 — `PropertyDetailResponse`에 필드를 추가할 필요는 없어 보임.
 - **(2026-08-04 해결)** `checklist` 도메인의 `ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE`(소유권 취득일 문항)에 남아있던 "risk-analysis 전세가율과 연계되는 보조 신호용" 주석이 실제 코드로 이어짐 — `ChecklistItemRepository`에 문항 단건 조회 쿼리를 추가해 `DepositSafetyCheckService`가 직접 읽어온다(아래 "남은 이슈" 4번 참고).
 - **(2026-08-03 해결)** `property`의 매물 삭제는 논리 삭제(soft delete, `PropertyStatus.DELETED`)라 삭제된 매물 데이터가 DB에 남아있음 — `ShortTermRelistingDetector`가 이 재료(삭제 이력)를 실제로 활용해 구현 완료됨. 별도 `deletedAt` 컬럼이 없어 `updatedAt`을 삭제 시각 대용으로 사용.
 - **(2026-08-03 해결)** `property`의 등록 시 중복 검사(`PROPERTY_DUPLICATE`)는 "동일 사용자가 동일 주소·거래유형으로 재등록"할 때만 걸리는 검사라, `DuplicateListingDetector`가 요구하는 "서비스 전체에서 동일 주소·유사 조건으로 등록된 다른 매물(다른 사용자 포함)" 탐지와는 성격이 달라 재사용이 어려웠음 — `PropertyRepository`에 `existsByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddress`/`_JibunAddress`(userId 조건 없이 본인 자신만 제외) 신규 쿼리를 추가해 해결.
