@@ -18,7 +18,7 @@
 
 ## property — 부분 구현, 명세보다 좁음
 
-매물 CRUD, 지역·면적·가격·거래유형 검색 + 페이지네이션, 매물 신고, market-data 시세비교 연동, 체크리스트 진행률 표시까지 되어 있습니다. 매매(SALE) 거래유형은 아직 없고(전월세만 지원), risk-analysis(위험 신호) 정보는 매물 상세 응답에 아직 연동되지 않았습니다.
+매물 CRUD, 지역·면적·가격·거래유형 검색 + 페이지네이션, 매물 신고, market-data 시세비교 연동, 체크리스트 진행률 표시까지 되어 있습니다. **(2026-08-07)** 목록 응답에 위험신호 개수/전세가율 요약(`checkSignalCount`/`signalSummary`/`jeonseRatio`)과 관리비(`maintenanceFee`, nullable, 등록/수정 시 선택 입력) 필드가 추가됐습니다. 매매(SALE) 거래유형은 아직 없고(전월세만 지원), risk-analysis(위험 신호) 정보는 매물 상세 응답에는 아직 연동되지 않았습니다(목록에만 연동됨).
 
 → 상세: [`docs/specs/property-design.md`](./docs/specs/property-design.md)
 
