@@ -51,7 +51,7 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 
 ## 다른 도메인에 남아있는 연계 흔적
 
-- `property` 도메인의 매물 상세조회(`PropertyDetailResponse`)엔 위험 신호·안전성 정보를 담을 필드가 아직 없음(`property-design.md` 확인 필요 항목 #3과 동일 사안). **(2026-08-03 갱신)** `RiskAnalysisController`(`GET /properties/{propertyId}/risk-signals`)는 이제 생겼으니 데이터 소스 자체는 있음 — 다만 `PropertyDetailResponse`가 이 별도 엔드포인트를 호출/포함하도록 연동하는 코드는 아직 없음.
+- `property` 도메인의 매물 상세조회(`PropertyDetailResponse`)엔 위험 신호·안전성 정보를 담을 필드가 없음(`property-design.md` 확인 필요 항목 #3과 동일 사안). **(2026-08-07 확인)** 다만 BE가 이 필드를 채워주는 대신, FE `PropertyDetailClient`가 매물 상세 페이지 로드 시 `GET /properties/{propertyId}/risk-signals`·`GET /properties/{propertyId}/deposit-safety`를 별도로 호출해 화면을 채우고 있어 기능적으로는 이미 연동돼 있음 — `PropertyDetailResponse`에 필드를 추가할 필요는 없어 보임.
 - **(2026-08-04 해결)** `checklist` 도메인의 `ChecklistItemCode.OWNERSHIP_ACQUISITION_DATE`(소유권 취득일 문항)에 남아있던 "risk-analysis 전세가율과 연계되는 보조 신호용" 주석이 실제 코드로 이어짐 — `ChecklistItemRepository`에 문항 단건 조회 쿼리를 추가해 `DepositSafetyCheckService`가 직접 읽어온다(아래 "남은 이슈" 4번 참고).
 - **(2026-08-03 해결)** `property`의 매물 삭제는 논리 삭제(soft delete, `PropertyStatus.DELETED`)라 삭제된 매물 데이터가 DB에 남아있음 — `ShortTermRelistingDetector`가 이 재료(삭제 이력)를 실제로 활용해 구현 완료됨. 별도 `deletedAt` 컬럼이 없어 `updatedAt`을 삭제 시각 대용으로 사용.
 - **(2026-08-03 해결)** `property`의 등록 시 중복 검사(`PROPERTY_DUPLICATE`)는 "동일 사용자가 동일 주소·거래유형으로 재등록"할 때만 걸리는 검사라, `DuplicateListingDetector`가 요구하는 "서비스 전체에서 동일 주소·유사 조건으로 등록된 다른 매물(다른 사용자 포함)" 탐지와는 성격이 달라 재사용이 어려웠음 — `PropertyRepository`에 `existsByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddress`/`_JibunAddress`(userId 조건 없이 본인 자신만 제외) 신규 쿼리를 추가해 해결.
@@ -76,7 +76,7 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 | 항목 | 상태 |
 |---|---|
 | 동일 입력·동일 정책 버전이면 동일 결과 보장 | ✅ **(2026-08-03 완료)** 탐지기 4종 전부 순수 함수적 판정(DB 조회 + 정책값 비교) — 결정적(deterministic). `PriceAnomalyDetector`도 같은 `MarketComparison` 입력이면 항상 같은 결과 |
-| 위험도 계산 실패가 매물 상세 조회 전체 실패로 이어지지 않음 | ⚠️ `FakeListingSignalService`는 market-data 실패/판정불가를 예외 없이 상태값으로 흡수하지만, `PropertyService.getProperty()` 쪽에 이 결과를 읽어오는 연동 지점 자체가 없어 실제 조회 흐름에서 검증 불가(위 "다른 도메인에 남아있는 연계 흔적" 참고) |
+| 위험도 계산 실패가 매물 상세 조회 전체 실패로 이어지지 않음 | ✅ **(2026-08-07 확인)** `FakeListingSignalService`는 market-data 실패/판정불가를 예외 없이 상태값으로 흡수한다. BE `PropertyService.getProperty()`는 애초에 risk-analysis를 호출하지 않지만, FE `page.tsx`가 `GET /risk-signals`·`GET /deposit-safety`를 매물 조회와 별개로 호출해 실패해도 `.catch()`로 흡수하고 매물 본문은 그대로 렌더링함(위 "다른 도메인에 남아있는 연계 흔적" 참고) — 결과적으로 요구사항이 만족됨 |
 | 실거래가 조회 실패와 위험도 계산 실패 구분 | ⚠️ 모델 수준에서는 `RiskCheckReason.DATA_FETCH_FAILURE`(FAILED)와 `NO_COMPARABLE_TRANSACTION`(UNDETERMINABLE)로 구분되지만, 실제 market-data 구현(`MolitRentClientImpl`)이 외부 API 실패를 예외로 던지지 않고 빈 리스트로 삼켜버려 "실패"와 "판정불가"가 원천 데이터부터 구분되지 않음 — `MarketDataClientImpl` 어댑터도 이 한계를 그대로 물려받아 항상 `UNDETERMINABLE`로만 매핑함(위 'market-data 도메인 연동' 참고). market-data 쪽에서 API 실패를 예외로 구분해 던지는 선행 작업이 있어야 완전히 해결됨 |
 | 매물 정보/시세 변경 시에만 재계산(불필요한 재계산 방지) | ✅ **(2026-08-04 구현)** `PropertyUpdatedEvent`가 매물 수정 시에만 발행되므로, 조회만으로는 재계산이 트리거되지 않음 |
 | 동일계정 다수등록 탐지를 정책 플래그로 켜고 끌 수 있게 | ✅ **(2026-08-03 구현)** `SameAccountMultipleDetector.isEnabled()`가 `RiskPolicyConfig.multiAccountDetectionEnabled`를 그대로 반환 — 탐지 로직 자체는 완성됐고 플래그로만 켜고 끔(기본값 `false`) |

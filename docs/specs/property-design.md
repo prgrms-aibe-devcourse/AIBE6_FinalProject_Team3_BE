@@ -56,7 +56,7 @@
 | 접근 권한 확인 | ✅ 403(`PROPERTY_ACCESS_DENIED`) |
 | 매물 기본 정보 + 주소 정보 조회 | ✅ |
 | 실거래가 비교 결과 조회 | ✅ 등록 때와 동일하게 `MarketComparisonService.compare()`를 조회 시점마다 다시 계산해 반환(결과를 저장해두지 않고 매번 실시간 재계산 — `market-data-design.md` 참고) |
-| 위험 신호와 안전성 정보 조회 | ⚠️ **목록 조회(위 표)에는 연동됨.** 상세 응답(`PropertyDetailResponse`)에는 여전히 관련 필드가 없음 — 위험 신호 상세는 별도 엔드포인트(`GET /properties/{id}/risk-signals`, `GET /properties/{id}/deposit-safety`, risk-analysis 도메인)로만 조회 가능 |
+| 위험 신호와 안전성 정보 조회 | ✅ **목록은 `PropertyListResponse` 요약 필드로, 상세는 FE가 별도 엔드포인트를 호출하는 방식으로 연동됨.** `PropertyDetailResponse` 자체엔 관련 필드가 없지만, FE `PropertyDetailClient`가 매물 상세를 불러올 때 `GET /properties/{id}/risk-signals`·`GET /properties/{id}/deposit-safety`를 추가로 호출해 화면을 채운다(FE `property-design.md` 참고) — 상세는 매물 1건만 다루면 되므로 목록처럼 응답에 필드를 욱여넣지 않고 API 호출을 나눈 구조로 보임 |
 | 임장 체크리스트 생성 여부 확인 | ✅ `PropertyDetailResponse.checklistCreated`(boolean) 추가 — `ChecklistRepository.findByPropertyId(propertyId).isPresent()`로 조회 시점마다 판단 |
 | 누적 신고 여부(존재 유무) 조회 | ✅ `PropertyDetailResponse.reported`(boolean) 추가 — `PropertyReportRepository.existsByPropertyIdAndReporterId(propertyId, userId)`로 판단(본인이 신고했는지 기준 — 아래 "자가 플래그 구조" 참고) |
 | 실패: 존재하지 않는 매물 | ✅ 404 |
@@ -118,13 +118,13 @@
 | 신고자 식별정보 비노출 | O | ✅ `PropertyReportResponse`에 `reporterId` 없음 (다만 애초에 신고 열람 API 자체가 없어 검증 대상이 사실상 없음) |
 | 보증금/월세/가격/면적 0 이상 | O(0 이상) | ⚠️ 실제는 `@Positive`(0 초과) — "0"을 허용하는지 여부가 요구사항과 다름 |
 | 거래유형별 필수 가격정보 다르게 검증 | O | ✅ |
-| 매물 변경 시 기존 위험신호 결과 최신 아님 처리 | O | 해당 기능 자체가 없어 N/A |
+| 매물 변경 시 기존 위험신호 결과 최신 아님 처리 | O | ⚠️ 별도의 "최신 아님" 플래그·안내는 없지만, `PropertyUpdatedEvent`로 매물 수정 시 위험신호·전세가율이 곧바로 자동 재계산되어(위 매물 수정 표 참고) 실질적으로 오래된 결과가 화면에 남는 문제는 없음 — 요구사항이 말하는 "구분 표시"까지는 아님 |
 | 매물 삭제는 논리 삭제 | O | ✅ |
 | 동일 사용자·동일 매물 중복 신고 방지 | O | ✅ |
 | 주소 검색 기능 제공 | O | ✅ Kakao 연동 |
-| 거래유형별 필요 입력 항목만 표시 | O | 프론트 책임 영역으로 추정 — 확인 필요 |
+| 거래유형별 필요 입력 항목만 표시 | O | ✅ FE 책임 영역, 확인 완료 — 등록/수정 폼 모두 `isMonthlyRent` 조건으로 월세 입력란을 거래유형에 따라 보이거나 숨김(FE `property-design.md` 참고) |
 | 시세조회 실패가 등록 실패로 오인되지 않게 안내 | O | ✅ `market-data` 쪽 국토부/카카오 API 호출 실패는 내부에서 흡수해 `UNAVAILABLE`로 degrade — 등록 자체는 항상 성공(`MolitRentClientImpl`/`KakaoRegionCodeClientImpl`이 예외를 삼킴) |
-| 신고 사유 중복탐지 문구 구분 안내 | O | risk-analysis 자체가 없어 해당 없음 |
+| 신고 사유 중복탐지 문구 구분 안내 | O | ✅ risk-analysis 도메인이 완전히 구현돼 있고(`DuplicateListingDetector`), 신고(`PropertyReport`)와는 완전히 분리된 별도 테이블/서비스로 역할이 나뉘어 있음(위 매물 신고 표 참고) |
 | 동일 매물 반복 등록 요청 시 중복 저장 방지 | O | ✅ 도로명주소 없으면 지번주소로 폴백해서 체크(위 참고) |
 | 수정 성공 + 위험신호 재계산 실패 구분 | O | 해당 기능 자체가 없어 N/A |
 | 목록 조회에 페이지네이션 | O | ✅ `page`/`size`/`sort` 지원(위 참고) |
@@ -142,7 +142,7 @@
 
 1. 매매(SALE) 거래유형과 `askingPrice`가 아예 없음 — 전월세만 지원. 서비스 타겟에 맞춘 의도적 축소인지 확인
 2. ~~국토부 실거래가 연동 자체가 미구현~~ → `market-data` 도메인으로 해소됨(`market-data-design.md` 참고). 남은 건 매물 조회마다 실시간 재계산하는 구조라 트래픽 늘면 캐싱/저장 전환이 필요할 수 있다는 점
-3. ~~risk-analysis(위험 신호·안전성 정보) 도메인 자체는 별도로 존재하지만, 매물 상세 응답과는 아직 연동되어 있지 않음~~ → **목록 조회는 `checkSignalCount`/`signalSummary`/`jeonseRatio` 추가로 해소됨.** 상세 응답(`PropertyDetailResponse`)에는 여전히 연동되어 있지 않음(별도 엔드포인트로만 조회 가능) — 필요하면 후속 이슈로
+3. ~~risk-analysis(위험 신호·안전성 정보) 도메인 자체는 별도로 존재하지만, 매물 상세 응답과는 아직 연동되어 있지 않음~~ → **해소됨.** 목록은 `PropertyListResponse`에 `checkSignalCount`/`signalSummary`/`jeonseRatio`를 추가하는 방식으로, 상세는 FE가 `GET /risk-signals`·`GET /deposit-safety`를 별도로 호출하는 방식으로 각각 연동됨(BE `PropertyDetailResponse` 자체엔 필드가 없지만 실제 화면엔 정상 표시됨 — 위 상세조회 표 참고)
 4. ~~매물 상세 응답에 임장 체크리스트 생성 여부가 포함되지 않음~~ → `checklistCreated` 필드 추가로 해소됨
 5. ~~매물 상세 응답에 누적 신고 여부가 포함되지 않음~~ → `reported` 필드 추가로 해소됨(단, 아래 6번의 자가 플래그 구조라 "본인이 신고했는지" 기준)
 6. 매물 신고가 "본인 매물을 본인이 신고"하는 자가 플래그 구조 — 원래 의도(마켓플레이스식 신고였는지)를 확인 필요
