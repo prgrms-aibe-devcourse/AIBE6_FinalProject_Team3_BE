@@ -136,6 +136,7 @@
 - 목록 조회 응답이 `PageResponse<PropertyListResponse>`로 감싸지면서 `totalElements`/`totalPages`/`hasNext` 등 요구사항 문서엔 없던 페이지 메타정보가 함께 내려감
 - `PropertyListResponse`에 `checklistProgress`(Integer, 0~100 또는 null) 추가 — 목록 카드에서 매물별 임장 체크리스트 진행률을 보여주기 위함. `ChecklistItemRepository.findProgressByUserId(userId)`가 유저의 모든 체크리스트 문항을 `property.id` 기준 GROUP BY로 한 번에 집계해(`ChecklistProgressProjection`) 엔티티 로딩·N+1 없이 매물 개수와 무관하게 쿼리 1회로 끝남. 체크리스트를 아예 시작 안 한 매물은 null(분모가 없음), 시작했으면 반올림된 정수 퍼센트
 - `PropertyListResponse`에 `checkSignalCount`(Integer)/`signalSummary`(String)/`jeonseRatio`(Integer) 추가 — 목록 카드에서 매물별 위험신호 개수·전세가율을 보여주기 위함. `checklistProgress`와 동일하게 `PropertyRiskCheckRepository`/`PropertyRiskRepository`/`DepositSafetyCheckRepository`에 `findAllByProperty_UserId(userId)`를 추가해 유저 전체 매물을 한 번에 조회한 뒤 서비스 레이어에서 propertyId별로 묶는다. GROUP BY로 DB에서 직접 집계하지 않는 이유는 `signalSummary`가 여러 `PropertyRisk.description`을 이어붙인 문자열이라 GROUP_CONCAT류의 DB별 문법 차이(H2/MySQL)를 피하기 위함
+- `Property`에 `maintenanceFee`(Long, nullable) 컬럼 추가 — 요구사항 Entity 필드 목록(위 표 참고)엔 없던 관리비 항목. 선택 입력이라 `null`(관리비를 아예 안 물어봄)과 `0`(관리비 없음을 명시적으로 입력)을 구분해서 그대로 내려준다. `PropertyRegisterRequest`/`PropertyUpdateRequest`에 `@PositiveOrZero` 검증 필드로 추가되고, `PropertyListResponse`/`PropertyDetailResponse`에도 반영됨. `PropertyRegisterResponse`는 애초에 `deposit`/`monthlyRent`/`area`도 포함하지 않는 최소 응답이라 일관성을 위해 여기엔 추가하지 않음(등록 직후 값 확인은 상세조회로)
 
 ## 남은 이슈 / 확인 필요 총정리
 
