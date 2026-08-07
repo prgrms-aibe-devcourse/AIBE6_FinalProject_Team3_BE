@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.boot.DefaultApplicationArguments;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
@@ -102,6 +103,23 @@ class AdminAccountSeederTest {
         assertEquals(Role.USER, existing.getRole());
         assertEquals("real-user-password-hash", existing.getPasswordHash());
         verify(userRepository, never()).save(any(User.class));
+    }
+
+    // 회귀 테스트 - 닉네임 "관리자"를 이미 다른 실제 사용자가 쓰고 있으면 User.nickname의 전역
+    // 유니크 제약에 걸려 save()가 DataIntegrityViolationException을 던진다. ApplicationRunner에서
+    // 예외가 그대로 새어나가면 앱 기동 자체가 실패하므로, 이메일 충돌과 동일하게 경고만 남기고
+    // 기동은 계속돼야 한다.
+    @Test
+    @DisplayName("닉네임 '관리자'가 이미 다른 사용자의 것이어도 기동을 실패시키지 않는다")
+    void doesNotCrashStartupWhenNicknameAlreadyTaken() throws Exception {
+        enableWith("admin@algogyeyak.local");
+        when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.empty());
+        when(userRepository.save(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("nickname unique constraint"));
+
+        seeder.run(new DefaultApplicationArguments());
+
+        verify(userRepository).save(any(User.class));
     }
 
     @Test

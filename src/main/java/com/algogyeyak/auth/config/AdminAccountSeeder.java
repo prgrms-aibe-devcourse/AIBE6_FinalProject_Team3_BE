@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 /**
@@ -67,6 +68,19 @@ public class AdminAccountSeeder implements ApplicationRunner {
 
         User admin = User.createLocalUser(normalizedEmail, null, "관리자");
         admin.grantAdminRole();
-        userRepository.save(admin);
+
+        try {
+            userRepository.save(admin);
+        } catch (DataIntegrityViolationException e) {
+            // 닉네임 "관리자"가 이미(다른 실제 사용자가 가입 시점에 우연히 골랐거나) 존재하는 값이면
+            // User.nickname의 전역 유니크 제약에 걸린다. 이메일 충돌과 달리 이 예외를 그냥 흘려보내면
+            // ApplicationRunner의 예외는 앱 기동 자체를 실패시킨다 - dev-login이 시딩 실패 하나로
+            // 전체 배포를 막아서는 안 되므로, 이메일 충돌과 동일하게 경고만 남기고 계속 기동한다.
+            log.warn(
+                    "app.dev-login.email({})용 관리자 계정 시딩 실패 - 닉네임 '관리자'를 이미 다른 사용자가"
+                            + " 사용 중입니다. 그 사용자의 닉네임을 바꾸거나 이 계정을 수동으로 만든 뒤 다시"
+                            + " 기동해야 dev-login을 쓸 수 있습니다.",
+                    normalizedEmail, e);
+        }
     }
 }
