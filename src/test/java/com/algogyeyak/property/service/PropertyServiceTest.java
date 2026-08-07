@@ -36,6 +36,9 @@ import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.event.PropertyUpdatedEvent;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
+import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
+import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
+import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.IntStream;
@@ -73,6 +76,15 @@ class PropertyServiceTest {
     private PropertyReportRepository propertyReportRepository;
 
     @Mock
+    private PropertyRiskRepository propertyRiskRepository;
+
+    @Mock
+    private PropertyRiskCheckRepository propertyRiskCheckRepository;
+
+    @Mock
+    private DepositSafetyCheckRepository depositSafetyCheckRepository;
+
+    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private PropertyService propertyService;
@@ -83,7 +95,9 @@ class PropertyServiceTest {
     void setUp() {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
-                checklistRepository, checklistItemRepository, propertyReportRepository, eventPublisher
+                checklistRepository, checklistItemRepository, propertyReportRepository,
+                propertyRiskRepository, propertyRiskCheckRepository, depositSafetyCheckRepository,
+                eventPublisher
         );
     }
 
@@ -107,6 +121,7 @@ class PropertyServiceTest {
                 30_000_000L,
                 null,
                 23.5,
+                null,
                 "역세권 오피스텔",
                 List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.jpg", null))
         );
@@ -125,6 +140,38 @@ class PropertyServiceTest {
         assertThat(response.address().latitude()).isEqualTo(37.4995539438207);
         assertThat(response.marketComparison().status()).isEqualTo("UNAVAILABLE");
         assertThat(response.notice()).isNull();
+        // 등록 직후에도 update()와 동일하게 위험 신호·전세가율 계산을 risk-analysis에 위임한다 - 이
+        // 이벤트가 없으면 등록 직후 목록/상세에서 checkSignalCount/jeonseRatio가 계속 null로 남는다.
+        verify(eventPublisher).publishEvent(any(PropertyUpdatedEvent.class));
+    }
+
+    @Test
+    void 관리비를_입력하면_등록_응답에_반영된다() {
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                150_000L,
+                "역세권 오피스텔",
+                null
+        );
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
+        )).thenReturn(false);
+        when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        propertyService.register(USER_ID, request);
+
+        org.mockito.ArgumentCaptor<Property> captor = org.mockito.ArgumentCaptor.forClass(Property.class);
+        verify(propertyRepository).save(captor.capture());
+        assertThat(captor.getValue().getMaintenanceFee()).isEqualTo(150_000L);
     }
 
     @Test
@@ -137,6 +184,7 @@ class PropertyServiceTest {
                 30_000_000L,
                 null,
                 23.5,
+                null,
                 null,
                 null
         );
@@ -158,6 +206,7 @@ class PropertyServiceTest {
                 30_000_000L,
                 null,
                 23.5,
+                null,
                 null,
                 null
         );
@@ -181,6 +230,7 @@ class PropertyServiceTest {
                 200_000_000L,
                 null,
                 50.0,
+                null,
                 null,
                 null
         );
@@ -212,6 +262,7 @@ class PropertyServiceTest {
                 200_000_000L,
                 null,
                 50.0,
+                null,
                 null,
                 null
         );
@@ -247,6 +298,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
+                null,
                 List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.bmp", null))
         );
 
@@ -266,6 +318,7 @@ class PropertyServiceTest {
                 30_000_000L,
                 null,
                 23.5,
+                null,
                 null,
                 List.of(new PropertyImageRequest("ftp://cdn.algogyeyak.com/img/abc.jpg", null))
         );
@@ -290,6 +343,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
+                null,
                 tooManyImages
         );
 
@@ -310,6 +364,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
+                null,
                 null
         );
 
@@ -328,6 +383,7 @@ class PropertyServiceTest {
                 500_000L,
                 23.5,
                 null,
+                null,
                 null
         );
 
@@ -345,6 +401,7 @@ class PropertyServiceTest {
                 .deposit(30_000_000L)
                 .monthlyRent(null)
                 .area(23.5)
+                .maintenanceFee(50_000L)
                 .description("역세권 오피스텔")
                 .build();
         PropertyAddress address = PropertyAddress.builder()
@@ -367,6 +424,7 @@ class PropertyServiceTest {
 
         assertThat(result.content()).hasSize(1);
         assertThat(result.content().get(0).roadAddress()).isEqualTo("서울특별시 강남구 테헤란로 123");
+        assertThat(result.content().get(0).maintenanceFee()).isEqualTo(50_000L);
         assertThat(result.content().get(0).transactionType()).isEqualTo("JEONSE");
         assertThat(result.totalElements()).isEqualTo(1);
         assertThat(result.hasNext()).isFalse();
@@ -449,6 +507,92 @@ class PropertyServiceTest {
         assertThat(result.content()).hasSize(2);
         assertThat(result.content().get(0).checklistProgress()).isEqualTo(75);
         assertThat(result.content().get(1).checklistProgress()).isNull();
+    }
+
+    @Test
+    void 매물_목록조회_응답에_확인_필요_신호_개수와_요약이_매물별로_포함된다() {
+        Property checkedWithRisks = Property.builder()
+                .userId(USER_ID).title("리스크 있는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(30_000_000L).area(23.5).build();
+        ReflectionTestUtils.setField(checkedWithRisks, "id", 1L);
+
+        Property checkedClean = Property.builder()
+                .userId(USER_ID).title("이상 없는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(20_000_000L).area(18.0).build();
+        ReflectionTestUtils.setField(checkedClean, "id", 2L);
+
+        Property neverChecked = Property.builder()
+                .userId(USER_ID).title("미검사 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(15_000_000L).area(15.0).build();
+        ReflectionTestUtils.setField(neverChecked, "id", 3L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(checkedWithRisks, checkedClean, neverChecked), pageable, 3));
+
+        // checkedWithRisks/checkedClean은 4종 신호 판정이 이미 돌았다는 것만 표시하면 되므로 신호 하나씩만 둔다.
+        when(propertyRiskCheckRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
+                com.algogyeyak.riskanalysis.entity.PropertyRiskCheck.success(
+                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "v1.0"),
+                com.algogyeyak.riskanalysis.entity.PropertyRiskCheck.success(
+                        checkedClean, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "v1.0")
+        ));
+        when(propertyRiskRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
+                com.algogyeyak.riskanalysis.entity.PropertyRisk.of(
+                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "시세 대비 높은 가격"),
+                com.algogyeyak.riskanalysis.entity.PropertyRisk.of(
+                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.DUPLICATE_LISTING, "유사 주소 중복")
+        ));
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content()).hasSize(3);
+        assertThat(result.content().get(0).checkSignalCount()).isEqualTo(2);
+        assertThat(result.content().get(0).signalSummary()).isEqualTo("시세 대비 높은 가격, 유사 주소 중복");
+        assertThat(result.content().get(1).checkSignalCount()).isEqualTo(0);
+        assertThat(result.content().get(1).signalSummary()).isNull();
+        assertThat(result.content().get(2).checkSignalCount()).isNull();
+        assertThat(result.content().get(2).signalSummary()).isNull();
+    }
+
+    @Test
+    void 매물_목록조회_응답에_전세가율이_계산완료된_매물만_포함된다() {
+        Property calculated = Property.builder()
+                .userId(USER_ID).title("전세가율 계산된 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(30_000_000L).area(23.5).build();
+        ReflectionTestUtils.setField(calculated, "id", 1L);
+
+        Property unavailable = Property.builder()
+                .userId(USER_ID).title("판정불가 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.MONTHLY_RENT).deposit(10_000_000L).monthlyRent(500_000L).area(18.0).build();
+        ReflectionTestUtils.setField(unavailable, "id", 2L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(calculated, unavailable), pageable, 2));
+
+        when(depositSafetyCheckRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
+                com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.calculated(
+                        calculated, new java.math.BigDecimal("85.00"), null, null,
+                        java.time.LocalDate.of(2026, 6, 20), "설명", "v1.0"),
+                com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.unavailable(
+                        unavailable, null, null,
+                        com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason.TRANSACTION_TYPE_UNSUPPORTED, "v1.0")
+        ));
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content()).hasSize(2);
+        assertThat(result.content().get(0).jeonseRatio()).isEqualTo(85);
+        assertThat(result.content().get(1).jeonseRatio()).isNull();
     }
 
     @Test
@@ -576,6 +720,7 @@ class PropertyServiceTest {
                 .deposit(30_000_000L)
                 .monthlyRent(null)
                 .area(23.5)
+                .maintenanceFee(80_000L)
                 .description("역세권 오피스텔")
                 .build();
         property.assignAddress(resolvedPropertyAddress());
@@ -592,6 +737,7 @@ class PropertyServiceTest {
         assertThat(response.marketComparison().status()).isEqualTo("UNAVAILABLE");
         assertThat(response.checklistCreated()).isFalse();
         assertThat(response.reported()).isFalse();
+        assertThat(response.maintenanceFee()).isEqualTo(80_000L);
     }
 
     @Test
@@ -666,7 +812,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, "수정된 설명", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, "수정된 설명", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -682,10 +828,35 @@ class PropertyServiceTest {
     }
 
     @Test
+    void 관리비를_수정하면_변경된_값이_반영된_응답을_반환한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .maintenanceFee(100_000L)
+                .description("역세권 오피스텔")
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 30_000_000L, null, 23.5, 200_000L, "역세권 오피스텔", null);
+
+        PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
+
+        assertThat(response.maintenanceFee()).isEqualTo(200_000L);
+    }
+
+    @Test
     void 존재하지_않는_매물을_수정하면_예외가_발생한다() {
         when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 999L, request))
                 .isInstanceOf(BusinessException.class);
@@ -708,7 +879,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
@@ -730,7 +901,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);

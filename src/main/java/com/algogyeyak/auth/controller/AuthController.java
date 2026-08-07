@@ -25,9 +25,13 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -37,16 +41,22 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Optional;
 
 @Tag(name = "Auth", description = "회원가입, 로그인(로컬/소셜), 토큰 재발급, 비밀번호 관리 API")
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final CookieUtils cookieUtils;
     private final UserRepository userRepository;
@@ -60,6 +70,22 @@ public class AuthController {
 
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
+
+    // 운영에서도 devLoginEnabled를 켤 수 있게 되면서(스위치 하나만으로는 "아무나" 이 엔드포인트를
+    // 호출해 admin이 될 수 있다) 추가한 공유 비밀 값 — 이 값을 아는 사람만 dev-login을 쓸 수 있다.
+    @Value("${app.dev-login.secret:}")
+    private String devLoginSecret;
+
+    // enabled=true인데 secret이 비어있으면, 스위치만 켜졌을 뿐 아무런 잠금도 없는 상태로 조용히
+    // 뜬다 - JWT_SECRET 등과 같은 이유로 이 조합은 기동 자체를 막는다(운영 배포 시 DEV_LOGIN_ENABLED만
+    // 켜고 DEV_LOGIN_SECRET을 깜빡하는 실수를 막기 위함).
+    @PostConstruct
+    private void validateDevLoginConfig() {
+        if (devLoginEnabled && !StringUtils.hasText(devLoginSecret)) {
+            throw new IllegalStateException(
+                    "app.dev-login.enabled=true requires app.dev-login.secret to be set");
+        }
+    }
 
     public AuthController(
             CookieUtils cookieUtils,
@@ -113,7 +139,18 @@ public class AuthController {
     public ResponseEntity<ApiResponse<MeResponse>> signup(
             @Valid @RequestBody SignupRequest request, HttpServletResponse response) {
         User user = localAuthService.signup(request.getEmail(), request.getPassword(), request.getNickname());
-        issueAuthCookies(response, user);
+        try {
+            issueAuthCookies(response, user);
+        } catch (BusinessException e) {
+            // signup()은 방금 User를 REQUIRES_NEW로 이미 커밋했다 - refresh token 발급(Redis 장애
+            // 등)이 실패해도 access 쿠키는 issueAuthCookies()가 지워주지만, 계정 자체는 세션 없이
+            // 그대로 남는다. 이 상태에서 재시도하면 AUTH_EMAIL_ALREADY_EXISTS로 막혀 사용자가 같은
+            // 이메일로 다시 가입도 로그인도 시도하기 어려워진다 - 방금 이 요청에서 만든 계정임이
+            // 확실하므로, 실패로 확정하는 이 경로에서 함께 되돌려 재시도 시 처음부터 깨끗하게
+            // 다시 가입할 수 있게 한다.
+            localAuthService.deleteNewlyCreatedUserAfterSessionSetupFailure(user.getId());
+            throw e;
+        }
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(toMeResponse(user)));
     }
 
@@ -167,12 +204,15 @@ public class AuthController {
     }
 
     // 개발 편의용 "관리자로 로그인" 버튼. AdminAccountSeeder가 만들어둔 admin 계정으로 자격 증명
-    // 없이 바로 로그인시킨다 — devLoginEnabled가 false(운영 등)면 엔드포인트가 존재하는지조차
-    // 드러내지 않도록 404로 응답한다.
+    // 없이 바로 로그인시킨다 — devLoginEnabled가 false(운영 등)면, 그리고 key가 devLoginSecret과
+    // 일치하지 않으면 엔드포인트가 존재하는지조차 드러내지 않도록 둘 다 동일하게 404로 응답한다.
+    // key는 쿼리 파라미터가 아니라 헤더로 받는다 - 쿼리스트링은 서버 액세스 로그, 프록시/LB 로그,
+    // APM, 브라우저 히스토리 등에 평문으로 남기 쉬워 공유 비밀값을 싣기에 적절하지 않다.
     @Hidden
     @PostMapping("/dev-login")
-    public ResponseEntity<ApiResponse<MeResponse>> devLogin(HttpServletResponse response) {
-        if (!devLoginEnabled) {
+    public ResponseEntity<ApiResponse<MeResponse>> devLogin(
+            @RequestHeader(value = "X-Dev-Login-Key", required = false) String key, HttpServletResponse response) {
+        if (!devLoginEnabled || !constantTimeEquals(devLoginSecret, key)) {
             throw new BusinessException(ErrorCode.NOT_FOUND);
         }
 
@@ -182,6 +222,19 @@ public class AuthController {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         issueAuthCookies(response, user);
         return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
+    }
+
+    // String.equals는 첫 불일치 문자에서 바로 리턴해 비교 시간이 일치한 접두 길이에 약하게
+    // 비례한다 - 공유 비밀값(devLoginSecret) 검증에는 CookieUtils의 HMAC 검증과 동일하게
+    // MessageDigest.isEqual(상수 시간 비교)을 쓴다. key가 아예 없으면(헤더 미전송) 바이트 비교
+    // 자체를 하지 않고 바로 false로 처리한다.
+    private boolean constantTimeEquals(String expected, String actual) {
+        if (actual == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                expected.getBytes(StandardCharsets.UTF_8),
+                actual.getBytes(StandardCharsets.UTF_8));
     }
 
     @Operation(summary = "로그아웃", description = "refresh_token 쿠키가 있으면 서버에서 즉시 무효화(revoke)하고, access token(access_token 쿠키 또는 Authorization: Bearer 헤더)이 있으면 그 jti를 만료 시각까지 블랙리스트에 등록해 남은 유효기간 동안에도 즉시 무효화한다. 이후 access/refresh 쿠키를 삭제한다. 아무것도 없어도(이미 만료/삭제된 경우 등) 항상 200으로 성공 처리되므로 필수 인증 요구사항으로 문서화하지 않는다.")
@@ -216,7 +269,9 @@ public class AuthController {
                     .toLocalDateTime();
             accessTokenRevocationService.revoke(claims.getId(), expiresAt);
         } catch (JwtException | IllegalArgumentException e) {
-            // 무시: 이미 무효한 토큰이라 블랙리스트에 올릴 대상이 없다.
+            // 무시: 이미 무효한 토큰이라 블랙리스트에 올릴 대상이 없다. 로그아웃 자체는 계속
+            // 진행되므로 warn/error는 과하고, 원인 진단이 필요할 때 확인할 수 있게 debug만 남긴다.
+            log.debug("로그아웃 시 access token 무효화를 건너뜁니다(이미 무효한 토큰)", e);
         }
     }
 
@@ -228,11 +283,34 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Redis 장애로 refresh token 저장소에 연결할 수 없음 (AUTH_TOKEN_STORE_UNAVAILABLE)")
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<Void>> refresh(HttpServletRequest request, HttpServletResponse response) {
-        String rawRefreshToken = CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
-                .map(cookie -> cookie.getValue())
-                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_MISSING));
+        Optional<String> rawRefreshToken = CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
+                .map(Cookie::getValue);
+        if (rawRefreshToken.isEmpty()) {
+            // refresh 쿠키가 아예 없는 것도 AUTH_REFRESH_TOKEN_INVALID와 같은 성격의 확정 실패다 -
+            // access 쿠키만 자연 만료 전까지 남아있으면(예: 다른 탭 로그아웃으로 refresh만 지워진
+            // 상태) 반쪽 세션처럼 보일 수 있다. cross-origin 배포에서는 프론트가 이 httpOnly
+            // 쿠키를 직접 지울 수 없으므로 여기서 지워야 한다.
+            cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
+            throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_MISSING);
+        }
 
-        RefreshTokenService.RotationResult result = refreshTokenService.rotate(rawRefreshToken);
+        RefreshTokenService.RotationResult result;
+        try {
+            result = refreshTokenService.rotate(rawRefreshToken.get());
+        } catch (BusinessException e) {
+            // 확정적으로 무효한 토큰(AUTH_REFRESH_TOKEN_INVALID)일 때만 쿠키를 지운다 - Redis 장애로
+            // 인한 AUTH_TOKEN_STORE_UNAVAILABLE(503)은 토큰이 실제로 무효한지 알 수 없는 상태이므로
+            // 지우면 안 된다(장애가 걷힌 뒤에도 재로그인이 강제됨). cross-origin 배포에서는 프론트가
+            // 이 쿠키들을 직접 지울 수 없으므로(백엔드 도메인 전용 httpOnly), 여기서 지워주지 않으면
+            // 무효화된 refresh_token이 만료 시점까지 그대로 남아 매번 같은 401을 반복하게 된다. access
+            // 쿠키도 함께 지운다 - 아직 자연 만료 전에 이 refresh가 불렸을 수도 있어(예: 다른 탭에서
+            // 로그아웃), access만 남기면 그 쿠키가 만료될 때까지 반쪽 세션처럼 보일 수 있다.
+            if (e.getErrorCode() == ErrorCode.AUTH_REFRESH_TOKEN_INVALID) {
+                cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
+                cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
+            }
+            throw e;
+        }
         User user = result.user();
 
         String accessToken = jwtProvider.createAccessToken(user.getId(), user.getEmail(), user.getRole());
@@ -260,6 +338,12 @@ public class AuthController {
             // Set-Cookie 헤더는 지우지 않으므로, OAuth2AuthenticationSuccessHandler와 동일하게
             // 실패로 확정하는 이 경로에서 access 쿠키를 지워 깨끗한 상태로 되돌린다.
             cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
+            // 이번 로그인/가입 시도에서 새로 발급한 적은 없지만, 브라우저에 이전 세션의
+            // refresh_token 쿠키가 그대로 남아있을 수 있다(재로그인 시도, 여러 탭 등) - 그대로
+            // 두면 사용자는 "로그인 실패"를 봤는데 나중에 Redis가 복구된 뒤 그 옛 refresh_token으로
+            // /auth/refresh가 조용히 성공해 예전 세션이 되살아나는 혼란스러운 상태가 된다. 실패로
+            // 확정하는 이 경로에서 있을지 모르는 옛 refresh 쿠키도 함께 지워 깨끗한 상태로 만든다.
+            cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
             throw e;
         }
     }

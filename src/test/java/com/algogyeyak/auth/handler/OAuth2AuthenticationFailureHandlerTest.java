@@ -4,6 +4,7 @@ import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
@@ -21,15 +22,76 @@ class OAuth2AuthenticationFailureHandlerTest {
             new OAuth2AuthenticationFailureHandler(authorizationRequestRepository);
 
     @Test
-    void clearsAuthorizationRequestCookieAndRedirectsWithGenericErrorCode() throws Exception {
+    void redirectsWithTheSpecificOAuth2ErrorCode() throws Exception {
         ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login");
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
-        AuthenticationException exception = new OAuth2AuthenticationException(new OAuth2Error("access_denied"));
+        // CustomOAuth2UserService가 만드는 구체적인 코드(account_blocked/email_conflict 등)를 그대로
+        // 전달해야, 프론트가 "정지된 계정"과 "알 수 없는 오류"를 구분해 보여줄 수 있다 - 예전엔 이
+        // 코드와 무관하게 항상 oauth_login_failed로 덮어썼다.
+        AuthenticationException exception = new OAuth2AuthenticationException(new OAuth2Error("account_blocked"));
+
+        handler.onAuthenticationFailure(request, response, exception);
+
+        verify(authorizationRequestRepository).removeAuthorizationRequest(request, response);
+        assertEquals("https://example.com/login?error=account_blocked", response.getRedirectedUrl());
+    }
+
+    @Test
+    void fallsBackToGenericErrorCodeWhenExceptionIsNotAnOAuth2AuthenticationException() throws Exception {
+        ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AuthenticationException exception = new BadCredentialsException("some other auth failure");
 
         handler.onAuthenticationFailure(request, response, exception);
 
         verify(authorizationRequestRepository).removeAuthorizationRequest(request, response);
         assertEquals("https://example.com/login?error=oauth_login_failed", response.getRedirectedUrl());
+    }
+
+    @Test
+    void forwardsAccountBlockedErrorCodeInsteadOfGenericOne() throws Exception {
+        // CustomOAuth2UserService.rejectIfBlocked()가 만드는 account_blocked를 이 핸들러가 전부
+        // oauth_login_failed로 뭉개면, frontend(login/page.tsx)가 이미 준비해둔 "정지된 계정입니다"
+        // 안내가 화면까지 전혀 도달하지 못한다.
+        ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AuthenticationException exception = new OAuth2AuthenticationException(new OAuth2Error("account_blocked"));
+
+        handler.onAuthenticationFailure(request, response, exception);
+
+        assertEquals("https://example.com/login?error=account_blocked", response.getRedirectedUrl());
+    }
+
+    @Test
+    void forwardsEmailConflictErrorCodeInsteadOfGenericOne() throws Exception {
+        // CustomOAuth2UserService.createUser()의 복구 실패 분기가 만드는 email_conflict도
+        // 마찬가지로 화면까지 그대로 전달돼야 한다.
+        ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AuthenticationException exception = new OAuth2AuthenticationException(new OAuth2Error("email_conflict"));
+
+        handler.onAuthenticationFailure(request, response, exception);
+
+        assertEquals("https://example.com/login?error=email_conflict", response.getRedirectedUrl());
+    }
+
+    @Test
+    void forwardsSocialAccountConflictErrorCodeInsteadOfGenericOne() throws Exception {
+        // CustomOAuth2UserService.linkNewSocialAccount()가 uk_social_user_provider 위반을 감싸
+        // 만드는 social_account_conflict도 화면까지 그대로 전달돼야 한다 - 화이트리스트에만 넣고
+        // frontend(login/page.tsx)의 ERROR_MESSAGES에 빠뜨린 적이 있어(2026-08-07), 그 회귀를
+        // 이 테스트가 잡는다.
+        ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AuthenticationException exception = new OAuth2AuthenticationException(new OAuth2Error("social_account_conflict"));
+
+        handler.onAuthenticationFailure(request, response, exception);
+
+        assertEquals("https://example.com/login?error=social_account_conflict", response.getRedirectedUrl());
     }
 }

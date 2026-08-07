@@ -19,6 +19,8 @@ import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import com.algogyeyak.riskanalysis.signal.SignalDetector;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -26,7 +28,9 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,7 +45,7 @@ class FakeListingSignalServiceTest {
     private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
     private final FakeListingSignalService service = new FakeListingSignalService(
             List.of(mock(SignalDetector.class)), marketDataClient, riskCheckRepository, riskRepository,
-            propertyRepository, depositSafetyCheckService, policyConfig);
+            propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
 
     private Property property(Long id, Long ownerId) {
         Property property = Property.builder()
@@ -138,6 +142,66 @@ class FakeListingSignalServiceTest {
     }
 
     @Test
+    @DisplayName("PropertyRiskCheck 동시 insert로 유니크 제약을 위반하면 재조회해서 덮어쓰는 방식으로 복구한다")
+    void upsertCheckRecoversFromConcurrentInsertRace() {
+        Property property = property(10L, 1L);
+        com.algogyeyak.riskanalysis.signal.SignalDetector detector = mock(com.algogyeyak.riskanalysis.signal.SignalDetector.class);
+        when(detector.isEnabled()).thenReturn(true);
+        when(detector.type()).thenReturn(RiskSignalType.PRICE_ANOMALY);
+        when(detector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.undeterminable(com.algogyeyak.riskanalysis.enums.RiskCheckReason.NO_COMPARABLE_TRANSACTION));
+
+        FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
+                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        // 첫 조회 시점엔 아직 아무도 없다고 나오지만(레이스), saveAndFlush 시도 시 다른 트랜잭션이
+        // 먼저 커밋해서 유니크 제약 위반이 난다 - 재조회하면 그 사이 커밋된 행이 보인다.
+        when(riskCheckRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.PRICE_ANOMALY))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(PropertyRiskCheck.success(property, RiskSignalType.PRICE_ANOMALY, "v1.0")));
+        // 첫 saveAndFlush(신규 insert)만 유니크 제약 위반으로 실패하고, 복구 과정에서 재조회한
+        // 기존 행을 저장하는 두 번째 saveAndFlush(update)는 정상 처리된다 - 실제로도 update는
+        // insert와 달리 이 유니크 제약에 걸릴 이유가 없다.
+        when(riskCheckRepository.saveAndFlush(any(PropertyRiskCheck.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"))
+                .thenReturn(null);
+
+        serviceWithDetector.checkAndSave(property);
+
+        // 예외가 밖으로 안 새어 나오면 성공 - 재조회한 기존 행에 overwrite()로 복구됐다는 뜻.
+        verify(riskCheckRepository, times(2)).saveAndFlush(any(PropertyRiskCheck.class));
+    }
+
+    @Test
+    @DisplayName("PropertyRisk 동시 insert로 유니크 제약을 위반하면 재조회해서 덮어쓰는 방식으로 복구한다")
+    void upsertRiskRecoversFromConcurrentInsertRace() {
+        Property property = property(10L, 1L);
+        com.algogyeyak.riskanalysis.signal.SignalDetector detector = mock(com.algogyeyak.riskanalysis.signal.SignalDetector.class);
+        when(detector.isEnabled()).thenReturn(true);
+        when(detector.type()).thenReturn(RiskSignalType.DUPLICATE_LISTING);
+        when(detector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.success("동일 주소로 등록된 다른 매물이 있어요"));
+
+        FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
+                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        when(riskCheckRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.DUPLICATE_LISTING))
+                .thenReturn(Optional.empty());
+        when(riskRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.DUPLICATE_LISTING))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(PropertyRisk.of(property, RiskSignalType.DUPLICATE_LISTING, "동일 주소로 등록된 다른 매물이 있어요")));
+        when(riskRepository.saveAndFlush(any(PropertyRisk.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"))
+                .thenReturn(null);
+
+        serviceWithDetector.checkAndSave(property);
+
+        verify(riskRepository, times(2)).saveAndFlush(any(PropertyRisk.class));
+    }
+
+    @Test
     @DisplayName("checkAndSave(userId, propertyId)는 존재하지 않는 매물이면 PROPERTY_NOT_FOUND 예외가 발생한다")
     void checkAndSaveWithOwnerCheckThrowsWhenPropertyNotFound() {
         when(propertyRepository.findById(10L)).thenReturn(Optional.empty());
@@ -175,6 +239,12 @@ class FakeListingSignalServiceTest {
                 );
     }
 
+    // checkAndSummarize()는 더 이상 저장 직후 riskCheckRepository/riskRepository를 재조회해서
+    // signalCount를 만들지 않는다(REQUIRES_NEW로 커밋된 신규 행이 MySQL REPEATABLE READ 하에서
+    // 같은 트랜잭션의 재조회에 안 보일 수 있는 문제 때문 - FakeListingSignalService.checkAndSummarize()
+    // 주석 참고). 대신 checkAndSave()가 감지기 판정 결과를 그 자리에서 직접 세어 반환한 값을 그대로
+    // 쓰므로, 아래 두 테스트는 repository mock이 아니라 감지기(SignalDetector) mock으로 시나리오를
+    // 구성한다.
     @Test
     @DisplayName("checkAndSummarize()는 실행 후 리스크가 발견된 신호 개수와 정책 버전을 요약해 반환한다")
     void checkAndSummarizeReturnsSignalCountAndPolicyVersion() {
@@ -182,13 +252,22 @@ class FakeListingSignalServiceTest {
         Property property = property(10L, 1L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
 
-        PropertyRiskCheck foundCheck = PropertyRiskCheck.success(property, RiskSignalType.DUPLICATE_LISTING, "v1.0");
-        PropertyRisk foundRisk = PropertyRisk.of(property, RiskSignalType.DUPLICATE_LISTING, "동일 주소로 등록된 다른 매물이 있어요");
-        PropertyRiskCheck cleanCheck = PropertyRiskCheck.success(property, RiskSignalType.SHORT_TERM_RELISTING, "v1.0");
-        when(riskCheckRepository.findAllByPropertyId(10L)).thenReturn(List.of(foundCheck, cleanCheck));
-        when(riskRepository.findAllByPropertyId(10L)).thenReturn(List.of(foundRisk));
+        SignalDetector foundDetector = mock(SignalDetector.class);
+        when(foundDetector.isEnabled()).thenReturn(true);
+        when(foundDetector.type()).thenReturn(RiskSignalType.DUPLICATE_LISTING);
+        when(foundDetector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.success("동일 주소로 등록된 다른 매물이 있어요"));
+        SignalDetector cleanDetector = mock(SignalDetector.class);
+        when(cleanDetector.isEnabled()).thenReturn(true);
+        when(cleanDetector.type()).thenReturn(RiskSignalType.SHORT_TERM_RELISTING);
+        when(cleanDetector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.success(null));
 
-        RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
+        FakeListingSignalService serviceWithDetectors = new FakeListingSignalService(
+                List.of(foundDetector, cleanDetector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        RiskAnalysisSummaryResponse result = serviceWithDetectors.checkAndSummarize(1L, 10L);
 
         assertThat(result.propertyId()).isEqualTo(10L);
         assertThat(result.signalCount()).isEqualTo(1);
@@ -203,11 +282,17 @@ class FakeListingSignalServiceTest {
         Property property = property(10L, 1L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
 
-        PropertyRiskCheck cleanCheck = PropertyRiskCheck.success(property, RiskSignalType.DUPLICATE_LISTING, "v1.0");
-        when(riskCheckRepository.findAllByPropertyId(10L)).thenReturn(List.of(cleanCheck));
-        when(riskRepository.findAllByPropertyId(10L)).thenReturn(List.of());
+        SignalDetector cleanDetector = mock(SignalDetector.class);
+        when(cleanDetector.isEnabled()).thenReturn(true);
+        when(cleanDetector.type()).thenReturn(RiskSignalType.DUPLICATE_LISTING);
+        when(cleanDetector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.success(null));
 
-        RiskAnalysisSummaryResponse result = service.checkAndSummarize(1L, 10L);
+        FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
+                List.of(cleanDetector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        RiskAnalysisSummaryResponse result = serviceWithDetector.checkAndSummarize(1L, 10L);
 
         assertThat(result.propertyId()).isEqualTo(10L);
         assertThat(result.signalCount()).isEqualTo(0);

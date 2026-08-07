@@ -15,6 +15,7 @@ import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.user.service.AdminUserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -31,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 관리자 전용 유저 관리 API. /admin/** 는 SecurityConfig에서 ROLE_ADMIN으로만 접근 가능하도록 막혀있다.
  */
+@Slf4j
 @RestController
 @RequestMapping("/admin/users")
 @RequiredArgsConstructor
@@ -62,7 +64,12 @@ public class AdminUserController {
             @Valid @RequestBody AdminUserRoleUpdateRequest request
     ) {
         rejectSelf(principal, userId);
-        return ResponseEntity.ok(ApiResponse.success(adminUserService.updateRole(userId, request.role())));
+        AdminUserDetailResponse result = adminUserService.updateRole(userId, request.role());
+        // 감사 로그: 권한 변경(특히 USER→ADMIN 승격)은 누가 언제 누구에게 했는지 추적 가능해야 한다 -
+        // 별도 DB 감사 테이블은 없으므로 최소한 로그로는 남긴다.
+        log.info("관리자 액션: actorId={} action=UPDATE_ROLE targetUserId={} newRole={}",
+                principal.userId(), userId, request.role());
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 
     @PatchMapping("/{userId}/status")
@@ -72,7 +79,10 @@ public class AdminUserController {
             @Valid @RequestBody AdminUserStatusUpdateRequest request
     ) {
         rejectSelf(principal, userId);
-        return ResponseEntity.ok(ApiResponse.success(adminUserService.updateStatus(userId, request.status())));
+        AdminUserDetailResponse result = adminUserService.updateStatus(userId, request.status());
+        log.info("관리자 액션: actorId={} action=UPDATE_STATUS targetUserId={} newStatus={}",
+                principal.userId(), userId, request.status());
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 
     // 관리자가 실수로 자기 자신의 권한을 강등하거나 자기 자신을 정지시켜 스스로를 잠그는 사고를 막는다.

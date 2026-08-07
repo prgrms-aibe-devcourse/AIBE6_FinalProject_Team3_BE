@@ -2,20 +2,32 @@
 
 ## 배경 / 성격
 
-다른 문서들과 같은 방식의 **회고성(retroactive) 문서**입니다. 이 도메인은 다른 팀원(CLAUDE.md 기준 담당: 송민혁)이 구현 중인 파트라, 담당자 확인이 필요한 부분은 **⚠️ 확인 필요**로 표시했습니다. CLAUDE.md에 "진행 중"이라고 명시되어 있는 만큼, 여기서 다루는 미구현 항목 다수는 **버그가 아니라 아직 순서가 안 온 작업**일 가능성이 높습니다.
+다른 문서들과 같은 방식의 **회고성(retroactive) 문서**입니다. 이 도메인은 담당자(CLAUDE.md 기준: 송민혁)가 직접 최신화했습니다(2026-08-07). 이전 버전은 `/analyze`가 구현되기 전 시점에 작성되어 있어 이후 진행분(AI 분석, Q&A 챗봇, 환각 검증 보강 등)이 반영되어 있지 않았습니다 — 이번 갱신으로 코드 기준 현재 상태를 다시 정리했습니다.
 
-**범위**: `com.algogyeyak.contractanalysis.*`(계약 문구 입력/OCR/마스킹/AI 분석)만 다룹니다.
+**범위**: `com.algogyeyak.contractanalysis.*`(계약 문구 입력/OCR/마스킹/AI 분석/Q&A 챗봇)만 다룹니다. 다른 도메인(예: 매물 소유권 검증에 필요한 `Property`)에 대한 판단은 이 문서의 범위 밖이라 다루지 않습니다.
+
+## 파이프라인 — 요구사항 4단계 대비 실제 5개 엔드포인트
+
+요구사항은 입력→OCR→마스킹→AI분석 4단계였지만, 실제로는 분석 결과에 대한 후속 질문을 처리하는 **`POST /contract-analysis/chat`**이 추가로 구현되어 있습니다(요구사항 문서 작성 이후 추가된 기능).
+
+| 순서 | 엔드포인트 | 상태 |
+|---|---|---|
+| 1 | `POST /contract-analysis/inputs` | ✅ 구현 |
+| 2 | `POST /contract-analysis/ocr` | ✅ 구현 |
+| 3 | `POST /contract-analysis/masking` | ✅ 구현 |
+| 4 | `POST /contract-analysis/analyze` | ✅ 구현 |
+| 5 (요구사항 외 추가) | `POST /contract-analysis/chat` | ✅ 구현 |
 
 ## 주요 Entity — 요구사항 대비 실제
 
-요구사항의 4개 "Entity"는 애초에 **영구 저장 대상이 아니라 요청/응답을 표현하는 모델**입니다(요구사항 본문에도 "장기 저장 목적으로 저장하지 않는다"고 명시). 실제 구현도 이와 일치하게 JPA 엔티티가 아니라 DTO(record)로만 존재합니다.
+요구사항의 "Entity"들은 애초에 **영구 저장 대상이 아니라 요청/응답을 표현하는 모델**입니다(요구사항 본문에도 "장기 저장 목적으로 저장하지 않는다"고 명시). 실제 구현도 이와 일치하게 JPA 엔티티가 아니라 DTO(record)로만 존재합니다.
 
 | 요구사항 Entity | 실제 대응 |
 |---|---|
-| `ContractAnalysisRequest`(userId, propertyId, inputType, maskedText) | `ContractAnalysisInputRequest`/`ContractAnalysisInputResponse` — 입력 단계 DTO. `maskedText`는 이후 마스킹 단계 응답에 별도로 존재 |
-| `OcrResult`(extractedText, confidence, status) | `ContractAnalysisOcrResponse`(extractedText, confidence, editable) — `status` 대신 `editable`(항상 true) |
-| `ClauseAnalysisResult`(originalText, riskFlag, explanation, question, suggestedText) | ❌ **대응하는 코드가 없습니다** — AI 분석 단계 자체가 미구현이라 이 모델을 표현하는 DTO도 아직 없음 |
-| `ContractAnalysisResponse`(summary, clauses, disclaimer, aiGeneratedNotice, status) | ❌ **대응하는 코드가 없음** — 위와 동일한 이유 |
+| `ContractAnalysisRequest`(userId, propertyId, inputType, maskedText) | `ContractAnalysisInputRequest`/`ContractAnalysisInputResponse` — 입력 단계 DTO. `maskedText`는 마스킹 단계 응답(`ContractAnalysisMaskingResponse`)에 별도로 존재 |
+| `OcrResult`(extractedText, confidence, status) | `ContractAnalysisOcrResponse`(extractedText, confidence, editable, **uncertainFields**) — `status` 대신 `editable`(항상 true) + 신뢰도 낮은 필드 목록(`uncertainFields: [{text, index}]`, 아래 참고) |
+| `ClauseAnalysisResult`(originalText, riskFlag, explanation, question, suggestedText) | ✅ `ContractAnalysisClause`(record) — 필드 구성이 요구사항과 정확히 일치 |
+| `ContractAnalysisResponse`(summary, clauses, disclaimer, aiGeneratedNotice, status) | ✅ `ContractAnalysisAnalyzeResponse`(summary, clauses, aiGeneratedNotice, disclaimer) — `status` 필드만 없음(현재 실패는 전부 예외로 표현되고 별도 status enum은 없음) |
 
 ## 계약 문구 입력 (`POST /contract-analysis/inputs`) — 요구사항 대비
 
@@ -23,26 +35,28 @@
 |---|---|
 | 입력 방식(이미지/텍스트) 확인 | ✅ `InputType`으로 분기 |
 | 이미지 파일 형식·크기 검증 | ✅ `image/jpeg`, `image/png`만 허용, 10MB 이하 |
-| 텍스트 최소 조건 확인 | ✅ 20자 미만이면 거부(구체적 최소 길이는 요구사항에 없고 구현에서 임의로 정한 값 — 정책값으로 관리되는지 확인 필요) |
-| 선택한 매물이 사용자 소유인지 확인 | ❌ **TODO 스텁 상태.** `validatePropertyOwnership` 메서드 자체는 있지만 본문이 비어있고, 주석에 "Property 엔티티/레포지토리 도입 후 구현 예정"이라고 되어 있음 — ⚠️ **`Property` 엔티티는 이미 다른 도메인에 구현되어 있어(`property-design.md` 참고) 이 TODO는 더 이상 블로킹 사유가 아닙니다.** 실제 연동만 하면 되는 상태로 보임 |
+| 텍스트 최소 조건 확인 | ✅ 20자 미만이면 거부(`MIN_TEXT_LENGTH = 20`, 상수 하드코딩 — 정책값으로 외부화되어 있진 않음) |
+| 선택한 매물이 사용자 소유인지 확인 | ❌ **여전히 TODO 스텁 상태.** `validatePropertyOwnership`은 `propertyId`가 `null`이 아니면 아무 것도 하지 않고 그냥 통과시킴(본문이 비어있음, TODO 주석 그대로) — 이전 버전 문서 작성 이후로 변경 없음 |
 | 실패: 지원하지 않는 파일 형식 | ✅ 400 |
 | 실패: 파일 크기 초과 | ✅ 400 |
 | 실패: 입력된 텍스트 없음 | ✅ 400 (`CONTRACT_ANALYSIS_INVALID_INPUT`) |
 | 실패: 분석하기에 지나치게 짧은 문구 | ✅ 400 |
-| 실패: 부동산 계약과 관련 없는 입력 | ❌ **검증 로직 없음.** 전용 코드(`CONTRACT_ANALYSIS_NOT_RELATED`)는 정의돼 있지만 실제로 어디서도 쓰이지 않는 죽은 코드 — AI 분석 단계에서 판단할 계획인지 확인 필요 |
+| 실패: 부동산 계약과 관련 없는 입력 | ❌ **여전히 검증 로직 없음.** 전용 코드(`CONTRACT_ANALYSIS_NOT_RELATED`)는 정의돼 있지만 `/inputs`, `/analyze` 어디에서도 쓰이지 않는 죽은 코드로 남아 있음(grep으로 재확인) |
 | 실패: 매물 접근 권한 없음 | ❌ 위 TODO 참고 — 코드(`CONTRACT_ANALYSIS_FORBIDDEN`)는 정의돼 있지만 실제로 발생하지 않음 |
 
 ## OCR 텍스트 추출 (`POST /contract-analysis/ocr`) — 요구사항 대비
+
+**⚠️ 정책이 이전 버전 문서 이후 바뀌었습니다**: 낮은 신뢰도를 이유로 OCR 결과 자체를 거부하던 방식(`OCR_LOW_CONFIDENCE`, 422)을 없애고, 신뢰도 낮은 필드를 `uncertainFields`로 알려주기만 하는 힌트 방식으로 전환했습니다. OCR이 불완전해도 사용자 흐름을 막지 않고, 프론트가 해당 필드만 강조해서 "확인이 필요합니다"로 보여줄 수 있게 한다는 판단입니다.
 
 | 요구사항 | 실제 구현 |
 |---|---|
 | 외부 OCR API(Clova) 호출 | ✅ `ClovaOcrClientImpl` |
 | 추출 텍스트를 수정 가능한 형태로 제공 | ✅ `editable: true` 필드 |
-| 결과가 비어있거나 신뢰도 낮은지 확인 | ✅ 필드가 비어있으면 `OCR_EMPTY_RESULT`(422), 최소 신뢰도(0.7) 미달이면 `OCR_LOW_CONFIDENCE`(422) |
-| 실패: OCR API 장애 / 응답 시간 초과 | ✅ 502(`OCR_API_ERROR`), 타임아웃은 504로 별도 구분 |
-| 실패: 문자 인식 어려운 이미지 / 손글씨·저품질 이미지 | ⚠️ **별도 사유로 구분되지 않고 전부 `OCR_LOW_CONFIDENCE`(신뢰도 미달) 하나로 뭉뚱그려짐.** Clova가 두 상황을 구분해서 응답해주지 않는 이상 서버에서 원인을 나눠 판단하긴 어려워 보이나, 요구사항의 실패 사유 구분과는 차이가 있음 |
+| 결과가 비어있거나 신뢰도 낮은지 확인 | 결과가 비어있으면 ✅ `OCR_EMPTY_RESULT`(422)로 거부. 신뢰도(필드별 0.7 미만)는 더 이상 거부 사유가 아니고, `uncertainFields: [{text, index}]`로 응답에 포함만 됨 — 전체 응답은 항상 성공 |
+| 실패: OCR API 장애 / 응답 시간 초과 | ✅ 502(`OCR_API_ERROR`), 타임아웃(`SocketTimeoutException`)은 504로 별도 구분 |
+| 실패: 문자 인식 어려운 이미지 / 손글씨·저품질 이미지 | ⚠️ 더 이상 "실패"로 취급되지 않음 — 신뢰도 낮은 필드는 `uncertainFields`에 담겨 성공 응답으로 내려감. 정책 자체가 "거부"에서 "힌트"로 바뀌었기 때문에, 요구사항의 "실패 사유" 관점과는 전제가 달라진 상태(버그가 아니라 의도된 방향 전환) |
 | 실패: 비어있는 OCR 결과 | ✅ |
-| 실패 시 텍스트 직접 입력 안내 | ⚠️ **백엔드 응답엔 안내 필드가 없습니다.** 그냥 예외(4xx/5xx)만 반환하고, "직접 입력하라"는 안내 UX는 프론트엔드가 구성해야 하는 구조로 보임 — 의도된 역할 분담인지 확인 필요 |
+| 실패 시 텍스트 직접 입력 안내 | ⚠️ 여전히 백엔드 응답엔 별도 안내 필드가 없음. `uncertainFields`로 프론트가 UX를 구성해야 하는 구조는 동일 |
 
 ## 개인정보 마스킹 (`POST /contract-analysis/masking`) — 요구사항 대비
 
@@ -50,47 +64,64 @@
 |---|---|
 | 전화번호·주민등록번호·계좌번호 정규식 마스킹 | ✅ 순서를 고정(주민번호→전화번호→계좌→성명)해서 충돌 방지 |
 | 임대인/임차인 성명 등 라벨 기반 마스킹 | ✅ "임대인"/"임차인" 라벨 뒤 2~4자 한글을 마스킹 |
-| 마스킹 결과를 서버에 저장하지 않음 | ✅ 순수 함수형 서비스라 애초에 영속화 코드 자체가 없음 — 자동 충족 |
-| 사용자가 마스킹 결과를 확인했는지 검증 | ❌ **이 엔드포인트엔 확인 여부를 받는 필드가 없습니다.** CLAUDE.md에 명시된 "`userConfirmed=true` 아니면 AI 분석 요청 차단" 정책은 다음 단계인 `/analyze`에서 검증할 계획으로 보이는데, 그 `/analyze` 자체가 없어 지금은 검증 지점이 어디에도 없는 상태 |
-| 실패: 마스킹 결과 확인 미완료 | ❌ 위와 동일한 이유로 발생하지 않음(`CONTRACT_ANALYSIS_MASKING_NOT_CONFIRMED`는 정의만 되어 있고 미사용) |
+| 마스킹 결과를 서버에 저장하지 않음 | ✅ 순수 함수형 서비스라 애초에 영속화 코드 자체가 없음 |
+| 사용자가 마스킹 결과를 확인했는지 검증 | ✅ **이전 버전 문서에서 "검증 지점 없음"으로 지적됐던 부분이 해소됨.** `/masking` 자체는 여전히 확인 여부를 받지 않지만(`requiresUserConfirmation: true`만 응답), 다음 단계인 `/analyze`가 `userConfirmed !== true`면 즉시 `CONTRACT_ANALYSIS_MASKING_NOT_CONFIRMED`(400)로 막음 — CLAUDE.md의 "마스킹 완료 전 AI 분석 요청 절대 차단" 정책이 실제로 강제되고 있음 |
+| 실패: 마스킹 결과 확인 미완료 | ✅ 위 항목 참고, `/analyze`에서 발생 |
 | 실패: 마스킹 처리 실패 | ✅ 정규식 처리 중 런타임 예외 발생 시 500(`MASKING_FAILED`)으로 감싸서 반환 |
 | 실패: 확인할 텍스트 없음 | ✅ 400 |
 
 ## AI 계약 문구 분석 (`POST /contract-analysis/analyze`) — 요구사항 대비
 
-❌ **엔드포인트 자체가 구현되어 있지 않습니다.** 컨트롤러(`ContractAnalysisController`)에 `/analyze` 매핑이 없고, Gemini 등 AI API를 호출하는 클라이언트도 코드베이스에 존재하지 않습니다(`grep`으로 확인). CLAUDE.md에 "OCR → 마스킹 → AI분석" 4단계 파이프라인으로 계획돼 있지만 현재는 앞 3단계(입력/OCR/마스킹)만 구현된 상태입니다.
+✅ **구현 완료.** 이전 버전 문서가 작성된 시점엔 이 엔드포인트가 아예 없었지만, 현재는 `ContractAnalysisAnalyzeService` + `GeminiClientImpl`(Gemini `generateContent`, `response_schema`로 JSON 구조 강제)로 전체 흐름이 동작함.
 
-다만 이 단계를 위한 **에러코드는 미리 정의되어 있습니다**(`CONTRACT_ANALYSIS_AI_RESPONSE_INVALID`, `CONTRACT_ANALYSIS_AI_HALLUCINATION`, `CONTRACT_ANALYSIS_AI_API_ERROR`) — 응답 구조 검증, 환각(입력에 없는 내용 생성) 검증, API 장애 처리를 계획하고 있다는 근거로 보이나 실제 로직은 아직 없습니다.
+| 요구사항 항목 | 실제 구현 |
+|---|---|
+| 계약 문구별 위험 신호 분석 | ✅ 조항별 `riskFlag`(boolean, CLAUDE.md 정책대로 등급 없이 true/false) |
+| 쉬운 설명 생성 | ✅ `explanation` — 시스템 프롬프트에 "위험 등급이 아니라 사실과 이유로 설명" 지시 |
+| 확인 질문 생성 | ✅ `question` — 중개사/임대인에게 직접 물을 질문(사용자 자기점검 질문 금지 규칙, 프롬프트 rule 5 + 스키마 `description`으로 이중 강제) |
+| 수정 요청 문구 예시 생성 | ✅ `suggestedText` — "법률적 정답이 아닌 협의용 예시"임을 프롬프트에서 안내 |
+| AI 응답 구조 검증 | ✅ `parseAndValidateSchema`가 JSON 파싱 실패/필수 필드 누락 시 `CONTRACT_ANALYSIS_AI_RESPONSE_INVALID`(502) |
+| "사용자가 입력하지 않은 조항 포함 여부" 검증(환각 방지) | ✅ `validateNoHallucination` — 마스킹 텍스트에 조항 원문이 그대로 포함되는지 확인. 다음 3단계 폴백: (1) 정규화 후 완전 포함, (2) 조 제목(`제N조(...)`) 제거 후 포함, (3) 그래도 실패하면 원문 단어의 85% 이상이(순서 무관, 대괄호 제거 후) 마스킹 텍스트에 존재하는지(표/체크박스 OCR 평문화로 어순이 깨지는 경우 대응, 5단어 미만 짧은 인용은 100% 일치 요구) |
+| "AI가 생성한 결과입니다" 고지 | ✅ 응답 레벨 `aiGeneratedNotice` 필드로 고정 문자열 반환(조항별 `explanation`에는 더 이상 안 들어감 — 중복 방지, 프롬프트 rule 6) |
+| 법적 효력 없음 안내 / "협의용 예시" 안내 | ✅ 응답 레벨 `disclaimer` 필드로 통합(마찬가지로 조항별 텍스트에서 제거, 아래 "남은 이슈" 참고) |
+| 마스킹 미확인 시 차단 | ✅ 위 마스킹 섹션 참고 |
 
-요구사항이 요구하는 아래 항목들은 전부 미구현 상태입니다: 계약 문구별 위험 신호 분석, 쉬운 설명 생성, 확인 질문 생성, 수정 요청 문구 예시 생성, AI 응답 구조 검증, "사용자가 입력하지 않은 조항 포함 여부" 검증(환각 방지), "AI가 생성한 결과입니다" 고지, 법적 효력 없음 안내, "협의용 예시" 안내.
+**에러 코드**: `CONTRACT_ANALYSIS_AI_RESPONSE_INVALID`(502, 스키마 위반), `CONTRACT_ANALYSIS_AI_HALLUCINATION`(502, 환각), `CONTRACT_ANALYSIS_AI_API_ERROR`(502, 연동 실패 / 504 타임아웃) — 이전 문서에서 "정의만 되어있고 미사용"이라 지적됐던 부분이 전부 실제로 쓰이고 있음.
+
+## Q&A 챗봇 (`POST /contract-analysis/chat`) — 요구사항 외 추가 기능
+
+요구사항 문서에는 없던 기능으로, `/analyze` 결과의 특정 조항에 대해 사용자가 후속 질문을 이어갈 수 있게 함(`ContractAnalysisChatService`).
+
+- 요청(`ContractAnalysisChatRequest`): 질의 대상 조항(`ContractAnalysisChatClause`: originalText/riskFlag/explanation — `/analyze` 응답의 `ContractAnalysisClause`에서 question/suggestedText만 뺀 축소판), `question`, 대화 이력(`history: [{role, content}]`, `role`은 "user"/"assistant")
+- 검증: `question` 없으면 `CONTRACT_ANALYSIS_QUESTION_REQUIRED`(400), `clause.originalText` 없으면 `CONTRACT_ANALYSIS_INVALID_INPUT`(400)
+- Gemini 호출은 analyze와 별도 시스템 프롬프트(`CHAT_SYSTEM_INSTRUCTION_TEMPLATE`, 조항 무관 질문엔 정중히 안내하도록 지시) 경로를 씀 — `response_schema` 강제는 없음(자유 텍스트 답변)
+- 응답(`ContractAnalysisChatResponse`)도 analyze와 동일하게 `aiGeneratedNotice`/`disclaimer`를 응답 레벨 필드로 고정 반환, 답변 텍스트 자체엔 고지문구·마크다운 문법을 넣지 않도록 프롬프트로 지시
 
 ## 비기능 요구사항 — 대조
 
 | 항목 | 요구사항 | 실제 |
 |---|---|---|
-| 계약 이미지·마스킹 전 텍스트를 로그에 기록하지 않음 | O | ✅ 코드상 이미지/원문 텍스트를 로깅하는 지점이 없음(에러 로그도 예외 클래스명만 남김) |
-| 마스킹 확인 전 AI API에 전송 금지 | O | ⚠️ AI 호출 자체가 없어 결과적으로는 지켜지고 있지만, 확인 검증 로직이 없는 상태로 `/analyze`가 만들어지면 이 요구사항이 깨질 위험이 있음 — 구현 시 반드시 확인 필요 |
-| 외부 API 전달 데이터 범위 최소화 | O | ✅ OCR엔 이미지만, 마스킹은 서버 자체 정규식 처리(외부 API 호출 없음) |
+| 계약 이미지·마스킹 전 텍스트를 로그에 기록하지 않음 | O | ✅ 코드상 이미지/원문 텍스트를 로깅하는 지점 없음(환각 검증 실패 시 디버그 로그도 정규화된 masked/original 텍스트만 남김 — 마스킹 이후 텍스트라 개인정보 자체는 이미 제거된 상태) |
+| 마스킹 확인 전 AI API에 전송 금지 | O | ✅ `/analyze`가 `userConfirmed`를 검증한 뒤에만 `geminiClient.analyzeClauses`를 호출 — 이전 문서에서 "위험 있음"으로 지적됐던 부분 해소 |
+| 외부 API 전달 데이터 범위 최소화 | O | ✅ OCR엔 이미지만, 마스킹은 서버 자체 정규식 처리(외부 API 미사용), AI엔 마스킹된 텍스트만 전달 |
 | 계약 이미지 원본을 분석 완료/실패 후 임시저장소에서 삭제 | O | 원본을 디스크에 저장하는 코드 자체가 없어(메모리 상에서 바로 외부 API로 전달) 이 요구사항이 적용될 대상이 없음 — 향후 파일을 임시 저장하는 방식으로 바뀌면 재검토 필요 |
-| 외부 API 인증키를 클라이언트에 노출하지 않음 | O | ✅ `@Value`로 서버 설정에서만 주입, 응답 DTO에 포함 안 됨 |
-| AI 결과가 입력 근거 기반이어야 함 / 환각 방지 | O | AI 분석 자체가 없어 N/A |
-| OCR 결과를 AI 분석 전 사용자가 수정 가능 | O | ✅ `editable: true`로 응답(단, 그 다음 AI 분석 단계가 없어 실제 흐름 검증은 안 됨) |
-| 계약 조항 분석과 보증금 안전성 체크 구분 표시 | O | AI 분석 자체가 없어 N/A |
-| OCR 실패 시 텍스트 직접 입력 제공 | O | ⚠️ `/inputs`가 `TEXT` 타입을 이미 지원하므로 "가능은 하다"고 볼 수 있으나, OCR 실패 응답이 이를 명시적으로 안내하진 않음(위 참고) |
-| AI API 호출 실패 시 무제한 재시도 금지 | O | AI 분석 자체가 없어 N/A |
-| 동일 분석 요청 중복 제출 방지 | O | ❌ 관련 로직 없음(멱등 키나 중복 요청 차단 장치 없음) |
-| 분석 실패 시 입력 내용이 즉시 사라지지 않음 | O | 서버는 애초에 아무 것도 저장하지 않는 구조라, 이 요구사항은 프론트엔드가 입력값을 화면 상태로 들고 있어야 한다는 의미로 보임 — 확인 필요 |
-| OCR/AI 응답시간 제한 적용 | O | ⚠️ OCR은 `RestTemplate` 기본/설정된 타임아웃에 의존(타임아웃 발생 시 504로 구분 처리는 확인됨), AI는 N/A |
-| 이미지 크기·해상도 제한 | O | 크기(10MB)만 제한, 해상도 제한은 없음 |
-| OCR/AI API 응답시간·오류율 모니터링 | O | 코드 안에서 확인 가능한 범위 밖(Actuator/Prometheus 등 인프라 레벨 설정 필요 — 확인 필요) |
+| 외부 API 인증키를 클라이언트에 노출하지 않음 | O | ✅ `@Value`로 서버 설정에서만 주입(Clova `secretKey`, Gemini `apiKey`), 응답 DTO에 포함 안 됨 |
+| AI 결과가 입력 근거 기반이어야 함 / 환각 방지 | O | ✅ `validateNoHallucination` (위 참고) |
+| OCR 결과를 AI 분석 전 사용자가 수정 가능 | O | ✅ `editable: true`로 응답, `/analyze`는 프론트가 넘긴 `maskedText`를 그대로 받으므로 그 사이 수정이 실제로 반영됨 |
+| 계약 조항 분석과 보증금 안전성 체크 구분 표시 | O | contract-analysis 도메인 범위 밖 — 여기서 다루는 응답엔 보증금 안전성 관련 필드가 없음(다른 도메인 여부는 확인 안 함) |
+| OCR 실패 시 텍스트 직접 입력 제공 | O | ⚠️ `/inputs`가 `TEXT` 타입을 이미 지원하므로 "가능은 하다"고 볼 수 있으나, OCR 응답이 이를 명시적으로 안내하진 않음(위 참고) |
+| AI API 호출 실패 시 무제한 재시도 금지 | O | ✅ 재시도 로직 자체가 없음(호출 1회, 실패 시 즉시 예외) |
+| 동일 분석 요청 중복 제출 방지 | O | ❌ 여전히 관련 로직 없음(멱등 키나 중복 요청 차단 장치 없음) — 이전 문서 이후 변경 없음 |
+| 분석 실패 시 입력 내용이 즉시 사라지지 않음 | O | 서버는 애초에 아무 것도 저장하지 않는 구조라, 프론트엔드가 입력값을 화면 상태로 들고 있어야 한다는 의미로 보임 — 확인 필요 |
+| OCR/AI 응답시간 제한 적용 | O | ✅ 둘 다 타임아웃 발생 시 504(`GATEWAY_TIMEOUT`)로 구분 처리(OCR: `SocketTimeoutException`, Gemini: `SocketTimeoutException`/`HttpTimeoutException`) |
+| 이미지 크기·해상도 제한 | O | 크기(10MB)만 제한, 해상도 제한은 없음 — 변경 없음 |
+| OCR/AI API 응답시간·오류율 모니터링 | O | 코드 안에서 확인 가능한 범위 밖(Actuator/Prometheus 등 인프라 레벨 설정 필요) — 확인 안 함 |
 
-## 남은 이슈 / 확인 필요 총정리
+## 남은 이슈 / 확인 필요 총정리 (2026-08-07 기준)
 
-1. AI 계약 문구 분석(`/analyze`) 엔드포인트 자체가 구현되어 있지 않음 — 이 도메인의 핵심 유스케이스가 아직 없고, 관련 에러코드만 미리 정의되어 있는 상태
-2. 마스킹 결과에 대한 "사용자 확인 완료" 여부를 검증하는 지점이 없음 — `/analyze`가 만들어질 때 반드시 함께 구현되어야 할 부분("마스킹 확인 전 AI 전송 금지"라는 보안 요구사항과 직결)
-3. "부동산 계약과 관련 없는 입력" 검증 로직이 없음 — AI 분석 단계에서 판단할 계획인지 확인 필요
-4. 매물 소유권 검증이 TODO 스텁 상태 — TODO 주석은 "Property 엔티티 도입 후"라고 되어 있지만 `Property`는 이미 구현되어 있어 더 이상 블로킹 사유가 아님(연동만 하면 됨)
-5. OCR 실패 사유가 요구사항만큼 세분화되어 있지 않음 — "인식 어려운 이미지"/"손글씨·저품질"이 전부 신뢰도 미달(`OCR_LOW_CONFIDENCE`) 하나로 처리됨
-6. OCR 실패 응답에 "텍스트 직접 입력 안내"가 담겨있지 않음 — 프론트가 이 UX를 알아서 구성해야 하는 구조로 보이는데 의도된 역할 분담인지 확인 필요
-7. 동일 분석 요청의 중복 제출을 막는 장치가 없음
-8. 계약 이미지 원본의 "임시저장소 삭제" 요구사항에 대응할 저장 로직 자체가 없음(메모리에서 바로 외부 API로 전달) — 향후 저장 방식이 바뀌면 재검토 필요
+1. 매물 소유권 검증이 여전히 TODO 스텁 상태(`ContractAnalysisInputService.validatePropertyOwnership`) — 이전 문서 이후 변경 없음
+2. "부동산 계약과 관련 없는 입력" 검증 로직이 여전히 없음 — 전용 에러코드(`CONTRACT_ANALYSIS_NOT_RELATED`)는 정의돼 있지만 어디서도 쓰이지 않는 죽은 코드
+3. OCR 실패 응답에 "텍스트 직접 입력 안내"가 담겨있지 않음 — 프론트가 이 UX를 알아서 구성해야 하는 구조로 보이는데 의도된 역할 분담인지 확인 필요
+4. 동일 분석 요청의 중복 제출을 막는 장치가 없음
+5. 계약 이미지 원본의 "임시저장소 삭제" 요구사항에 대응할 저장 로직 자체가 없음(메모리에서 바로 외부 API로 전달) — 향후 저장 방식이 바뀌면 재검토 필요
+6. `ContractAnalysisAnalyzeService`에 환각 검증 실패 시 디버그용 `log.error("[HALLUCINATION_DEBUG] ...")` 3줄이 남아 있음 — 실제 운영에서도 매 환각 검출마다 로그가 쌓이는 구조라, 상시 유지할지 진단 완료 후 레벨을 낮출지 정리 필요

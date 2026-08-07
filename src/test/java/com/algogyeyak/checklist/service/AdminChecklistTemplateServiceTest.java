@@ -110,10 +110,69 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
+    @DisplayName("존재하지 않는 매물유형으로 생성하면 ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE 예외가 발생한다")
+    void createThrowsWhenApplicablePropertyTypeIsUnknown() {
+        // 관리자 화면은 체크박스라 정상 값만 보내지만, Swagger/직접 API 호출은 그 보장이 없다 -
+        // 저장 시점에 막지 않으면 ChecklistItemTemplate.isApplicableTo()가 이 토큰을 어떤
+        // 매물유형과도 매칭시키지 못해 그 문항이 조용히 전체 매물유형에서 노출되지 않게 된다.
+        assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,TYPO"
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
+    }
+
+    @Test
+    @DisplayName("trailing comma로 생긴 빈 토큰은 존재하지 않는 매물유형으로 취급하지 않는다")
+    void createAllowsTrailingCommaInApplicablePropertyTypes() {
+        // 회귀 테스트 - split(",")가 "OFFICETEL,"에서 만드는 빈 문자열 토큰을 거르지 않으면, 오타가
+        // 아니라 단순 구분자 습관 차이일 뿐인데도 ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE로
+        // 거부됐다.
+        when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,"
+                )
+        );
+
+        assertThat(result.applicablePropertyTypes()).isEqualTo("OFFICETEL,");
+    }
+
+    @Test
+    @DisplayName("구분자만 있고 유효한 매물유형 토큰이 하나도 없으면 예외가 발생한다")
+    void createThrowsWhenApplicablePropertyTypesHasOnlySeparators() {
+        // 회귀 테스트 - trailing comma 허용 수정이 만든 새 버그. "," 하나만 있으면 필터링 후 토큰이
+        // 0개가 되어 검증은 통과하지만, null이 아니라서 ChecklistItemTemplate.isApplicableTo()가
+        // "전체 적용"으로 봐주지 않고 빈 배열과 어떤 매물유형도 매칭시키지 못해 그 문항이 모든
+        // 매물유형에서 조용히 숨겨진다 - 이 검증 메서드가 원래 막으려던 바로 그 실패 모드다.
+        assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, " , "
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
+    }
+
+    @Test
     @DisplayName("존재하는 문항을 수정하면 변경된 필드가 반영된다")
     void updateChangesExistingTemplateFields() {
         ChecklistItemTemplate existing = template(1L, 2, 1);
         when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        // 이 테스트는 active=false로의 전환 자체(마지막 활성 문항 보호)가 아니라 필드 반영을
+        // 검증하는 것이 목적이므로, 다른 활성 문항이 남아있는 상태로 스텁해 그 보호에 걸리지 않게 한다.
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(existing, template(2L, 2, 2)));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
                 1L,
@@ -129,6 +188,24 @@ class AdminChecklistTemplateServiceTest {
         assertThat(result.displayOrder()).isEqualTo(9);
         assertThat(result.active()).isFalse();
         assertThat(result.version()).isEqualTo(2); // 수정으로 버전이 바뀌지 않는다
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 매물유형으로 수정하면 ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE 예외가 발생한다")
+    void updateThrowsWhenApplicablePropertyTypeIsUnknown() {
+        ChecklistItemTemplate existing = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.update(
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, "TYPO", true
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
     }
 
     @Test
@@ -229,10 +306,34 @@ class AdminChecklistTemplateServiceTest {
         ChecklistItemTemplate existing = template(1L, 2, 1);
         when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
         when(checklistItemTemplateRepository.count()).thenReturn(2L);
+        // 이 테스트는 물리 삭제 자체를 검증하는 것이 목적이므로, 다른 활성 문항이 남아있는 상태로
+        // 스텁해 마지막 활성 문항 보호(validateNotDeactivatingLastActiveTemplate)에 걸리지 않게 한다.
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(existing, template(2L, 2, 2)));
 
         adminChecklistTemplateService.delete(1L);
 
         verify(checklistItemTemplateRepository).delete(existing);
+    }
+
+    @Test
+    @DisplayName("비활성 문항이 남아있어도 마지막 활성 문항을 삭제하려 하면 ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM 예외가 발생한다")
+    void deleteThrowsWhenDeletingTheLastActiveTemplateEvenIfInactiveTemplatesRemain() {
+        // count() <= 1 검사는 "테이블 전체가 비어버리는 것"만 막는다 - 비활성 문항이 하나 더
+        // 있으면 count()는 2를 반환해 통과하지만, 삭제 대상이 마지막 활성 문항이면 활성 문항이
+        // 0개가 되는 회귀 테스트.
+        ChecklistItemTemplate activeTemplate = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(activeTemplate));
+        when(checklistItemTemplateRepository.count()).thenReturn(2L);
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(activeTemplate));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.delete(1L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
+
+        verify(checklistItemTemplateRepository, org.mockito.Mockito.never()).delete(any(ChecklistItemTemplate.class));
     }
 
     @Test
@@ -244,6 +345,48 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("마지막 활성 문항을 비활성화하려 하면 ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM 예외가 발생한다")
+    void updateThrowsWhenDeactivatingTheLastActiveTemplate() {
+        // delete()는 마지막 문항 물리 삭제를 막지만, "숨기려면 active=false를 쓰라"는 안내와 달리
+        // 그 경로 자체는 막혀 있지 않았던 회귀 테스트 - 이 경우 그 이후 생성되는 모든 유저
+        // 체크리스트가 문항 0개로 만들어진다.
+        ChecklistItemTemplate existing = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of(existing));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.update(
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
+    }
+
+    @Test
+    @DisplayName("다른 활성 문항이 남아있으면 비활성화해도 된다")
+    void updateAllowsDeactivatingWhenOtherActiveTemplatesRemain() {
+        ChecklistItemTemplate existing = template(1L, 2, 1);
+        ChecklistItemTemplate other = template(2L, 2, 2);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(existing, other));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                )
+        );
+
+        assertThat(result.active()).isFalse();
     }
 
     @Test

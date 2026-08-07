@@ -124,6 +124,34 @@ class AuthControllerTest {
     }
 
     @Test
+    void signupDeletesNewlyCreatedUserWhenRefreshTokenIssueFails() throws Exception {
+        // signup()은 User를 이미 REQUIRES_NEW로 커밋한 뒤 이 컨트롤러로 돌아온다 - refresh token
+        // 발급(Redis 등)이 실패하면 access 쿠키는 지워지지만, 계정 자체가 세션 없이 그대로 남으면
+        // 재시도 시 AUTH_EMAIL_ALREADY_EXISTS로 막혀 사용자가 같은 이메일로 다시 가입도 로그인도
+        // 하기 어려워지던 문제의 회귀 테스트 - 방금 만든 계정을 함께 삭제해 재시도를 가능하게 해야 한다.
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("새유저")).thenReturn(false);
+        when(passwordEncoder.encode("password1")).thenReturn("encoded-hash");
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> {
+            User user = invocation.getArgument(0);
+            ReflectionTestUtils.setField(user, "id", 1L);
+            return user;
+        });
+        when(refreshTokenService.issue(any(User.class)))
+                .thenThrow(new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE));
+
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"new@example.com","password":"password1","nickname":"새유저"}
+                                """))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_STORE_UNAVAILABLE"));
+
+        verify(userRepository).deleteById(1L);
+    }
+
+    @Test
     void signupRejectsDuplicateEmail() throws Exception {
         when(userRepository.existsByEmail("dup@example.com")).thenReturn(true);
 
@@ -225,6 +253,82 @@ class AuthControllerTest {
         // 여러 Set-Cookie가 같은 이름으로 내려가면 브라우저는 마지막 것을 최종 값으로 받아들인다 -
         // 그래서 삭제 신호가 반드시 마지막이어야 한다.
         assertTrue(accessTokenCookies.get(accessTokenCookies.size() - 1).contains("Max-Age=0"));
+
+        // 회귀 테스트 - 이번 로그인에서 새로 발급한 적은 없지만, 브라우저에 이전 세션의
+        // refresh_token이 남아있을 수 있다. 그대로 두면 나중에 Redis가 복구된 뒤 그 옛
+        // refresh_token으로 /auth/refresh가 조용히 성공해 예전 세션이 되살아난다 - 실패로
+        // 확정하는 이 경로에서 refresh_token도 함께 지워야 한다.
+        List<String> refreshTokenCookies = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME + "="))
+                .toList();
+        assertFalse(refreshTokenCookies.isEmpty());
+        assertTrue(refreshTokenCookies.get(refreshTokenCookies.size() - 1).contains("Max-Age=0"));
+    }
+
+    @Test
+    void refreshDeletesRefreshTokenCookieWhenTokenIsConfirmedInvalid() throws Exception {
+        // 회귀 테스트 - AUTH_REFRESH_TOKEN_INVALID(확정적으로 무효한 토큰)로 응답할 때 쿠키를
+        // 지우지 않으면, cross-origin 배포에서는 프론트가 이 쿠키를 직접 지울 수 없어(백엔드
+        // 도메인 전용) 무효 토큰이 만료 시점까지 남아 매번 같은 401을 반복하게 된다.
+        when(refreshTokenService.rotate("bad-token"))
+                .thenThrow(new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+
+        MvcResult result = mockMvc.perform(post("/auth/refresh")
+                        .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "bad-token")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_INVALID"))
+                .andReturn();
+
+        List<String> refreshTokenCookies = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME + "="))
+                .toList();
+        assertFalse(refreshTokenCookies.isEmpty());
+        assertTrue(refreshTokenCookies.get(refreshTokenCookies.size() - 1).contains("Max-Age=0"));
+    }
+
+    @Test
+    void refreshDeletesAccessTokenCookieWhenRefreshTokenIsConfirmedInvalid() throws Exception {
+        // 회귀 테스트 - 확정 무효 세션이면 access 쿠키도 함께 지운다. cross-origin 배포에서는
+        // 프론트가 이 httpOnly 쿠키를 직접 지울 수 없으므로, 여기서 안 지우면 access 쿠키가
+        // 자연 만료 전까지 반쪽 세션처럼 남을 수 있다.
+        when(refreshTokenService.rotate("bad-token"))
+                .thenThrow(new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+
+        MvcResult result = mockMvc.perform(post("/auth/refresh")
+                        .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "bad-token")))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        List<String> accessTokenCookies = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "="))
+                .toList();
+        assertFalse(accessTokenCookies.isEmpty());
+        assertTrue(accessTokenCookies.get(accessTokenCookies.size() - 1).contains("Max-Age=0"));
+    }
+
+    @Test
+    void refreshDoesNotDeleteRefreshTokenCookieWhenRedisIsUnavailable() throws Exception {
+        // AUTH_TOKEN_STORE_UNAVAILABLE(503)은 토큰이 실제로 무효한지 알 수 없는 상태(Redis
+        // 장애)이므로, 이 경우까지 쿠키를 지우면 장애가 걷힌 뒤에도 사용자가 불필요하게
+        // 재로그인해야 한다 - 확정적으로 무효(401)한 경우와 구분해야 한다.
+        when(refreshTokenService.rotate("some-token"))
+                .thenThrow(new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE));
+
+        MvcResult result = mockMvc.perform(post("/auth/refresh")
+                        .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "some-token")))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_STORE_UNAVAILABLE"))
+                .andReturn();
+
+        boolean deletedRefreshCookie = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME + "="))
+                .anyMatch(value -> value.contains("Max-Age=0"));
+        assertFalse(deletedRefreshCookie);
+
+        boolean deletedAccessCookie = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "="))
+                .anyMatch(value -> value.contains("Max-Age=0"));
+        assertFalse(deletedAccessCookie);
     }
 
     @Test
@@ -372,6 +476,7 @@ class AuthControllerTest {
     void devLoginIssuesAuthCookiesForSeededAdminWhenEnabled() throws Exception {
         ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
         ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
         try {
             // AdminAccountSeeder가 실제로 만드는 시드 계정과 동일하게 passwordHash 없이 구성한다 —
             // dev-login은 비밀번호를 검사하지 않는다.
@@ -382,15 +487,34 @@ class AuthControllerTest {
             when(refreshTokenService.issue(admin)).thenReturn("new-refresh-token");
             when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
 
-            mockMvc.perform(post("/auth/dev-login"))
+            mockMvc.perform(post("/auth/dev-login").header("X-Dev-Login-Key", "test-secret"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.role").value("ADMIN"))
                     .andExpect(header().string("Set-Cookie",
                             containsString(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "=")));
         } finally {
-            // 다른 테스트에 영향이 없도록 기본값(false)으로 되돌린다.
+            // 다른 테스트에 영향이 없도록 기본값으로 되돌린다.
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+            ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+        }
+    }
+
+    @Test
+    void devLoginRejectsMismatchedKeyEvenWhenEnabled() throws Exception {
+        ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
+        try {
+            // secret을 아는 사람만 통과해야 한다 - 틀린 값은 물론 아예 안 보낸 경우도 마찬가지로
+            // 404여야, "이 엔드포인트가 존재한다"는 사실 자체가 새어나가지 않는다.
+            mockMvc.perform(post("/auth/dev-login").header("X-Dev-Login-Key", "wrong-secret"))
+                    .andExpect(status().isNotFound());
+            mockMvc.perform(post("/auth/dev-login"))
+                    .andExpect(status().isNotFound());
+        } finally {
+            ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+            ReflectionTestUtils.setField(authController, "devLoginSecret", "");
         }
     }
 
@@ -398,6 +522,7 @@ class AuthControllerTest {
     void devLoginNormalizesConfiguredEmailBeforeLookup() throws Exception {
         ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
         ReflectionTestUtils.setField(authController, "devLoginEmail", "  Admin@Algogyeyak.Local  ");
+        ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
         try {
             User admin = User.createLocalUser("admin@algogyeyak.local", null, "관리자");
             ReflectionTestUtils.setField(admin, "id", 1L);
@@ -406,24 +531,35 @@ class AuthControllerTest {
             when(refreshTokenService.issue(admin)).thenReturn("new-refresh-token");
             when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
 
-            mockMvc.perform(post("/auth/dev-login"))
+            mockMvc.perform(post("/auth/dev-login").header("X-Dev-Login-Key", "test-secret"))
                     .andExpect(status().isOk());
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+            ReflectionTestUtils.setField(authController, "devLoginSecret", "");
         }
     }
+
+    // "enabled=true인데 secret이 비어있으면 기동 자체가 실패한다"는 계약 자체는
+    // AuthControllerDevLoginStartupTest(ApplicationContextRunner로 실제 컨텍스트를 새로 띄워봄)에서
+    // 검증한다 - 이미 뜬 컨텍스트에서 validateDevLoginConfig()를 reflection으로 직접 호출하는 방식은
+    // @PostConstruct 애너테이션이 실수로 빠져도 통과해버려 그 계약을 보장하지 못하기 때문이다.
 
     @Test
     void devLoginReturnsNotFoundWhenEnabledButSeededAdminMissing() throws Exception {
         ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
         ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
         try {
             when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.empty());
 
-            mockMvc.perform(post("/auth/dev-login"))
+            // key를 맞게 보내야 secret 불일치가 아니라 실제로 검증하려는 분기(계정 없음)를 탄다 -
+            // key 없이 호출하면 이 404가 secret 불일치 때문인지 계정 없음 때문인지 구분이 안 된다.
+            mockMvc.perform(post("/auth/dev-login").header("X-Dev-Login-Key", "test-secret"))
                     .andExpect(status().isNotFound());
+            verify(userRepository).findByEmail("admin@algogyeyak.local");
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+            ReflectionTestUtils.setField(authController, "devLoginSecret", "");
         }
     }
 
@@ -431,16 +567,19 @@ class AuthControllerTest {
     void devLoginReturnsNotFoundWhenAccountAtConfiguredEmailIsNotAdmin() throws Exception {
         ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
         ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
         try {
             // 예: 어떤 이유로 이 이메일에 일반 USER 계정이 걸려 있는 경우 — dev-login이 그 계정으로
             // 로그인시키면 안 되므로 Role.ADMIN이 아니면 "찾을 수 없음"과 동일하게 취급한다.
             User notAdmin = User.createLocalUser("admin@algogyeyak.local", null, "일반유저");
             when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(notAdmin));
 
-            mockMvc.perform(post("/auth/dev-login"))
+            mockMvc.perform(post("/auth/dev-login").header("X-Dev-Login-Key", "test-secret"))
                     .andExpect(status().isNotFound());
+            verify(userRepository).findByEmail("admin@algogyeyak.local");
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+            ReflectionTestUtils.setField(authController, "devLoginSecret", "");
         }
     }
 
@@ -448,16 +587,19 @@ class AuthControllerTest {
     void devLoginReturnsNotFoundWhenSeededAdminHasBeenWithdrawn() throws Exception {
         ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
         ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
         try {
             User admin = User.createLocalUser("admin@algogyeyak.local", null, "관리자");
             admin.grantAdminRole();
             admin.withdraw();
             when(userRepository.findByEmail("admin@algogyeyak.local")).thenReturn(Optional.of(admin));
 
-            mockMvc.perform(post("/auth/dev-login"))
+            mockMvc.perform(post("/auth/dev-login").header("X-Dev-Login-Key", "test-secret"))
                     .andExpect(status().isNotFound());
+            verify(userRepository).findByEmail("admin@algogyeyak.local");
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+            ReflectionTestUtils.setField(authController, "devLoginSecret", "");
         }
     }
 
@@ -627,6 +769,22 @@ class AuthControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_MISSING"));
+    }
+
+    @Test
+    void refreshDeletesAccessTokenCookieWhenRefreshTokenCookieIsMissing() throws Exception {
+        // 회귀 테스트 - refresh 쿠키가 아예 없는 것도 AUTH_REFRESH_TOKEN_INVALID와 같은 확정 실패인데,
+        // access 쿠키 삭제 로직이 그쪽 catch에만 있고 이 경로엔 없었다. cross-origin 배포에서는
+        // 프론트가 이 httpOnly 쿠키를 직접 지울 수 없으므로 여기서도 지워야 한다.
+        MvcResult result = mockMvc.perform(post("/auth/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        List<String> accessTokenCookies = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "="))
+                .toList();
+        assertFalse(accessTokenCookies.isEmpty());
+        assertTrue(accessTokenCookies.get(accessTokenCookies.size() - 1).contains("Max-Age=0"));
     }
 
     @Test

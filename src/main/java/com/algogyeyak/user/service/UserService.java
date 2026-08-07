@@ -15,15 +15,17 @@ import com.algogyeyak.global.s3.dto.PresignedUploadResponse;
 import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.global.s3.util.S3ImagePurpose;
 import com.algogyeyak.global.s3.util.S3KeyGenerator;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 @Service
-@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class UserService {
 
@@ -32,6 +34,19 @@ public class UserService {
     private final UserRepository userRepository;
     private final UserPreferenceRepository userPreferenceRepository;
     private final S3PresignService s3PresignService;
+    private final TransactionTemplate requiresNewTransactionTemplate;
+
+    public UserService(
+            UserRepository userRepository,
+            UserPreferenceRepository userPreferenceRepository,
+            S3PresignService s3PresignService,
+            PlatformTransactionManager transactionManager) {
+        this.userRepository = userRepository;
+        this.userPreferenceRepository = userPreferenceRepository;
+        this.s3PresignService = s3PresignService;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     public UserProfileResponse getMyProfile(Long userId) {
         User user = getActiveUserOrThrow(userId);
@@ -39,13 +54,19 @@ public class UserService {
         return toResponse(user, preference);
     }
 
+    // userId는 로그인된 사용자가 프로필 수정 화면에서 호출하면 채워지고(본인 제외 검사),
+    // 회원가입 화면(로그인 전)에서 호출하면 null이다. existsByNicknameAndIdNot(nickname, null)을
+    // 그대로 쓰면 SQL의 "id <> NULL"이 항상 거짓으로 평가돼 무조건 available=true가 나와버리므로,
+    // null일 때는 본인 제외 없이 전체 중복만 검사하는 existsByNickname으로 분기해야 한다.
     public NicknameCheckResponse checkNicknameAvailable(Long userId, String nickname) {
         if (!StringUtils.hasText(nickname)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "닉네임을 입력해 주세요.");
         }
 
-        boolean available = !userRepository.existsByNicknameAndIdNot(nickname, userId);
-        return NicknameCheckResponse.builder().available(available).build();
+        boolean exists = userId != null
+                ? userRepository.existsByNicknameAndIdNot(nickname, userId)
+                : userRepository.existsByNickname(nickname);
+        return NicknameCheckResponse.builder().available(!exists).build();
     }
 
     @Transactional
@@ -56,10 +77,11 @@ public class UserService {
             throw new BusinessException(ErrorCode.USER_PROFILE_ALREADY_EXISTS);
         }
 
+        String newNickname = null;
         if (StringUtils.hasText(request.getNickname())
                 && !request.getNickname().equals(user.getNickname())) {
             validateNicknameNotDuplicated(userId, request.getNickname());
-            user.updateNickname(request.getNickname());
+            newNickname = request.getNickname();
         }
 
         UserPreference preference = UserPreference.builder()
@@ -69,7 +91,15 @@ public class UserService {
                 .currentStage(request.getCurrentStage())
                 .build();
 
-        userPreferenceRepository.save(preference);
+        // 닉네임 변경과 preference 최초 등록을 하나의 트랜잭션으로 묶어서 커밋한다(아래 메서드 참고) -
+        // 둘을 changeNickname()/savePreferenceOrThrowIfAlreadyRegistered()처럼 각자 별도의
+        // REQUIRES_NEW로 커밋하면, 닉네임 변경이 먼저 커밋된 뒤 preference 저장만 실패해도 실패한
+        // 요청의 닉네임 변경만 그대로 남는 부분 실패가 생긴다.
+        registerProfileAtomically(userId, newNickname, preference);
+
+        if (newNickname != null) {
+            user.updateNickname(newNickname);
+        }
 
         return toResponse(user, preference);
     }
@@ -85,6 +115,15 @@ public class UserService {
         return new PresignedUploadResponse(uploadUrl, key, S3PresignService.PENDING_UPLOAD_TAG);
     }
 
+    /**
+     * 알려진 한계(조회 후 저장 방식이라 원자적이지 않음): 같은 유저가 두 탭에서 거의 동시에
+     * confirmProfileImageUpload()/resetProfileImage()를 각각 호출하면, 나중에 커밋하는 쪽이
+     * profileImageUrl 컬럼을 그대로 덮어써 먼저 커밋된 쪽의 결과가 조용히 사라질 수 있다(진
+     * 쪽이 confirm이었다면 그 S3 객체는 이미 PENDING_UPLOAD_TAG가 지워진 뒤라 이후로도 참조하는
+     * 행이 없어 영구 orphan이 된다). 본인 계정 내 자기 자신과의 레이스라 다른 사용자에게 영향이
+     * 없고, 실제로 두 탭에서 거의 동시에 프로필 사진을 바꾸는 빈도가 매우 낮아 감수하기로 함 -
+     * AdminChecklistTemplateService.validateCode와 동일한 판단 기준.
+     */
     @Transactional
     public UserProfileResponse confirmProfileImageUpload(Long userId, String key) {
         User user = getActiveUserOrThrow(userId);
@@ -137,13 +176,11 @@ public class UserService {
 
         if (StringUtils.hasText(request.getNickname())
                 && !request.getNickname().equals(user.getNickname())) {
-            validateNicknameNotDuplicated(userId, request.getNickname());
-            user.updateNickname(request.getNickname());
+            changeNickname(user, userId, request.getNickname());
         }
 
         UserPreference preference = userPreferenceRepository.findByUserId(userId)
-                .orElseGet(() -> userPreferenceRepository.save(
-                        UserPreference.builder().user(user).build()));
+                .orElseGet(() -> saveOrFetchExistingPreference(userId, user));
 
         if (request.getInterestRegion() != null) {
             preference.updateInterestRegion(request.getInterestRegion());
@@ -161,7 +198,12 @@ public class UserService {
     @Transactional
     public void withdraw(Long userId) {
         User user = getActiveUserOrThrow(userId);
+        // User.withdraw()가 profileImageUrl을 직접 null로 비우기 전에 먼저 캡처해둔다 - 안 그러면
+        // resetProfileImage()/confirmProfileImageUpload()와 달리 이 S3 객체를 정리할 방법이 없어,
+        // 탈퇴할 때마다 실제 소유자가 없는 이미지가 영구적으로 S3에 남는다.
+        String previousImageUrl = user.getProfileImageUrl();
         user.withdraw();
+        deletePreviousProfileImageIfOwned(userId, previousImageUrl);
         // TODO: user_social_accounts(OAuth 연동 정보, UserSocialAccount 엔티티) 처리 정책 적용 필요 — 확인 필요
         // TODO: 탈퇴한 사용자의 Property/ContractAnalysis 등 연관 데이터 처리 방식 적용 필요 — 확인 필요
     }
@@ -175,6 +217,86 @@ public class UserService {
     private void validateNicknameNotDuplicated(Long userId, String nickname) {
         if (userRepository.existsByNicknameAndIdNot(nickname, userId)) {
             throw new BusinessException(ErrorCode.USER_NICKNAME_ALREADY_EXISTS);
+        }
+    }
+
+    // 사전 검사(validateNicknameNotDuplicated) 통과 이후에도, 커밋 전에 동시에 같은 닉네임으로
+    // 바꾼 다른 요청이 먼저 커밋되면 유니크 제약에 걸릴 수 있다. 이 UPDATE를 바깥 트랜잭션과 같은
+    // 세션에서 그냥 저장하면 유니크 제약 위반 시 바깥 트랜잭션 세션 전체가 더 이상 쓸 수 없는
+    // 상태가 되어 버리므로, CustomOAuth2UserService.createUser / LocalAuthService.createUser와
+    // 동일한 이유로 REQUIRES_NEW(별도 세션)로 분리해 실패해도 폐기되는 세션이 이 임시
+    // 트랜잭션뿐이도록 격리하고, 실패 시 진짜 원인(닉네임 중복)을 재확인해 정확한 에러로 변환한다.
+    private void changeNickname(User user, Long userId, String newNickname) {
+        validateNicknameNotDuplicated(userId, newNickname);
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> {
+                User managed = userRepository.findById(userId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+                managed.updateNickname(newNickname);
+                userRepository.saveAndFlush(managed);
+            });
+        } catch (DataIntegrityViolationException e) {
+            // 이 재확인도 바깥 트랜잭션에서 그냥 실행하면 안 된다 - MySQL 기본 REPEATABLE READ에서는
+            // 바깥 트랜잭션이 경쟁 요청의 커밋 전 스냅샷을 이미 고정하고 있을 수 있어, 실제로는
+            // 닉네임이 선점됐는데도 이 재확인이 stale한 "아직 안 겹침" 결과를 돌려줄 수 있다.
+            // 그러면 의도한 409 대신 원래 예외가 그대로 다시 던져져 500으로 샌다 - 재확인도
+            // REQUIRES_NEW(별도 세션)로 분리해 항상 그 시점의 최신 커밋 상태를 보게 한다.
+            boolean nicknameTaken = Boolean.TRUE.equals(
+                    requiresNewTransactionTemplate.execute(status -> userRepository.existsByNicknameAndIdNot(newNickname, userId)));
+            if (nicknameTaken) {
+                throw new BusinessException(ErrorCode.USER_NICKNAME_ALREADY_EXISTS);
+            }
+            throw e;
+        }
+        user.updateNickname(newNickname);
+    }
+
+    // registerProfile()의 사전 검사(existsByUserId/닉네임 중복) 통과 이후에도, 커밋 전에 동시에
+    // 같은 유저로 먼저 등록을 마친 다른 요청(중복 클릭 등)이 있으면 user_id 유니크 제약에, 동시에
+    // 같은 닉네임으로 바꾼 다른 요청이 있으면 닉네임 유니크 제약에 걸릴 수 있다. 닉네임 변경(있는
+    // 경우)과 preference INSERT를 같은 REQUIRES_NEW 트랜잭션 안에서 함께 시도해, 어느 한쪽이라도
+    // 실패하면 둘 다 롤백되게 한다 - 그래야 "닉네임만 바뀌고 preference 등록은 실패"하는 부분
+    // 실패가 생기지 않는다. 재확인도 REQUIRES_NEW(별도 세션)로 최신 커밋 상태를 봐야 한다(changeNickname()과
+    // 동일한 이유).
+    private void registerProfileAtomically(Long userId, String newNickname, UserPreference preference) {
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> {
+                if (newNickname != null) {
+                    User managed = userRepository.findById(userId)
+                            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+                    managed.updateNickname(newNickname);
+                    userRepository.saveAndFlush(managed);
+                }
+                userPreferenceRepository.saveAndFlush(preference);
+            });
+        } catch (DataIntegrityViolationException e) {
+            if (newNickname != null) {
+                boolean nicknameTaken = Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(
+                        status -> userRepository.existsByNicknameAndIdNot(newNickname, userId)));
+                if (nicknameTaken) {
+                    throw new BusinessException(ErrorCode.USER_NICKNAME_ALREADY_EXISTS);
+                }
+            }
+            boolean alreadyRegistered = Boolean.TRUE.equals(
+                    requiresNewTransactionTemplate.execute(status -> userPreferenceRepository.existsByUserId(userId)));
+            if (alreadyRegistered) {
+                throw new BusinessException(ErrorCode.USER_PROFILE_ALREADY_EXISTS);
+            }
+            throw e;
+        }
+    }
+
+    // updateMyProfile()의 이 경로는 "미리 온보딩하지 않은 기존 유저도 그냥 되게 하자"는 편의
+    // 처리라, registerProfile()과 달리 유니크 제약에 걸려도 에러로 막을 이유가 없다 - 동시에
+    // 같은 유저로 처음 preference를 만드는 레이스에서 진 쪽은, 이긴 쪽이 방금 커밋한 행을 그냥
+    // 재사용한다. 재조회도 REQUIRES_NEW로 해야 한다(changeNickname()과 동일한 이유).
+    private UserPreference saveOrFetchExistingPreference(Long userId, User user) {
+        UserPreference candidate = UserPreference.builder().user(user).build();
+        try {
+            return requiresNewTransactionTemplate.execute(status -> userPreferenceRepository.saveAndFlush(candidate));
+        } catch (DataIntegrityViolationException e) {
+            return requiresNewTransactionTemplate.execute(status -> userPreferenceRepository.findByUserId(userId)
+                    .orElseThrow(() -> e));
         }
     }
 

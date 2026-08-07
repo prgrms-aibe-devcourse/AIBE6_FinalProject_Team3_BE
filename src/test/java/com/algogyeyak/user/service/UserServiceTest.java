@@ -2,6 +2,7 @@ package com.algogyeyak.user.service;
 
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.user.dto.NicknameCheckResponse;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
@@ -11,14 +12,18 @@ import com.algogyeyak.user.enums.TransactionType;
 import com.algogyeyak.user.repository.UserPreferenceRepository;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -30,7 +35,8 @@ class UserServiceTest {
     private final UserRepository userRepository = mock(UserRepository.class);
     private final UserPreferenceRepository userPreferenceRepository = mock(UserPreferenceRepository.class);
     private final S3PresignService s3PresignService = mock(S3PresignService.class);
-    private final UserService userService = new UserService(userRepository, userPreferenceRepository, s3PresignService);
+    private final UserService userService = new UserService(
+            userRepository, userPreferenceRepository, s3PresignService, mock(PlatformTransactionManager.class));
 
     private User activeUser(Long id) {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
@@ -106,6 +112,56 @@ class UserServiceTest {
     }
 
     @Test
+    void updateMyProfileChangesNicknameWhenAvailable() {
+        User user = activeUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.existsByNicknameAndIdNot("새닉네임", 1L)).thenReturn(false);
+
+        ProfileUpdateRequest request = new ProfileUpdateRequest();
+        ReflectionTestUtils.setField(request, "nickname", "새닉네임");
+
+        UserProfileResponse response = userService.updateMyProfile(1L, request);
+
+        assertEquals("새닉네임", response.getNickname());
+    }
+
+    @Test
+    void updateMyProfileRecoversWithNicknameConflictWhenConcurrentChangeWinsTheRace() {
+        // 사전 검사(existsByNicknameAndIdNot)를 통과한 이후에도, 커밋 전에 동시에 같은 닉네임으로
+        // 바꾼 다른 요청이 먼저 커밋되면 유니크 제약에 걸릴 수 있다 - 이때 500 대신 정확한
+        // USER_NICKNAME_ALREADY_EXISTS 409로 복구되어야 한다(UserService.changeNickname 참고).
+        User user = activeUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.existsByNicknameAndIdNot("경쟁닉네임", 1L)).thenReturn(false, true);
+        when(userRepository.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("duplicate"));
+
+        ProfileUpdateRequest request = new ProfileUpdateRequest();
+        ReflectionTestUtils.setField(request, "nickname", "경쟁닉네임");
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> userService.updateMyProfile(1L, request));
+
+        assertEquals(ErrorCode.USER_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
+    }
+
+    @Test
+    void withdrawDeletesOwnedProfileImage() {
+        // User.withdraw()가 profileImageUrl을 직접 null로 비우기 때문에, resetProfileImage()와
+        // 달리 이 정리를 명시적으로 해주지 않으면 탈퇴할 때마다 소유자 없는 이미지가 S3에 영구적으로
+        // 남는 회귀 테스트.
+        User user = activeUser(1L);
+        user.updateProfileImageUrl("https://bucket.s3.ap-northeast-2.amazonaws.com/profile-images/1/old.jpg");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(s3PresignService.extractOwnedKey("https://bucket.s3.ap-northeast-2.amazonaws.com/profile-images/1/old.jpg"))
+                .thenReturn(Optional.of("profile-images/1/old.jpg"));
+
+        userService.withdraw(1L);
+
+        verify(s3PresignService).deleteReplacedObject("profile-images/1/old.jpg");
+    }
+
+    @Test
     void resetProfileImageClearsUrlAndDeletesOwnedS3Object() {
         User user = activeUser(1L);
         user.updateProfileImageUrl("https://bucket.s3.ap-northeast-2.amazonaws.com/profile-images/1/old.jpg");
@@ -130,5 +186,28 @@ class UserServiceTest {
 
         assertNull(response.getProfileImageUrl());
         verify(s3PresignService, never()).deleteReplacedObject(any());
+    }
+
+    @Test
+    void checkNicknameAvailableExcludesSelfWhenAuthenticated() {
+        when(userRepository.existsByNicknameAndIdNot("닉네임", 1L)).thenReturn(false);
+
+        NicknameCheckResponse response = userService.checkNicknameAvailable(1L, "닉네임");
+
+        assertTrue(response.isAvailable());
+        verify(userRepository, never()).existsByNickname(any());
+    }
+
+    @Test
+    void checkNicknameAvailableChecksGloballyWhenAnonymous() {
+        // 회원가입 화면처럼 로그인 전(userId == null)에 호출되는 경우 - existsByNicknameAndIdNot에
+        // null을 그대로 넘기면 SQL의 "id <> NULL"이 항상 거짓이 되어 무조건 available=true로 잘못
+        // 판정하므로, 이 경로는 본인 제외 없이 전체 중복만 확인하는 existsByNickname을 타야 한다.
+        when(userRepository.existsByNickname("중복닉네임")).thenReturn(true);
+
+        NicknameCheckResponse response = userService.checkNicknameAvailable(null, "중복닉네임");
+
+        assertFalse(response.isAvailable());
+        verify(userRepository, never()).existsByNicknameAndIdNot(any(), any());
     }
 }

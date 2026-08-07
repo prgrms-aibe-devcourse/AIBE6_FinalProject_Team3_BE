@@ -51,6 +51,11 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // 관리자 통계 대시보드: 신규 가입자 수 카드용(기간 내 가입).
     long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
+    // 마지막 남은 관리자 계정 보호(AdminUserService)용 - 실제로 로그인해 관리자 기능을 쓸 수 있는
+    // 계정만 세려고 role뿐 아니라 status도 ACTIVE로 제한한다(SUSPENDED/WITHDRAWN인 ADMIN은 이미
+    // 로그인 자체가 막혀 있어 그 수만큼 아무도 못 쓰는 셈이라 카운트에서 빼야 한다).
+    long countByRoleAndStatus(Role role, UserStatus status);
+
     // 관리자 통계 대시보드: 매물 등록자/미등록자 분포용 - 가입-등록 전환율을 보기 위해, 기간 내 가입한
     // 유저들의 id만 뽑아 PropertyRepository.countDistinctUserIdIn에 넘긴다.
     @Query("SELECT u.id FROM User u WHERE u.createdAt >= :start AND u.createdAt < :end")

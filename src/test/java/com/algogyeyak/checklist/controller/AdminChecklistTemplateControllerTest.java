@@ -247,7 +247,12 @@ class AdminChecklistTemplateControllerTest {
 
     @Test
     void 관리자_토큰으로_문항수정에_성공한다() throws Exception {
-        when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(template(10L)));
+        ChecklistItemTemplate target = template(10L);
+        when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(target));
+        // active=false로 바꾸는 요청이라, 마지막 활성 문항 보호 가드(AdminChecklistTemplateService.
+        // validateNotDeactivatingLastActiveTemplate)에 걸리지 않도록 다른 활성 문항이 남아있는 것으로 스텁한다.
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(target, template(11L)));
 
         mockMvc.perform(patch("/admin/checklist-templates/{id}", 10L)
                         .cookie(adminCookie())
@@ -290,8 +295,13 @@ class AdminChecklistTemplateControllerTest {
 
     @Test
     void 관리자_토큰으로_문항삭제에_성공한다() throws Exception {
-        when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(template(10L)));
+        ChecklistItemTemplate target = template(10L);
+        when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(target));
         when(checklistItemTemplateRepository.count()).thenReturn(2L);
+        // 마지막 활성 문항 보호(validateNotDeactivatingLastActiveTemplate)에 걸리지 않도록 다른
+        // 활성 문항이 남아있는 것으로 스텁한다.
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(target, template(11L)));
 
         mockMvc.perform(delete("/admin/checklist-templates/{id}", 10L).cookie(adminCookie()))
                 .andExpect(status().isOk())

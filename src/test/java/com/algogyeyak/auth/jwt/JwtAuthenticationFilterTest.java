@@ -211,6 +211,28 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    void failsClosedWithStoreUnavailableWhenDbLookupThrows() throws Exception {
+        // 회귀 테스트 - DB 장애로 findById()가 예외를 던지면 catch 없이 그대로 새어나가 컨테이너
+        // 기본 500(ApiResponse 포맷이 아님)이 되던 문제. AccessTokenRevocationService의 Redis
+        // 장애 처리와 동일하게 fail-closed(AUTH_TOKEN_STORE_UNAVAILABLE, 503)로 처리해야 한다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        when(userRepository.findById(1L)).thenThrow(new org.springframework.dao.QueryTimeoutException("DB timeout"));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, filterChain);
+
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
+        // 예외를 삼키고 필터 체인은 계속 진행해야 SecurityConfig의 authenticationEntryPoint가
+        // 이 속성을 읽어 503 응답을 만들 수 있다 - 여기서 예외가 그대로 전파되면 그 기회조차 없다.
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
     void doesNotSetAuthenticationWhenTokenJtiIsRevoked() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         Claims claims = jwtProvider.parseClaims(token);

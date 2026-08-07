@@ -13,6 +13,7 @@ import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.user.DefaultOAuth2User;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.HashMap;
 import java.util.List;
@@ -156,6 +157,68 @@ class CustomOAuth2UserServiceTest {
     }
 
     @Test
+    void linksCurrentProviderWhenRecoveredWinnerWasFoundOnlyByEmailAfterConflict() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        // 동시에 로컬 가입(또는 다른 provider의 OAuth 가입)이 같은 검증된 이메일로 먼저 커밋되고,
+        // 이번 요청의 User INSERT가 email 유니크 제약에 걸리는 상황 - 복구 조회는 provider+providerId로는
+        // 여전히 못 찾고(winner 계정에 이 provider가 아직 연동된 적이 없으므로) 이메일로만 winner를 찾는다.
+        // findByEmail을 순차 응답으로 둔다 - 1번째 호출은 findOrCreateUser()가 insert를 시도하기
+        // 전에 하는 사전 이메일 확인(linkToExistingAccountByEmail)이라 아직 아무도 없고(레이스), 그
+        // 사이 경쟁 요청이 커밋된 뒤 2번째 호출(createUser()의 유니크 제약 위반 복구 조회)에서만
+        // winner가 보이게 해야, 이 테스트가 검증하려는 복구 경로(사전 확인이 아니라 진짜 복구)를 탄다.
+        User winner = User.createLocalUser("test@kakao.com", "encoded-hash", "먼저가입한유저");
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123"))
+                .thenReturn(Optional.empty());
+        when(repository.findByEmail("test@kakao.com"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        when(repository.saveAndFlush(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+        when(socialAccountRepository.saveAndFlush(any(UserSocialAccount.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        OAuth2User result = service.processOAuth2User("kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com"));
+
+        User user = ((CustomOAuth2User) result).getUser();
+        assertEquals(winner, user);
+        // 이메일로만 찾은 winner에게 이번 provider가 실제로 연동돼야 한다 - 안 그러면
+        // user_social_accounts에 이 provider가 영영 안 남아 다음 로그인마다 같은 충돌·복구를 반복한다.
+        verify(socialAccountRepository).saveAndFlush(any(UserSocialAccount.class));
+        // 새 계정 생성이 아니라 기존 계정에 방금 연동된 것이므로 안내가 떠야 한다.
+        assertTrue(((CustomOAuth2User) result).isLinkedToExistingAccount());
+    }
+
+    @Test
+    void wrapsSocialAccountConflictWhenProviderIdEndsUpLinkedToADifferentUser() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        // 극히 드문 레이스: 이메일로 찾은 이 user(id=1)에게 이번 provider+providerId를 연동하려는
+        // 순간, 같은 provider+providerId가 이미 다른 user(id=999)에게 붙어버린 상태(데이터 불일치
+        // 또는 동시 레이스)를 가정한다. "이미 존재함"만 보고 통과시키면 엉뚱한 계정에 로그인시키는
+        // 셈이라, 소유자(user_id)까지 확인해서 다르면 conflict로 실패해야 한다.
+        User existingLocalUser = User.createLocalUser("shared@example.com", "encoded-hash", "로컬유저");
+        ReflectionTestUtils.setField(existingLocalUser, "id", 1L);
+        User differentUser = User.createOAuthUser("other@example.com", "다른유저", null);
+        ReflectionTestUtils.setField(differentUser, "id", 999L);
+        UserSocialAccount linkedToDifferentUser = UserSocialAccount.of(differentUser, AuthProvider.KAKAO, "123");
+
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(linkedToDifferentUser));
+        when(repository.findByEmail("shared@example.com")).thenReturn(Optional.of(existingLocalUser));
+        when(socialAccountRepository.saveAndFlush(any(UserSocialAccount.class)))
+                .thenThrow(new DataIntegrityViolationException("uk_social_provider_provider_id violation"));
+
+        assertThrows(OAuth2AuthenticationException.class,
+                () -> service.processOAuth2User(
+                        "kakao", kakaoOAuth2User(123L, "카카오닉네임", "http://img", "shared@example.com")));
+    }
+
+    @Test
     void linksNewProviderToExistingAccountWithSameEmailInsteadOfCreatingRow() {
         UserRepository repository = mock(UserRepository.class);
         UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
@@ -180,6 +243,33 @@ class CustomOAuth2UserServiceTest {
         verify(repository, never()).saveAndFlush(any(User.class));
         // 로컬 계정에 카카오가 처음 연동되는 것이므로 새 UserSocialAccount가 만들어져야 한다.
         verify(socialAccountRepository).saveAndFlush(any(UserSocialAccount.class));
+    }
+
+    @Test
+    void wrapsSocialAccountConflictInsteadOfCrashingWhenUserAlreadyHasDifferentAccountForSameProvider() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        // UserSocialAccount는 uk_social_provider_provider_id(같은 소셜 계정이 두 User에게 동시
+        // 연결 불가)와 uk_social_user_provider(한 User가 같은 provider를 두 개 연동 불가) 두 유니크
+        // 제약을 갖는다. 이 계정은 이메일로 찾아졌지만(로컬 계정 등) 이미 같은 provider의 다른
+        // providerId가 연동돼 있는 데이터 불일치 상태를 가정한다 - INSERT는 후자 제약 위반으로 실패한다.
+        User existingLocalUser = User.createLocalUser("shared@example.com", "encoded-hash", "로컬유저");
+        ReflectionTestUtils.setField(existingLocalUser, "id", 1L);
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.empty());
+        when(repository.findByEmail("shared@example.com")).thenReturn(Optional.of(existingLocalUser));
+        when(socialAccountRepository.saveAndFlush(any(UserSocialAccount.class)))
+                .thenThrow(new DataIntegrityViolationException("uk_social_user_provider violation"));
+        // 복구 조회: 같은 소셜 계정(provider+providerId)으로는 여전히 못 찾지만(empty), 이 유저가
+        // 이미 이 provider의 다른 계정을 갖고 있다(uk_social_user_provider 위반이 맞음을 확인).
+        when(socialAccountRepository.existsByUserIdAndProvider(1L, AuthProvider.KAKAO)).thenReturn(true);
+
+        // raw DataIntegrityViolationException이 그대로 던져져 500으로 크래시하는 대신,
+        // 다른 실패들과 동일하게 OAuth2AuthenticationException으로 감싸져야 한다.
+        assertThrows(OAuth2AuthenticationException.class,
+                () -> service.processOAuth2User(
+                        "kakao", kakaoOAuth2User(123L, "카카오닉네임", "http://img", "shared@example.com")));
     }
 
     @Test
@@ -266,6 +356,35 @@ class CustomOAuth2UserServiceTest {
         // 처리할 수 있는 AuthenticationException으로 감싸져야 한다.
         assertThrows(OAuth2AuthenticationException.class,
                 () -> service.processOAuth2User("kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com")));
+    }
+
+    @Test
+    void recoversWithFallbackNicknameWhenTheOnlyConflictIsNickname() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.empty());
+        when(repository.findByEmail("test@kakao.com")).thenReturn(Optional.empty());
+        // 첫 시도(제공자가 내려준 닉네임)는 전혀 무관한 다른 유저의 닉네임과 우연히 겹쳐 유니크 제약
+        // 위반이 나고, 재시도(provider+providerId 기반 fallback 닉네임)는 성공한다고 가정한다.
+        when(repository.existsByNickname("테스트유저")).thenReturn(true);
+        when(repository.saveAndFlush(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(socialAccountRepository.saveAndFlush(any(UserSocialAccount.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        // 예전엔 provider+providerId도 이메일도 못 찾으면 원인과 무관하게 항상 email_conflict로
+        // 영구 실패했다 - 실제 원인이 닉네임 충돌이면 이제 유일한 fallback 닉네임으로 자동
+        // 재시도해서 정상적으로 가입돼야 한다(OAuth 가입은 로컬 가입과 달리 유저가 직접 다른
+        // 닉네임을 골라 재시도할 방법이 없으므로).
+        OAuth2User result =
+                service.processOAuth2User("kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com"));
+
+        User user = ((CustomOAuth2User) result).getUser();
+        assertEquals("kakao_123", user.getNickname());
+        assertEquals("test@kakao.com", user.getEmail());
     }
 
     // --- 다중 소셜 연동(user_social_accounts) 전용 시나리오 ---

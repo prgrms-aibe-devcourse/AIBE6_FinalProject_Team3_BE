@@ -50,6 +50,14 @@ public class CookieUtils {
             @Value("${app.cookie.same-site:Lax}") String sameSite,
             @Value("${app.cookie.domain:}") String cookieDomain,
             @Value("${app.oauth2.state-signing-key}") String stateSigningKey) {
+        // COOKIE_SAME_SITE 오타/공백("NONEE" 등)이 있으면 ResponseCookie가 이를 검증 없이 그대로
+        // Set-Cookie 헤더에 실어 보내는데, 브라우저는 인식 못 하는 SameSite 값을 사양에 따라 각기
+        // 다르게(대개 기본값 취급 또는 무시) 처리해 환경별로 쿠키 동작이 애매해진다 - 배포 자체는
+        // 성공해버려 원인 파악이 어려우므로, 셋 중 하나가 아니면 기동을 막는다.
+        if (!"strict".equalsIgnoreCase(sameSite) && !"lax".equalsIgnoreCase(sameSite) && !"none".equalsIgnoreCase(sameSite)) {
+            throw new IllegalStateException(
+                    "app.cookie.same-site must be one of Strict/Lax/None (got: \"" + sameSite + "\")");
+        }
         // 브라우저는 SameSite=None인데 Secure가 없는 쿠키는 아예 거부한다 — 이 조합으로 기동되면
         // access/refresh 쿠키가 Set-Cookie로는 내려가지만 브라우저가 조용히 버려서 로그인이
         // 전부 깨지는데, 그 원인이 겉으로 드러나지 않는다. 배포 시 COOKIE_SECURE를 함께 켜는 걸
@@ -90,12 +98,16 @@ public class CookieUtils {
         response.addHeader(HttpHeaders.SET_COOKIE, builder.build().toString());
     }
 
-    // 쿠키 삭제는 저장할 때와 동일한 path/domain으로 Set-Cookie를 내려줘야 브라우저가 실제로 지운다.
+    // 쿠키 삭제도 결국 Set-Cookie 응답이다 - 저장할 때와 동일한 path/domain은 물론 secure/sameSite도
+    // 맞춰야 한다. 특히 SameSite=None(크로스오리진 배포)에서 이 속성이 빠지면 브라우저가 기본값
+    // Lax/Strict로 취급해 삭제 응답 자체를 다른 쿠키로 보거나 거부할 수 있어, 로그아웃/refresh
+    // 발급 실패 후 access 쿠키 정리 등에서 stale 쿠키가 브라우저에 그대로 남을 수 있다.
     public void deleteCookie(HttpServletResponse response, String name) {
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(name, "")
                 .path("/")
                 .httpOnly(true)
                 .secure(secureCookie)
+                .sameSite(sameSite)
                 .maxAge(0);
         applyDomain(builder);
         response.addHeader(HttpHeaders.SET_COOKIE, builder.build().toString());
