@@ -174,7 +174,10 @@ class PropertyControllerTest {
                 "ACTIVE",
                 LocalDateTime.of(2026, 7, 23, 10, 0),
                 75,
-                null
+                null,
+                2,
+                "시세 대비 높은 가격, 전세가율 확인 필요",
+                85
         );
 
         Pageable pageable = PageRequest.of(0, 20);
@@ -190,6 +193,9 @@ class PropertyControllerTest {
                 .andExpect(jsonPath("$.data.content[0].propertyId").value(101))
                 .andExpect(jsonPath("$.data.content[0].roadAddress").value("서울특별시 강남구 테헤란로 123"))
                 .andExpect(jsonPath("$.data.content[0].checklistProgress").value(75))
+                .andExpect(jsonPath("$.data.content[0].checkSignalCount").value(2))
+                .andExpect(jsonPath("$.data.content[0].signalSummary").value("시세 대비 높은 가격, 전세가율 확인 필요"))
+                .andExpect(jsonPath("$.data.content[0].jeonseRatio").value(85))
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.hasNext").value(false));
     }
