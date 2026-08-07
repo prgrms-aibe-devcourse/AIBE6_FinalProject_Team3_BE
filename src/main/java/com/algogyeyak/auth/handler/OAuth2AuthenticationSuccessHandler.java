@@ -63,6 +63,11 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
             // 없이 access token만 반쪼가리로 남기면 그게 자연 만료(30분)될 때까지 정상 로그인처럼
             // 보이는 애매한 상태가 되므로, 실패로 확정하는 이 경로에서 지워 깨끗한 상태로 되돌린다.
             cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
+            // 이번 소셜 로그인 시도에서 새로 발급한 적은 없지만, 브라우저에 이전 세션의
+            // refresh_token 쿠키가 남아있을 수 있다 - 그대로 두면 "로그인 실패"를 본 사용자가
+            // 나중에 Redis 복구 후 그 옛 refresh_token으로 /auth/refresh를 조용히 성공시켜 예전
+            // 세션이 되살아나는 혼란스러운 상태가 된다(AuthController.issueAuthCookies()와 동일한 이유).
+            cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
             authorizationRequestRepository.removeAuthorizationRequest(request, response);
             String failureUrl = UriComponentsBuilder.fromUriString(authorizedRedirectUri)
                     .queryParam("error", "token_issue_failed")

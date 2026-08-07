@@ -124,6 +124,34 @@ class AuthControllerTest {
     }
 
     @Test
+    void signupDeletesNewlyCreatedUserWhenRefreshTokenIssueFails() throws Exception {
+        // signup()은 User를 이미 REQUIRES_NEW로 커밋한 뒤 이 컨트롤러로 돌아온다 - refresh token
+        // 발급(Redis 등)이 실패하면 access 쿠키는 지워지지만, 계정 자체가 세션 없이 그대로 남으면
+        // 재시도 시 AUTH_EMAIL_ALREADY_EXISTS로 막혀 사용자가 같은 이메일로 다시 가입도 로그인도
+        // 하기 어려워지던 문제의 회귀 테스트 - 방금 만든 계정을 함께 삭제해 재시도를 가능하게 해야 한다.
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("새유저")).thenReturn(false);
+        when(passwordEncoder.encode("password1")).thenReturn("encoded-hash");
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> {
+            User user = invocation.getArgument(0);
+            ReflectionTestUtils.setField(user, "id", 1L);
+            return user;
+        });
+        when(refreshTokenService.issue(any(User.class)))
+                .thenThrow(new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE));
+
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"new@example.com","password":"password1","nickname":"새유저"}
+                                """))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_STORE_UNAVAILABLE"));
+
+        verify(userRepository).deleteById(1L);
+    }
+
+    @Test
     void signupRejectsDuplicateEmail() throws Exception {
         when(userRepository.existsByEmail("dup@example.com")).thenReturn(true);
 
@@ -225,6 +253,57 @@ class AuthControllerTest {
         // 여러 Set-Cookie가 같은 이름으로 내려가면 브라우저는 마지막 것을 최종 값으로 받아들인다 -
         // 그래서 삭제 신호가 반드시 마지막이어야 한다.
         assertTrue(accessTokenCookies.get(accessTokenCookies.size() - 1).contains("Max-Age=0"));
+
+        // 회귀 테스트 - 이번 로그인에서 새로 발급한 적은 없지만, 브라우저에 이전 세션의
+        // refresh_token이 남아있을 수 있다. 그대로 두면 나중에 Redis가 복구된 뒤 그 옛
+        // refresh_token으로 /auth/refresh가 조용히 성공해 예전 세션이 되살아난다 - 실패로
+        // 확정하는 이 경로에서 refresh_token도 함께 지워야 한다.
+        List<String> refreshTokenCookies = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME + "="))
+                .toList();
+        assertFalse(refreshTokenCookies.isEmpty());
+        assertTrue(refreshTokenCookies.get(refreshTokenCookies.size() - 1).contains("Max-Age=0"));
+    }
+
+    @Test
+    void refreshDeletesRefreshTokenCookieWhenTokenIsConfirmedInvalid() throws Exception {
+        // 회귀 테스트 - AUTH_REFRESH_TOKEN_INVALID(확정적으로 무효한 토큰)로 응답할 때 쿠키를
+        // 지우지 않으면, cross-origin 배포에서는 프론트가 이 쿠키를 직접 지울 수 없어(백엔드
+        // 도메인 전용) 무효 토큰이 만료 시점까지 남아 매번 같은 401을 반복하게 된다.
+        when(refreshTokenService.rotate("bad-token"))
+                .thenThrow(new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+
+        MvcResult result = mockMvc.perform(post("/auth/refresh")
+                        .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "bad-token")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("AUTH_REFRESH_TOKEN_INVALID"))
+                .andReturn();
+
+        List<String> refreshTokenCookies = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME + "="))
+                .toList();
+        assertFalse(refreshTokenCookies.isEmpty());
+        assertTrue(refreshTokenCookies.get(refreshTokenCookies.size() - 1).contains("Max-Age=0"));
+    }
+
+    @Test
+    void refreshDoesNotDeleteRefreshTokenCookieWhenRedisIsUnavailable() throws Exception {
+        // AUTH_TOKEN_STORE_UNAVAILABLE(503)은 토큰이 실제로 무효한지 알 수 없는 상태(Redis
+        // 장애)이므로, 이 경우까지 쿠키를 지우면 장애가 걷힌 뒤에도 사용자가 불필요하게
+        // 재로그인해야 한다 - 확정적으로 무효(401)한 경우와 구분해야 한다.
+        when(refreshTokenService.rotate("some-token"))
+                .thenThrow(new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE));
+
+        MvcResult result = mockMvc.perform(post("/auth/refresh")
+                        .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "some-token")))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error.code").value("AUTH_TOKEN_STORE_UNAVAILABLE"))
+                .andReturn();
+
+        boolean deletedRefreshCookie = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME + "="))
+                .anyMatch(value -> value.contains("Max-Age=0"));
+        assertFalse(deletedRefreshCookie);
     }
 
     @Test

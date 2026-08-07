@@ -76,6 +76,19 @@ public class LocalAuthService {
         }
     }
 
+    /**
+     * signup() 직후 refresh token 발급(Redis 장애 등)이 실패해 세션을 만들지 못했을 때, 방금
+     * 커밋된 계정을 되돌리는 보상 트랜잭션이다({@link com.algogyeyak.auth.controller.AuthController#signup}
+     * 참고). 세션 없이 "가입만 된" 계정이 그대로 남으면, 재시도 시 AUTH_EMAIL_ALREADY_EXISTS로
+     * 막혀 사용자가 같은 이메일로 다시 가입도 로그인도 하기 어려워진다(로그인 화면으로 바꿔야
+     * 한다는 걸 알기 어려움). signup()이 방금 이 요청에서 만든 계정임이 확실한 경우에만 호출해야
+     * 한다 — login()/OAuth처럼 기존 계정을 재사용하는 경로에서는 절대 호출하면 안 된다.
+     */
+    @Transactional
+    public void deleteNewlyCreatedUserAfterSessionSetupFailure(Long userId) {
+        userRepository.deleteById(userId);
+    }
+
     @Transactional(readOnly = true)
     public User login(String email, String rawPassword) {
         User user = userRepository.findByEmail(EmailNormalizer.normalize(email))

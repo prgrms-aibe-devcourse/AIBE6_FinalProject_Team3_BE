@@ -128,5 +128,9 @@ class OAuth2AuthenticationSuccessHandlerTest {
         // access token 쿠키는 이미 심어졌지만, refresh token 없이 반쪼가리 로그인 상태로 두면
         // 안 되므로 실패 처리하는 이 경로에서 지워야 한다.
         verify(cookieUtils).deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
+        // 회귀 테스트 - 이번 로그인에서 새로 발급한 적은 없지만, 브라우저에 이전 세션의
+        // refresh_token이 남아있을 수 있다. 실패로 확정하는 이 경로에서 함께 지워야, 나중에
+        // Redis가 복구된 뒤 그 옛 refresh_token으로 예전 세션이 조용히 되살아나지 않는다.
+        verify(cookieUtils).deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
     }
 }
