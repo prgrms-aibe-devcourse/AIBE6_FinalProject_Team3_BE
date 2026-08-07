@@ -26,6 +26,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
+import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -80,8 +83,13 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 // H2 콘솔은 내부적으로 프레임(iframe)을 사용하는데, 기본 X-Frame-Options: DENY가 이를 막는다.
-                // 로컬 개발 편의를 위한 설정이라 H2 콘솔 경로에 한해 sameOrigin으로 완화한다.
-                .headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()))
+                // frameOptions()로 전역 완화하면 실제로는 REST API 응답 전체가 sameOrigin으로 풀려버려
+                // (이 앱은 서버 렌더링 HTML이 없어 위험은 낮지만) 의도("H2 콘솔 경로에 한해")와 실제
+                // 동작이 어긋난다 - DelegatingRequestMatcherHeaderWriter로 /h2-console/** 요청에만
+                // SAMEORIGIN을 적용하고, 나머지 모든 응답은 기본값인 DENY를 그대로 유지한다.
+                .headers(headers -> headers.addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
+                        PathPatternRequestMatcher.pathPattern("/h2-console/**"),
+                        new XFrameOptionsHeaderWriter(XFrameOptionsHeaderWriter.XFrameOptionsMode.SAMEORIGIN))))
                 .oauth2Login(oauth2 -> oauth2
                         .authorizationEndpoint(endpoint -> endpoint
                                 .authorizationRequestRepository(cookieAuthorizationRequestRepository))
