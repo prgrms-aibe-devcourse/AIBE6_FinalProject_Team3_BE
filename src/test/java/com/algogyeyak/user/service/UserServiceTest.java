@@ -3,6 +3,7 @@ package com.algogyeyak.user.service;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.dto.NicknameCheckResponse;
+import com.algogyeyak.user.dto.NicknamePolicy;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
@@ -106,6 +107,70 @@ class UserServiceTest {
 
         assertEquals(ErrorCode.USER_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
         assertEquals(HttpStatus.CONFLICT, exception.getStatus());
+    }
+
+    @Test
+    void updateMyProfileThrowsWhenNewNicknameViolatesFormat() {
+        User user = activeUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        ProfileUpdateRequest request = new ProfileUpdateRequest();
+        ReflectionTestUtils.setField(request, "nickname", "닉네임!");
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> userService.updateMyProfile(1L, request));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        assertEquals(NicknamePolicy.MESSAGE, exception.getMessage());
+        verify(userRepository, never()).existsByNicknameAndIdNot(any(), any());
+    }
+
+    @Test
+    void updateMyProfileAllowsUnchangedNonConformingNicknameFromOAuthUser() {
+        // 카카오/구글 OAuth 가입은 NicknamePolicy를 거치지 않고 만들어진 닉네임을 가질 수 있다
+        // (공백 포함 등). 프론트는 닉네임을 안 바꿔도 현재 값을 그대로 재전송하므로, 그 값이 새
+        // 정책을 위반해도 "바뀌지 않았다면" 검증 자체가 생략돼야 프로필 수정이 막히지 않는다.
+        User oauthUser = User.createOAuthUser("oauth@example.com", "홍 길동", null);
+        ReflectionTestUtils.setField(oauthUser, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(oauthUser));
+        when(userPreferenceRepository.findByUserId(1L)).thenReturn(Optional.empty());
+        when(userPreferenceRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProfileUpdateRequest request = new ProfileUpdateRequest();
+        ReflectionTestUtils.setField(request, "nickname", "홍 길동");
+        ReflectionTestUtils.setField(request, "interestRegion", "서울시 강남구");
+
+        UserProfileResponse response = userService.updateMyProfile(1L, request);
+
+        assertEquals("홍 길동", response.getNickname());
+        verify(userRepository, never()).existsByNicknameAndIdNot(any(), any());
+    }
+
+    @Test
+    void registerProfileThrowsWhenNewNicknameViolatesFormat() {
+        User user = activeUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userPreferenceRepository.existsByUserId(1L)).thenReturn(false);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> userService.registerProfile(1L, registerRequest("닉네임!")));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        assertEquals(NicknamePolicy.MESSAGE, exception.getMessage());
+        verify(userRepository, never()).existsByNicknameAndIdNot(any(), any());
+    }
+
+    @Test
+    void registerProfileAllowsUnchangedNonConformingNicknameFromOAuthUser() {
+        User oauthUser = User.createOAuthUser("oauth@example.com", "홍 길동", null);
+        ReflectionTestUtils.setField(oauthUser, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(oauthUser));
+        when(userPreferenceRepository.existsByUserId(1L)).thenReturn(false);
+
+        UserProfileResponse response = userService.registerProfile(1L, registerRequest("홍 길동"));
+
+        assertEquals("홍 길동", response.getNickname());
+        verify(userRepository, never()).existsByNicknameAndIdNot(any(), any());
     }
 
     @Test

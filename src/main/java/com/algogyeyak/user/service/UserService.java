@@ -1,6 +1,7 @@
 package com.algogyeyak.user.service;
 
 import com.algogyeyak.user.dto.NicknameCheckResponse;
+import com.algogyeyak.user.dto.NicknamePolicy;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
@@ -21,6 +22,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -64,6 +67,7 @@ public class UserService {
 
         if (StringUtils.hasText(request.getNickname())
                 && !request.getNickname().equals(user.getNickname())) {
+            validateNicknameFormat(request.getNickname());
             validateNicknameNotDuplicated(userId, request.getNickname());
             user.updateNickname(request.getNickname());
         }
@@ -143,6 +147,7 @@ public class UserService {
 
         if (StringUtils.hasText(request.getNickname())
                 && !request.getNickname().equals(user.getNickname())) {
+            validateNicknameFormat(request.getNickname());
             validateNicknameNotDuplicated(userId, request.getNickname());
             user.updateNickname(request.getNickname());
         }
@@ -176,6 +181,18 @@ public class UserService {
         return userRepository.findById(userId)
                 .filter(user -> !user.isWithdrawn() && !user.isSuspended())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+    }
+
+    // 닉네임 형식은 "실제로 값이 바뀔 때"만 검사한다(registerProfile/updateMyProfile 호출부 참고) -
+    // ProfileRegisterRequest/ProfileUpdateRequest에 @Pattern을 걸어 항상 검사하면, OAuth 가입
+    // 사용자처럼 이 정책을 거치지 않고 만들어진 기존 닉네임(카카오/구글이 내려준 값 그대로, 공백·
+    // 특수문자 포함 가능)을 프론트가 매 요청 그대로 다시 실어 보낼 때마다(닉네임을 안 바꿔도) 검증에
+    // 걸려 프로필 등록/수정 자체가 막히는 문제가 있었다 - 닉네임 중복 검사(validateNicknameNotDuplicated)와
+    // 같은 이유로 같은 조건에서만 동작해야 한다.
+    private void validateNicknameFormat(String nickname) {
+        if (!Pattern.matches(NicknamePolicy.PATTERN, nickname)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, NicknamePolicy.MESSAGE);
+        }
     }
 
     private void validateNicknameNotDuplicated(Long userId, String nickname) {
