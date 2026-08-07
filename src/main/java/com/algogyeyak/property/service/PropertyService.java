@@ -27,6 +27,11 @@ import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.event.PropertyUpdatedEvent;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
+import com.algogyeyak.riskanalysis.entity.PropertyRisk;
+import com.algogyeyak.riskanalysis.enums.DepositSafetyStatus;
+import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
+import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
+import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,6 +54,9 @@ public class PropertyService {
     private final ChecklistRepository checklistRepository;
     private final ChecklistItemRepository checklistItemRepository;
     private final PropertyReportRepository propertyReportRepository;
+    private final PropertyRiskRepository propertyRiskRepository;
+    private final PropertyRiskCheckRepository propertyRiskCheckRepository;
+    private final DepositSafetyCheckRepository depositSafetyCheckRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     // 목록 조회 정렬 허용 필드 - PageableUtils.validateSort가 이 밖의 필드는 INVALID_SORT_FIELD로 막는다.
@@ -141,13 +149,48 @@ public class PropertyService {
                         PropertyService::toProgressPercent
                 ));
 
+        // risk-analysis를 한 번도 안 돌린 매물(checkSignalCount=null)과 돌렸는데 신호가 0건인
+        // 매물(checkSignalCount=0)을 구분하기 위해, "실행 여부"는 PropertyRiskCheck 쪽으로 판단하고
+        // "실제 발견된 신호"는 PropertyRisk 쪽으로 집계한다 (FakeListingSignalService 참고).
+        Set<Long> riskCheckedPropertyIds = propertyRiskCheckRepository.findAllByProperty_UserId(userId)
+                .stream()
+                .map(check -> check.getProperty().getId())
+                .collect(Collectors.toSet());
+
+        Map<Long, List<PropertyRisk>> risksByPropertyId = propertyRiskRepository.findAllByProperty_UserId(userId)
+                .stream()
+                .collect(Collectors.groupingBy(risk -> risk.getProperty().getId()));
+
+        Map<Long, Integer> jeonseRatioByPropertyId = depositSafetyCheckRepository.findAllByProperty_UserId(userId)
+                .stream()
+                .filter(check -> check.getStatus() == DepositSafetyStatus.CALCULATED)
+                .collect(Collectors.toMap(
+                        check -> check.getProperty().getId(),
+                        check -> check.getJeonseRatio().intValue()
+                ));
+
         return PageResponse.from(
                 properties,
-                property -> PropertyListResponse.from(
-                        property,
-                        checklistProgressByPropertyId.get(property.getId()),
-                        marketComparisonService.compare(property)
-                )
+                property -> {
+                    Long propertyId = property.getId();
+                    Integer checkSignalCount = riskCheckedPropertyIds.contains(propertyId)
+                            ? risksByPropertyId.getOrDefault(propertyId, List.of()).size()
+                            : null;
+                    String signalSummary = checkSignalCount != null && checkSignalCount > 0
+                            ? risksByPropertyId.get(propertyId).stream()
+                                    .map(PropertyRisk::getDescription)
+                                    .collect(Collectors.joining(", "))
+                            : null;
+
+                    return PropertyListResponse.from(
+                            property,
+                            checklistProgressByPropertyId.get(propertyId),
+                            marketComparisonService.compare(property),
+                            checkSignalCount,
+                            signalSummary,
+                            jeonseRatioByPropertyId.get(propertyId)
+                    );
+                }
         );
     }
 

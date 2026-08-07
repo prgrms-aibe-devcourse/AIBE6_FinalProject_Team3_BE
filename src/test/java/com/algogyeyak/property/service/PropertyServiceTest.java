@@ -36,6 +36,9 @@ import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.event.PropertyUpdatedEvent;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
+import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
+import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
+import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.IntStream;
@@ -73,6 +76,15 @@ class PropertyServiceTest {
     private PropertyReportRepository propertyReportRepository;
 
     @Mock
+    private PropertyRiskRepository propertyRiskRepository;
+
+    @Mock
+    private PropertyRiskCheckRepository propertyRiskCheckRepository;
+
+    @Mock
+    private DepositSafetyCheckRepository depositSafetyCheckRepository;
+
+    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private PropertyService propertyService;
@@ -83,7 +95,9 @@ class PropertyServiceTest {
     void setUp() {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
-                checklistRepository, checklistItemRepository, propertyReportRepository, eventPublisher
+                checklistRepository, checklistItemRepository, propertyReportRepository,
+                propertyRiskRepository, propertyRiskCheckRepository, depositSafetyCheckRepository,
+                eventPublisher
         );
     }
 
@@ -449,6 +463,92 @@ class PropertyServiceTest {
         assertThat(result.content()).hasSize(2);
         assertThat(result.content().get(0).checklistProgress()).isEqualTo(75);
         assertThat(result.content().get(1).checklistProgress()).isNull();
+    }
+
+    @Test
+    void 매물_목록조회_응답에_확인_필요_신호_개수와_요약이_매물별로_포함된다() {
+        Property checkedWithRisks = Property.builder()
+                .userId(USER_ID).title("리스크 있는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(30_000_000L).area(23.5).build();
+        ReflectionTestUtils.setField(checkedWithRisks, "id", 1L);
+
+        Property checkedClean = Property.builder()
+                .userId(USER_ID).title("이상 없는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(20_000_000L).area(18.0).build();
+        ReflectionTestUtils.setField(checkedClean, "id", 2L);
+
+        Property neverChecked = Property.builder()
+                .userId(USER_ID).title("미검사 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(15_000_000L).area(15.0).build();
+        ReflectionTestUtils.setField(neverChecked, "id", 3L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(checkedWithRisks, checkedClean, neverChecked), pageable, 3));
+
+        // checkedWithRisks/checkedClean은 4종 신호 판정이 이미 돌았다는 것만 표시하면 되므로 신호 하나씩만 둔다.
+        when(propertyRiskCheckRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
+                com.algogyeyak.riskanalysis.entity.PropertyRiskCheck.success(
+                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "v1.0"),
+                com.algogyeyak.riskanalysis.entity.PropertyRiskCheck.success(
+                        checkedClean, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "v1.0")
+        ));
+        when(propertyRiskRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
+                com.algogyeyak.riskanalysis.entity.PropertyRisk.of(
+                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "시세 대비 높은 가격"),
+                com.algogyeyak.riskanalysis.entity.PropertyRisk.of(
+                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.DUPLICATE_LISTING, "유사 주소 중복")
+        ));
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content()).hasSize(3);
+        assertThat(result.content().get(0).checkSignalCount()).isEqualTo(2);
+        assertThat(result.content().get(0).signalSummary()).isEqualTo("시세 대비 높은 가격, 유사 주소 중복");
+        assertThat(result.content().get(1).checkSignalCount()).isEqualTo(0);
+        assertThat(result.content().get(1).signalSummary()).isNull();
+        assertThat(result.content().get(2).checkSignalCount()).isNull();
+        assertThat(result.content().get(2).signalSummary()).isNull();
+    }
+
+    @Test
+    void 매물_목록조회_응답에_전세가율이_계산완료된_매물만_포함된다() {
+        Property calculated = Property.builder()
+                .userId(USER_ID).title("전세가율 계산된 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(30_000_000L).area(23.5).build();
+        ReflectionTestUtils.setField(calculated, "id", 1L);
+
+        Property unavailable = Property.builder()
+                .userId(USER_ID).title("판정불가 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.MONTHLY_RENT).deposit(10_000_000L).monthlyRent(500_000L).area(18.0).build();
+        ReflectionTestUtils.setField(unavailable, "id", 2L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(calculated, unavailable), pageable, 2));
+
+        when(depositSafetyCheckRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
+                com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.calculated(
+                        calculated, new java.math.BigDecimal("85.00"), null, null,
+                        java.time.LocalDate.of(2026, 6, 20), "설명", "v1.0"),
+                com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.unavailable(
+                        unavailable, null, null,
+                        com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason.TRANSACTION_TYPE_UNSUPPORTED, "v1.0")
+        ));
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content()).hasSize(2);
+        assertThat(result.content().get(0).jeonseRatio()).isEqualTo(85);
+        assertThat(result.content().get(1).jeonseRatio()).isNull();
     }
 
     @Test
