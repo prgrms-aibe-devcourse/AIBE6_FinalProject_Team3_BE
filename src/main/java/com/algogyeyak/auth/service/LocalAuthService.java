@@ -17,6 +17,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class LocalAuthService {
 
+    // login()이 계정 없음/소셜 전용 계정(passwordHash 없음)일 때 BCrypt 비교 자체를 건너뛰면,
+    // 그 경로가 실제 비밀번호 불일치 경로보다 눈에 띄게 빨라 응답 시간만으로 "이 이메일에 로컬
+    // 비밀번호가 있는지"를 알아낼 수 있다(에러 메시지/코드는 이미 동일하게 처리돼 있었지만 처리
+    // 시간은 갈려 있었다). 이 값은 실제 사용자의 비밀번호가 아니라 형식만 유효한 더미 해시로,
+    // 그 경로에서도 항상 같은 비용의 BCrypt 비교를 한 번 수행해 시간차를 없애는 데만 쓰인다.
+    private static final String DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY =
+            "$2a$10$CwTycUXWue0Thq9StjUM0uJ8Q0kQAr9Z6FkQx9F.C2t2CSqDNXW0e";
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final TransactionTemplate requiresNewTransactionTemplate;
@@ -93,12 +101,17 @@ public class LocalAuthService {
     public User login(String email, String rawPassword) {
         User user = userRepository.findByEmail(EmailNormalizer.normalize(email))
                 .filter(found -> !found.isWithdrawn() && !found.isSuspended())
-                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS));
+                .orElse(null);
 
         // passwordHash가 없는 계정(소셜 전용 가입)은 계정 존재 여부를 드러내지 않도록 자격 증명
-        // 오류와 동일한 메시지/코드로 처리한다.
-        String passwordHash = user.getPasswordHash();
-        if (passwordHash == null || !passwordEncoder.matches(rawPassword, passwordHash)) {
+        // 오류와 동일한 메시지/코드로 처리한다. 계정이 아예 없거나 passwordHash가 없어도 항상 같은
+        // 비용의 BCrypt 비교를 한 번 수행해(DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY 참고), 그
+        // 비교를 건너뛰는 경로가 실제 비밀번호 불일치 경로보다 빨리 응답해 계정 존재 여부가
+        // 새어나가는 것을 막는다.
+        String passwordHash = user != null ? user.getPasswordHash() : null;
+        boolean matches = passwordEncoder.matches(
+                rawPassword, passwordHash != null ? passwordHash : DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY);
+        if (user == null || passwordHash == null || !matches) {
             throw new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS);
         }
 

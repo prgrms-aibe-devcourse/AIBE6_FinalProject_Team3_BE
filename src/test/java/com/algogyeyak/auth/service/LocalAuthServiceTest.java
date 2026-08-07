@@ -157,6 +157,29 @@ class LocalAuthServiceTest {
     }
 
     @Test
+    void loginRunsBcryptComparisonEvenWhenEmailNotFound() {
+        // 회귀 테스트(타이밍 사이드채널) - 계정이 없어도 실제 비밀번호 불일치 경로와 같은 비용의
+        // BCrypt 비교를 한 번 수행해야, 응답 시간만으로 "이 이메일이 존재하는지"를 알아낼 수 없다.
+        when(userRepository.findByEmail("unknown@example.com")).thenReturn(Optional.empty());
+
+        assertThrows(BusinessException.class, () -> localAuthService.login("unknown@example.com", "password1"));
+
+        verify(passwordEncoder).matches(eq("password1"), any());
+    }
+
+    @Test
+    void loginRunsBcryptComparisonEvenForSocialOnlyAccount() {
+        // 회귀 테스트(타이밍 사이드채널) - passwordHash가 없는 소셜 전용 계정도 더미 해시로
+        // BCrypt 비교를 한 번 수행해야 한다.
+        User socialUser = User.createOAuthUser("social2@example.com", "소셜유저2", null);
+        when(userRepository.findByEmail("social2@example.com")).thenReturn(Optional.of(socialUser));
+
+        assertThrows(BusinessException.class, () -> localAuthService.login("social2@example.com", "password1"));
+
+        verify(passwordEncoder).matches(eq("password1"), any());
+    }
+
+    @Test
     void loginThrowsWhenPasswordDoesNotMatch() {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));

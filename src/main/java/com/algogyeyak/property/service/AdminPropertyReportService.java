@@ -76,6 +76,13 @@ public class AdminPropertyReportService {
         }
 
         PropertyReport report = findReport(reportId);
+        // PropertyReport는 매물 소유자 본인이 직접 등록하는 자가 신고다(클래스 주석 참고) - 그
+        // 소유자가 ADMIN 권한도 갖고 있으면 아무 제약 없이는 자기 매물에 대한 자신의 신고를
+        // 스스로 검토/확정할 수 있어, AdminUserController.rejectSelf와 같은 이유로 이 경로도
+        // 막아야 한다(신고 검토는 제3자 확인이 전제인 절차라 본인 확정은 그 절차를 무력화한다).
+        if (report.getReporterId().equals(reviewerId)) {
+            throw new BusinessException(ErrorCode.ADMIN_PROPERTY_REPORT_SELF_REVIEW);
+        }
         if (status == PropertyReportStatus.RESOLVED) {
             report.resolve(reviewerId, memo);
         } else {

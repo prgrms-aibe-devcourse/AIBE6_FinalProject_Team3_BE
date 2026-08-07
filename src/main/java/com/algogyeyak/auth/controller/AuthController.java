@@ -44,6 +44,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 
@@ -208,7 +210,7 @@ public class AuthController {
     @PostMapping("/dev-login")
     public ResponseEntity<ApiResponse<MeResponse>> devLogin(
             @RequestHeader(value = "X-Dev-Login-Key", required = false) String key, HttpServletResponse response) {
-        if (!devLoginEnabled || !devLoginSecret.equals(key)) {
+        if (!devLoginEnabled || !constantTimeEquals(devLoginSecret, key)) {
             throw new BusinessException(ErrorCode.NOT_FOUND);
         }
 
@@ -218,6 +220,19 @@ public class AuthController {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         issueAuthCookies(response, user);
         return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
+    }
+
+    // String.equals는 첫 불일치 문자에서 바로 리턴해 비교 시간이 일치한 접두 길이에 약하게
+    // 비례한다 - 공유 비밀값(devLoginSecret) 검증에는 CookieUtils의 HMAC 검증과 동일하게
+    // MessageDigest.isEqual(상수 시간 비교)을 쓴다. key가 아예 없으면(헤더 미전송) 바이트 비교
+    // 자체를 하지 않고 바로 false로 처리한다.
+    private boolean constantTimeEquals(String expected, String actual) {
+        if (actual == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                expected.getBytes(StandardCharsets.UTF_8),
+                actual.getBytes(StandardCharsets.UTF_8));
     }
 
     @Operation(summary = "로그아웃", description = "refresh_token 쿠키가 있으면 서버에서 즉시 무효화(revoke)하고, access token(access_token 쿠키 또는 Authorization: Bearer 헤더)이 있으면 그 jti를 만료 시각까지 블랙리스트에 등록해 남은 유효기간 동안에도 즉시 무효화한다. 이후 access/refresh 쿠키를 삭제한다. 아무것도 없어도(이미 만료/삭제된 경우 등) 항상 200으로 성공 처리되므로 필수 인증 요구사항으로 문서화하지 않는다.")
