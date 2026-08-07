@@ -90,12 +90,16 @@ public class CookieUtils {
         response.addHeader(HttpHeaders.SET_COOKIE, builder.build().toString());
     }
 
-    // 쿠키 삭제는 저장할 때와 동일한 path/domain으로 Set-Cookie를 내려줘야 브라우저가 실제로 지운다.
+    // 쿠키 삭제도 결국 Set-Cookie 응답이다 - 저장할 때와 동일한 path/domain은 물론 secure/sameSite도
+    // 맞춰야 한다. 특히 SameSite=None(크로스오리진 배포)에서 이 속성이 빠지면 브라우저가 기본값
+    // Lax/Strict로 취급해 삭제 응답 자체를 다른 쿠키로 보거나 거부할 수 있어, 로그아웃/refresh
+    // 발급 실패 후 access 쿠키 정리 등에서 stale 쿠키가 브라우저에 그대로 남을 수 있다.
     public void deleteCookie(HttpServletResponse response, String name) {
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(name, "")
                 .path("/")
                 .httpOnly(true)
                 .secure(secureCookie)
+                .sameSite(sameSite)
                 .maxAge(0);
         applyDomain(builder);
         response.addHeader(HttpHeaders.SET_COOKIE, builder.build().toString());

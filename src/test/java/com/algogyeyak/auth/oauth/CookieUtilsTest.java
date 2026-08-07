@@ -105,4 +105,22 @@ class CookieUtilsTest {
         assertTrue(setCookie.contains("SameSite=None"));
         assertTrue(setCookie.contains("Secure"));
     }
+
+    // 회귀 테스트 - deleteCookie()가 SameSite를 빼먹으면, 삭제 응답의 Set-Cookie 속성 조합이
+    // addCookie()가 발급한 것과 달라진다. SameSite=None 배포에서는 이 속성이 빠진 삭제 응답을
+    // 브라우저가 발급 때와 다른 쿠키로 취급하거나 거부할 수 있어, 로그아웃/refresh 발급 실패 후
+    // access 쿠키 정리 등에서 stale 쿠키가 남을 수 있었다.
+    @Test
+    void deleteCookieIncludesSameSameSiteAttributeAsAddCookie() {
+        CookieUtils secureNoneCookieUtils =
+                new CookieUtils(true, "None", "", "test-state-signing-key-must-be-at-least-32-bytes");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        secureNoneCookieUtils.deleteCookie(response, "test");
+
+        String setCookie = response.getHeader("Set-Cookie");
+        assertTrue(setCookie.contains("SameSite=None"));
+        assertTrue(setCookie.contains("Secure"));
+        assertTrue(setCookie.contains("Max-Age=0"));
+    }
 }
