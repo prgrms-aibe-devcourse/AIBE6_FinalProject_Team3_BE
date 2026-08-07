@@ -79,6 +79,15 @@ public class AdminChecklistTemplateService {
         return AdminChecklistItemTemplateResponse.from(checklistItemTemplateRepository.save(template));
     }
 
+    /**
+     * 알려진 한계: 요청 DTO가 필드 일부만 담는 부분 patch가 아니라 항상 전체 스냅샷을 요구한다
+     * (프론트가 수정 폼을 열 때 불러온 값을 그대로 다시 보냄). 관리자 두 명이 거의 동시에 같은
+     * 문항을 열어 서로 다른 필드를 고치면, 나중에 도착한 요청이 먼저 도착한 요청의 변경을
+     * 자기가 불러왔던(더 오래된) 값으로 조용히 덮어쓴다 - 낙관적 락(@Version) 없이는 막을 수
+     * 없는 전형적인 lost-update다. AdminUserService.rejectIfLastActiveAdmin과 같은 이유(관리자
+     * 전용 화면, 매우 낮은 동시 편집 빈도)로 지금은 감수하고, 실제로 문제가 되면 그때 @Version을
+     * 도입한다.
+     */
     @Transactional
     public AdminChecklistItemTemplateResponse update(Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
         ChecklistItemTemplate template = findTemplate(templateId);
