@@ -90,6 +90,7 @@ public class PropertyService {
                 .deposit(request.deposit())
                 .monthlyRent(request.monthlyRent())
                 .area(request.area())
+                .maintenanceFee(request.maintenanceFee())
                 .description(request.description())
                 .build();
 
@@ -274,6 +275,7 @@ public class PropertyService {
         property.updateTitle(request.title());
         property.updatePriceInfo(request.deposit(), request.monthlyRent());
         property.updateArea(request.area());
+        property.updateMaintenanceFee(request.maintenanceFee());
         property.updateDescription(request.description());
 
         // images가 null이면 "이미지 변경 없음"(기존 유지) - null이 아니면(빈 리스트 포함) 통째로 교체.

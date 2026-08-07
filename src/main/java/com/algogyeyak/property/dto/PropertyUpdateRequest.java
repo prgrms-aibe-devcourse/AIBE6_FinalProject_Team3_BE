@@ -3,6 +3,7 @@ package com.algogyeyak.property.dto;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import java.util.List;
 
 /**
@@ -25,6 +26,10 @@ public record PropertyUpdateRequest(
         @NotNull(message = "면적은 필수입니다.")
         @Positive(message = "면적은 0보다 커야 합니다.")
         Double area,
+
+        // 선택 입력 - 관리비 없는 매물도 있어 null 허용. 값이 있으면 0 이상이어야 함.
+        @PositiveOrZero(message = "관리비는 0 이상이어야 합니다.")
+        Long maintenanceFee,
 
         String description,
 

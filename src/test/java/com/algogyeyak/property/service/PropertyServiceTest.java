@@ -121,6 +121,7 @@ class PropertyServiceTest {
                 30_000_000L,
                 null,
                 23.5,
+                null,
                 "역세권 오피스텔",
                 List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.jpg", null))
         );
@@ -145,6 +146,35 @@ class PropertyServiceTest {
     }
 
     @Test
+    void 관리비를_입력하면_등록_응답에_반영된다() {
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                150_000L,
+                "역세권 오피스텔",
+                null
+        );
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
+        )).thenReturn(false);
+        when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        propertyService.register(USER_ID, request);
+
+        org.mockito.ArgumentCaptor<Property> captor = org.mockito.ArgumentCaptor.forClass(Property.class);
+        verify(propertyRepository).save(captor.capture());
+        assertThat(captor.getValue().getMaintenanceFee()).isEqualTo(150_000L);
+    }
+
+    @Test
     void 주소_확인에_실패하면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
@@ -154,6 +184,7 @@ class PropertyServiceTest {
                 30_000_000L,
                 null,
                 23.5,
+                null,
                 null,
                 null
         );
@@ -175,6 +206,7 @@ class PropertyServiceTest {
                 30_000_000L,
                 null,
                 23.5,
+                null,
                 null,
                 null
         );
@@ -198,6 +230,7 @@ class PropertyServiceTest {
                 200_000_000L,
                 null,
                 50.0,
+                null,
                 null,
                 null
         );
@@ -229,6 +262,7 @@ class PropertyServiceTest {
                 200_000_000L,
                 null,
                 50.0,
+                null,
                 null,
                 null
         );
@@ -264,6 +298,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
+                null,
                 List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.bmp", null))
         );
 
@@ -283,6 +318,7 @@ class PropertyServiceTest {
                 30_000_000L,
                 null,
                 23.5,
+                null,
                 null,
                 List.of(new PropertyImageRequest("ftp://cdn.algogyeyak.com/img/abc.jpg", null))
         );
@@ -307,6 +343,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
+                null,
                 tooManyImages
         );
 
@@ -327,6 +364,7 @@ class PropertyServiceTest {
                 null,
                 23.5,
                 null,
+                null,
                 null
         );
 
@@ -345,6 +383,7 @@ class PropertyServiceTest {
                 500_000L,
                 23.5,
                 null,
+                null,
                 null
         );
 
@@ -362,6 +401,7 @@ class PropertyServiceTest {
                 .deposit(30_000_000L)
                 .monthlyRent(null)
                 .area(23.5)
+                .maintenanceFee(50_000L)
                 .description("역세권 오피스텔")
                 .build();
         PropertyAddress address = PropertyAddress.builder()
@@ -384,6 +424,7 @@ class PropertyServiceTest {
 
         assertThat(result.content()).hasSize(1);
         assertThat(result.content().get(0).roadAddress()).isEqualTo("서울특별시 강남구 테헤란로 123");
+        assertThat(result.content().get(0).maintenanceFee()).isEqualTo(50_000L);
         assertThat(result.content().get(0).transactionType()).isEqualTo("JEONSE");
         assertThat(result.totalElements()).isEqualTo(1);
         assertThat(result.hasNext()).isFalse();
@@ -679,6 +720,7 @@ class PropertyServiceTest {
                 .deposit(30_000_000L)
                 .monthlyRent(null)
                 .area(23.5)
+                .maintenanceFee(80_000L)
                 .description("역세권 오피스텔")
                 .build();
         property.assignAddress(resolvedPropertyAddress());
@@ -695,6 +737,7 @@ class PropertyServiceTest {
         assertThat(response.marketComparison().status()).isEqualTo("UNAVAILABLE");
         assertThat(response.checklistCreated()).isFalse();
         assertThat(response.reported()).isFalse();
+        assertThat(response.maintenanceFee()).isEqualTo(80_000L);
     }
 
     @Test
@@ -769,7 +812,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, "수정된 설명", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, "수정된 설명", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -785,10 +828,35 @@ class PropertyServiceTest {
     }
 
     @Test
+    void 관리비를_수정하면_변경된_값이_반영된_응답을_반환한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .maintenanceFee(100_000L)
+                .description("역세권 오피스텔")
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 30_000_000L, null, 23.5, 200_000L, "역세권 오피스텔", null);
+
+        PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
+
+        assertThat(response.maintenanceFee()).isEqualTo(200_000L);
+    }
+
+    @Test
     void 존재하지_않는_매물을_수정하면_예외가_발생한다() {
         when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 999L, request))
                 .isInstanceOf(BusinessException.class);
@@ -811,7 +879,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
@@ -833,7 +901,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
