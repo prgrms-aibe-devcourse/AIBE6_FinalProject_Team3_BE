@@ -1,71 +1,108 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+이 문서는 이 저장소에서 작업할 때 Claude Code(claude.ai/code)에게 안내를 제공합니다.
 
-## Commands
+## 명령어
 
 ```
-# build
+# 빌드
 ./gradlew.bat build
 
-# run the app locally
+# 로컬 실행
 ./gradlew.bat bootRun
 
-# run all tests
+# 전체 테스트
 ./gradlew.bat test
 
-# run a single test class
+# 단일 테스트 클래스
 ./gradlew.bat test --tests "com.algogyeyak.AlgogyeyakApplicationTests"
 
-# run a single test method
+# 단일 테스트 메서드
 ./gradlew.bat test --tests "com.algogyeyak.AlgogyeyakApplicationTests.contextLoads"
 ```
 
-Use `gradlew.bat` (Windows). On the wrapper, Gradle 9.5.1 is pinned via `gradle/wrapper/gradle-wrapper.properties`.
+Windows 환경이므로 `gradlew.bat`을 사용합니다. wrapper 기준 Gradle 9.5.1로 고정되어 있습니다(`gradle/wrapper/gradle-wrapper.properties`).
 
-## Architecture
+## 아키텍처
 
-- **Framework**: Spring Boot 4.1.0, Java 21 toolchain, group `com.ll`, artifact `algogyeyak`.
-- **Web layer**: `spring-boot-starter-webmvc` (servlet MVC, not WebFlux).
-- **Persistence**: `spring-boot-starter-data-jpa`, with H2 (`spring-boot-h2console`) for local/dev and MySQL (`mysql-connector-j`) as the runtime driver — expect environment-specific datasource config to live in the `application-{profile}.yml` files.
-- **Redis**: `spring-boot-starter-data-redis` (Lettuce), used for access token blacklist + refresh token storage (`com.algogyeyak.auth.jwt.AccessTokenRevocationService` / `com.algogyeyak.auth.token.RefreshTokenService`) — see "Current state" below. Fail-closed on Redis outage: see those classes' javadoc. Tests that need a real Redis use Testcontainers (`redis:7-alpine`), requiring Docker locally.
-- **Auth**: `spring-boot-starter-security` + `spring-boot-starter-security-oauth2-client` for OAuth2 login (Google/Kakao), plus `jjwt` (api/impl/jackson, 0.12.6) for issuing/validating JWT access tokens. Stateless: no HTTP session, OAuth2 authorization requests are stored in a cookie (`com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository`) instead. See `com.algogyeyak.auth.config.SecurityConfig` for the full wiring.
-- **API docs**: `springdoc-openapi-starter-webmvc-ui` — Swagger UI is available once controllers exist.
-- **Observability**: `spring-boot-starter-actuator` + `micrometer-registry-prometheus` for metrics/health endpoints.
-- **Lombok**: enabled via `compileOnly` + `annotationProcessor` (and test equivalents) — expected for entities/DTOs.
-- **Config profiles**: `application.yml` plus `application-{dev,prod,test}.yml`, selected via Spring profiles. Common config (OAuth2 client id/secret, JWT, CORS, cookies, dev-login) already lives in `application.yml`; `application-prod.yml` overrides it for production (disables H2 console/Swagger, drops dummy defaults so missing env vars fail fast). `application-dev.yml`/`application-test.yml` still only set `spring.application.name`.
+- **프레임워크**: Spring Boot 4.1.0, Java 21 toolchain, group `com.ll`, artifact `algogyeyak`.
+- **웹 레이어**: `spring-boot-starter-webmvc`(서블릿 MVC, WebFlux 아님).
+- **영속성**: `spring-boot-starter-data-jpa`, 로컬/dev는 H2(`spring-boot-h2console`), 운영 드라이버는 MySQL(`mysql-connector-j`) — 환경별 데이터소스 설정은 `application-{profile}.yml`에 있어야 함(현재는 명시적으로 구성돼 있지 않음, `CURRENT_STATE.md` 참고).
+- **Redis**: `spring-boot-starter-data-redis`(Lettuce), access token 블랙리스트 + refresh token 저장용(`com.algogyeyak.auth.jwt.AccessTokenRevocationService` / `com.algogyeyak.auth.token.RefreshTokenService`) — 아래 "현재 상태" 참고. Redis 장애 시 fail-closed(해당 클래스들의 javadoc 참고). 실제 Redis가 필요한 테스트는 Testcontainers(`redis:7-alpine`)를 쓰며 로컬에 Docker가 필요함.
+- **인증**: OAuth2 로그인(구글/카카오)은 `spring-boot-starter-security` + `spring-boot-starter-security-oauth2-client`, JWT access token 발급/검증은 `jjwt`(api/impl/jackson, 0.12.6). Stateless — HTTP 세션 없이 OAuth2 인가 요청은 쿠키에 저장(`com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository`). 전체 배선은 `com.algogyeyak.auth.config.SecurityConfig` 참고.
+- **API 문서**: `springdoc-openapi-starter-webmvc-ui` — 컨트롤러가 있으면 Swagger UI 사용 가능.
+- **관측성**: `spring-boot-starter-actuator` + `micrometer-registry-prometheus`(메트릭/헬스 엔드포인트).
+- **Lombok**: `compileOnly` + `annotationProcessor`(테스트도 동일)로 활성화 — 엔티티/DTO에 사용.
+- **Config profiles**: `application.yml` + `application-{dev,prod,test}.yml`, Spring profile로 선택. 공통 설정(OAuth2 client id/secret, JWT, CORS, 쿠키, dev-login)은 `application.yml`(기본 프로필)에 이미 있고, `application-prod.yml`이 운영 전용 오버라이드를 담당(H2 콘솔/Swagger 비활성화, dummy 기본값 제거로 fail-fast, `DEV_LOGIN_ENABLED=false` 고정). `application-dev.yml`/`application-test.yml`은 아직 `spring.application.name`만 설정.
 
-### Package convention
+### 패키지 컨벤션
 
-Confirmed: all classes live under `com.algogyeyak` (matching `AlgogyeyakApplication.java`), not `com.ll.algogyeyak` (the Gradle `group`, `com.ll`, is unrelated to the source package). The previously mismatched test package has been moved to match.
+확정: 모든 클래스는 `com.algogyeyak`(`AlgogyeyakApplication.java`와 일치) 하위에 있으며, `com.ll.algogyeyak`이 아닙니다(Gradle `group`인 `com.ll`은 소스 패키지와 무관). 예전에 불일치했던 테스트 패키지도 이미 맞춰졌습니다.
 
-## Current state
+## 현재 상태
 
-Google/Kakao OAuth2 login and local email/password login, both with refresh tokens, are implemented:
-- `com.algogyeyak.user` — `User` entity, `AuthProvider`/`Role` enums, `UserRepository`, `UserSocialAccount`(`user_social_accounts`)/`UserSocialAccountRepository` (다중 소셜 연동 — 아래 참고)
-- `com.algogyeyak.auth.jwt` — `JwtProvider` (issue/validate access tokens, 매 토큰마다 `jti` 발급), `JwtUserPrincipal`, `JwtAuthenticationFilter` (헤더/쿠키에서 토큰을 찾아 검증하고, 실패 사유를 `AUTH_TOKEN_MISSING`/`AUTH_TOKEN_INVALID`/`AUTH_TOKEN_EXPIRED`로 구분해 요청 속성에 남김 — `SecurityConfig`의 `authenticationEntryPoint`가 읽어서 401 응답 코드를 정함), `AccessTokenRevocationService` (**2026-08-03부터 Redis** — 로그아웃 시 jti를 만료 시각까지의 TTL로 Redis에 등록해 access token을 즉시 무효화. 이전엔 `RevokedAccessToken` DB 테이블. Redis 장애 시 fail-closed로 "무효화됨"으로 간주해 인증 거부)
-- `com.algogyeyak.auth.oauth` — per-provider attribute parsing (`GoogleOAuth2UserInfo`, `KakaoOAuth2UserInfo`), `CustomOAuth2UserService`, cookie-based `AuthorizationRequestRepository`
-- `com.algogyeyak.auth.util.EmailNormalizer` — 이메일 trim+lowercase 정규화를 로컬/OAuth 양쪽이 공유한다. 저장하거나 `findByEmail`로 조회하는 모든 지점에서 반드시 거쳐야 함 — 안 그러면 대소문자만 다른 이메일이 다른 계정으로 취급돼 자동 연동이 조용히 실패할 수 있다.
-- `com.algogyeyak.auth.service.LocalAuthService` — email/password 가입·로그인. 비밀번호는 `PasswordEncoder`(BCrypt, `SecurityConfig`에 빈 등록)로 해시한다. `setPassword`로 로그인된 사용자 본인이 비밀번호를 설정/변경할 수 있다 — 구글/카카오 전용 계정도 이걸로 로컬 로그인을 추가로 확보할 수 있음(OAuth가 이미 이메일을 검증했으므로 안전)
-- **계정 자동 연동 및 다중 소셜 연동 (2026-07-30 갱신)**: `CustomOAuth2UserService.findOrCreateUser`는 `UserSocialAccount`(user_id+provider+provider_id, `(provider, provider_id)`/`(user_id, provider)` 유니크 제약)를 유일한 소스로 쓴다 — 1) `(provider, providerId)`로 `UserSocialAccount`를 먼저 조회해 있으면 그 유저를 재사용하고, 2) 없으면 검증된 이메일로 기존 계정(로컬 또는 다른 소셜)을 찾아 **기존 연동을 유지한 채 새 `UserSocialAccount`를 추가**하며, 3) 그것도 없으면 신규 `User`+첫 `UserSocialAccount`를 같은 트랜잭션에서 함께 생성한다. 이메일 검증(`findVerifiedEmailMatch`, `OAuth2UserInfo.isEmailVerified()` — Google `email_verified`, Kakao `kakao_account.is_email_verified`)을 거쳐야만 자동 연동되는 건 이전과 동일하다 — 검증 안 된 이메일은 `users.email`에 아예 저장하지 않고 `null`로 둔다(계정 탈취 방지, `CustomOAuth2UserService.createUser` 참고). `User`는 더 이상 `provider`/`providerId` 컬럼을 갖지 않는다(2026-07-30 제거) — 예전에는 "가장 최근에 로그인에 쓴 수단"만 가리키는 캐시로 남겨뒀었지만, 실제 조회/판단 로직 어디에서도 쓰이지 않아 정리했다. "이 유저가 실제로 연동해둔 모든 소셜 계정 목록"은 `UserSocialAccount`가 유일한 소스다. 한 유저가 구글+카카오를 동시에 연동해도 둘 다 유효하며, 이전 provider로 다시 로그인해도 재연동 없이 그 계정을 곧바로 찾는다.
-- `com.algogyeyak.auth.token` — `RefreshTokenService`: **Redis-backed since 2026-08-03** (previously DB — see `docs/specs/auth-design.md` for the reversal rationale), single session per user — a new login or refresh immediately invalidates the previous raw token. Two Redis keys per session (`by-hash:{tokenHash}`→userId, `by-user:{userId}`→tokenHash reverse index), both TTL'd to the refresh token validity so Redis handles natural expiry — no more `expiresAt` column/manual expiry check, and the old `AUTH_REFRESH_TOKEN_EXPIRED` error code was removed (collapsed into `AUTH_REFRESH_TOKEN_INVALID`, which the frontend already treated the same). `issue`/`rotate`/`revoke` each run as a single atomic Lua script (`RedisTemplate.execute(RedisScript, ...)`) — not separate GET/SET/DELETE calls — so concurrent issue() calls for the same user, concurrent rotate() of the same raw token, and rotate() racing against a stale/orphaned key all resolve to exactly one live session (see the class javadoc and `RefreshTokenServiceRedisIntegrationTest` for the concurrency regression tests). Raw tokens are never stored, only a SHA-256 hash. Redis failures are fail-closed (`AUTH_TOKEN_STORE_UNAVAILABLE`, 503).
-- `com.algogyeyak.auth.handler` + `com.algogyeyak.auth.config.SecurityConfig` — OAuth2 login wiring, access/refresh JWT delivered via httpOnly cookies (both path `/` — the frontend middleware needs to read the refresh cookie on protected-page requests, which a narrower path would block)
-- `com.algogyeyak.auth.controller.AuthController` — `GET /auth/me`, `POST /auth/logout`, `POST /auth/refresh`, `POST /auth/signup`, `POST /auth/login`, `GET /auth/password-policy`(인증 불필요) (엔드포인트는 `/api` 프리픽스 없이 작성하는 것으로 팀 컨벤션 확정). `signup`/`login` 모두 소셜 로그인과 동일하게 성공 시 access/refresh 쿠키를 즉시 발급해 자동 로그인 상태로 만든다. `logout`은 refresh token을 Redis에서 즉시 삭제하고, access token도 `Authorization: Bearer` 헤더/쿠키 어느 쪽으로 인증했든 그 jti를 Redis 블랙리스트에 등록해 즉시 무효화한다.
+8개 도메인(auth/user/property/checklist/market-data/risk-analysis/contract-analysis/admin)이 구현되어 있습니다. 도메인별 구현 현황·남은 이슈는 [CURRENT_STATE.md](./CURRENT_STATE.md)를, 각 도메인의 상세 설계/구현 이력은 `docs/specs/{도메인}-design.md`를 참고하세요(README.md의 "Docs" 섹션에 전체 목록).
 
-비밀번호 정책: 영문+숫자를 포함한 8~72자의 ASCII 출력 가능 문자(공백 제외) — `PasswordPolicy`(`com.algogyeyak.auth.dto`)가 유일한 소스다. BCrypt가 72바이트를 넘는 부분을 조용히 잘라버리는 문제 때문에 멀티바이트 문자를 막아 문자 수와 바이트 수를 일치시켰다. `GET /auth/password-policy`로 frontend에 이 정책(정규식/안내 문구)을 그대로 내려줘서, frontend가 하드코딩으로 따로 들고 있지 않게 한다.
+패키지 위치만 빠르게 참고할 때:
 
-See [README.md](./README.md) for stack overview and getting-started instructions.
+- `com.algogyeyak.user` — `User` 엔티티, `AuthProvider`/`Role`, `UserSocialAccount`(다중 소셜 연동)
+- `com.algogyeyak.auth.jwt` — `JwtProvider`, `JwtAuthenticationFilter`, `AccessTokenRevocationService`(Redis 블랙리스트)
+- `com.algogyeyak.auth.oauth` — 구글/카카오 속성 파싱, `CustomOAuth2UserService`
+- `com.algogyeyak.auth.service.LocalAuthService` — 이메일/비밀번호 가입·로그인
+- `com.algogyeyak.auth.token.RefreshTokenService` — Redis 기반, 유저당 세션 1개
+- `com.algogyeyak.auth.controller.AuthController` — `GET /auth/me`, `POST /auth/{signup,login,logout,refresh}`, `GET /auth/password-policy`
 
-## contract-analysis 도메인 (진행 중 — 담당: 송민혁)
+비밀번호 정책(영문+숫자 포함 8~72자)의 유일한 소스는 `PasswordPolicy`(`com.algogyeyak.auth.dto`)입니다 — `GET /auth/password-policy`로 frontend에 그대로 내려줍니다.
 
-- 패키지: `com.algogyeyak.contractanalysis`
-- 파이프라인: 계약문구입력 → OCR → 마스킹 → AI분석 (4개 엔드포인트, 순차 진행)
-  - POST /contract-analysis/inputs
-  - POST /contract-analysis/ocr
-  - POST /contract-analysis/masking
-  - POST /contract-analysis/analyze
-- 외부 API: Clova OCR(NCP), Gemini(gemini-2.5-flash) — 키는 환경변수로 분리, .env에 절대 커밋 금지
-- 마스킹 완료 전(`userConfirmed=true` 아니면) AI 분석 요청 절대 차단
-- 위험 신호는 등급(LOW/MEDIUM/HIGH) 없이 riskFlag(true/false) + 설명 방식 — 팀 전체 정책
-- 계약 문구 원본/마스킹 전 텍스트는 DB·로그에 영구 저장하지 않음 (개인정보 정책)
-- 분석 결과는 이력 조회 목적 저장 안 함 (MVP 범위 제외)
+스택 개요와 시작 방법은 [README.md](./README.md)를 참고하세요.
+
+## PR 작성 규칙
+
+사용자가 "PR 작성해줘"라고 요청하면 아래 형식을 그대로 따르세요. `gh pr create`로 직접 열지 말고, 채팅에 복사 가능한 마크다운 텍스트로만 작성합니다 — 실제 PR 생성은 사용자가 합니다.
+
+**PR 제목**
+
+```
+[타입] #이슈번호 제목
+```
+
+예시: `[feat] #10 방 생성 API 구현`
+
+**PR 본문** — `<!-- -->` 안내 주석은 실제 작성 시 빼고, "관련 이슈"/"작업 내용"/"리뷰 포인트"는 현재 브랜치의 실제 커밋·diff를 근거로 채웁니다(`git log`, `git diff`로 확인 — 추측 금지). 체크리스트는 체크하지 않은 채로 두고 사용자가 직접 확인 후 체크합니다.
+
+```markdown
+## 📌 관련 이슈
+- close #이슈번호
+
+## ✨ 작업 내용
+<!-- 어떤 변경 사항이 있었는지 주요 내용을 적어주세요. -->
+- 
+
+## 📸 스크린샷 / 테스트 결과
+<!-- API 응답 결과(Postman/Swagger)나 실행 결과 스크린샷을 첨부해주세요. -->
+- 
+
+## 🔍 리뷰 포인트
+<!-- 리뷰어가 집중해서 봐주었으면 하는 부분이 있다면 적어주세요. -->
+- 
+
+## ✅ 체크리스트
+- [ ] 커밋 메시지 컨벤션을 준수했는가?
+- [ ] 로컬에서 빌드 및 테스트가 성공했는가?
+- [ ] 불필요한 주석이나 console.log를 제거했는가?
+- [ ] 관련 문서를 함께 수정했는가?
+```
+
+## PR 리뷰 규칙
+
+- 최소 **1명 이상 리뷰 후 merge**
+- 리뷰 코멘트 반영 후 merge 진행
+- 리뷰 반영 완료 후 재요청 코멘트 작성
+- 충돌이 발생하면 작업자가 직접 해결 후 다시 확인 요청
+
+## Merge 기준
+
+- 리뷰 승인 완료
+- 빌드 / 테스트 통과
+- 충돌 없음
+- PR 체크리스트 완료
