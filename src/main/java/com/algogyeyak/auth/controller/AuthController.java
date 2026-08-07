@@ -277,9 +277,12 @@ public class AuthController {
             // 확정적으로 무효한 토큰(AUTH_REFRESH_TOKEN_INVALID)일 때만 쿠키를 지운다 - Redis 장애로
             // 인한 AUTH_TOKEN_STORE_UNAVAILABLE(503)은 토큰이 실제로 무효한지 알 수 없는 상태이므로
             // 지우면 안 된다(장애가 걷힌 뒤에도 재로그인이 강제됨). cross-origin 배포에서는 프론트가
-            // 이 쿠키를 직접 지울 수 없으므로(백엔드 도메인 전용), 여기서 지워주지 않으면 무효화된
-            // refresh_token이 만료 시점까지 그대로 남아 매번 같은 401을 반복하게 된다.
+            // 이 쿠키들을 직접 지울 수 없으므로(백엔드 도메인 전용 httpOnly), 여기서 지워주지 않으면
+            // 무효화된 refresh_token이 만료 시점까지 그대로 남아 매번 같은 401을 반복하게 된다. access
+            // 쿠키도 함께 지운다 - 아직 자연 만료 전에 이 refresh가 불렸을 수도 있어(예: 다른 탭에서
+            // 로그아웃), access만 남기면 그 쿠키가 만료될 때까지 반쪽 세션처럼 보일 수 있다.
             if (e.getErrorCode() == ErrorCode.AUTH_REFRESH_TOKEN_INVALID) {
+                cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
                 cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
             }
             throw e;

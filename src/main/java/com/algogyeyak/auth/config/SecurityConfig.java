@@ -12,6 +12,7 @@ import com.algogyeyak.global.response.ApiError;
 import com.algogyeyak.global.response.ApiResponse;
 import com.algogyeyak.user.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -57,6 +58,17 @@ public class SecurityConfig {
 
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
+
+    // CORS_ALLOWED_ORIGINS가 ""/공백/","처럼 값은 있지만 파싱 후 남는 origin이 없는 경우를 막는다 -
+    // fail-fast(placeholder 필수화)는 env 자체가 없는 경우만 잡아주고, 이런 값은 그대로 통과시켜
+    // CORS 설정이 빈 리스트로 조용히 뜬 채 모든 브라우저 인증 요청이 CORS 차단으로 실패하게 만든다.
+    @PostConstruct
+    void validateAllowedOrigins() {
+        if (parseAllowedOrigins().isEmpty()) {
+            throw new IllegalStateException(
+                    "app.cors.allowed-origins(CORS_ALLOWED_ORIGINS)에 유효한 origin이 하나도 없습니다: \"" + allowedOrigins + "\"");
+        }
+    }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {

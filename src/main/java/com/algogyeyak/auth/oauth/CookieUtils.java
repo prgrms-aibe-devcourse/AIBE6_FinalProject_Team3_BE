@@ -50,6 +50,14 @@ public class CookieUtils {
             @Value("${app.cookie.same-site:Lax}") String sameSite,
             @Value("${app.cookie.domain:}") String cookieDomain,
             @Value("${app.oauth2.state-signing-key}") String stateSigningKey) {
+        // COOKIE_SAME_SITE 오타/공백("NONEE" 등)이 있으면 ResponseCookie가 이를 검증 없이 그대로
+        // Set-Cookie 헤더에 실어 보내는데, 브라우저는 인식 못 하는 SameSite 값을 사양에 따라 각기
+        // 다르게(대개 기본값 취급 또는 무시) 처리해 환경별로 쿠키 동작이 애매해진다 - 배포 자체는
+        // 성공해버려 원인 파악이 어려우므로, 셋 중 하나가 아니면 기동을 막는다.
+        if (!"strict".equalsIgnoreCase(sameSite) && !"lax".equalsIgnoreCase(sameSite) && !"none".equalsIgnoreCase(sameSite)) {
+            throw new IllegalStateException(
+                    "app.cookie.same-site must be one of Strict/Lax/None (got: \"" + sameSite + "\")");
+        }
         // 브라우저는 SameSite=None인데 Secure가 없는 쿠키는 아예 거부한다 — 이 조합으로 기동되면
         // access/refresh 쿠키가 Set-Cookie로는 내려가지만 브라우저가 조용히 버려서 로그인이
         // 전부 깨지는데, 그 원인이 겉으로 드러나지 않는다. 배포 시 COOKIE_SECURE를 함께 켜는 걸

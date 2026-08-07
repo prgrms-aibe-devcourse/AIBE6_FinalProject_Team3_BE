@@ -94,6 +94,18 @@ class CookieUtilsTest {
     }
 
     @Test
+    void constructorRejectsInvalidSameSiteValue() {
+        assertThrows(IllegalStateException.class, () ->
+                new CookieUtils(true, "NONEE", "", "test-state-signing-key-must-be-at-least-32-bytes"));
+    }
+
+    @Test
+    void constructorRejectsBlankSameSiteValue() {
+        assertThrows(IllegalStateException.class, () ->
+                new CookieUtils(false, "  ", "", "test-state-signing-key-must-be-at-least-32-bytes"));
+    }
+
+    @Test
     void constructorAllowsSameSiteNoneWithSecure() {
         CookieUtils secureNoneCookieUtils =
                 new CookieUtils(true, "None", "", "test-state-signing-key-must-be-at-least-32-bytes");

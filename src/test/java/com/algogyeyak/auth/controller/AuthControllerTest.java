@@ -287,6 +287,26 @@ class AuthControllerTest {
     }
 
     @Test
+    void refreshDeletesAccessTokenCookieWhenRefreshTokenIsConfirmedInvalid() throws Exception {
+        // 회귀 테스트 - 확정 무효 세션이면 access 쿠키도 함께 지운다. cross-origin 배포에서는
+        // 프론트가 이 httpOnly 쿠키를 직접 지울 수 없으므로, 여기서 안 지우면 access 쿠키가
+        // 자연 만료 전까지 반쪽 세션처럼 남을 수 있다.
+        when(refreshTokenService.rotate("bad-token"))
+                .thenThrow(new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+
+        MvcResult result = mockMvc.perform(post("/auth/refresh")
+                        .cookie(new Cookie(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME, "bad-token")))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        List<String> accessTokenCookies = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "="))
+                .toList();
+        assertFalse(accessTokenCookies.isEmpty());
+        assertTrue(accessTokenCookies.get(accessTokenCookies.size() - 1).contains("Max-Age=0"));
+    }
+
+    @Test
     void refreshDoesNotDeleteRefreshTokenCookieWhenRedisIsUnavailable() throws Exception {
         // AUTH_TOKEN_STORE_UNAVAILABLE(503)은 토큰이 실제로 무효한지 알 수 없는 상태(Redis
         // 장애)이므로, 이 경우까지 쿠키를 지우면 장애가 걷힌 뒤에도 사용자가 불필요하게
@@ -304,6 +324,11 @@ class AuthControllerTest {
                 .filter(value -> value.startsWith(JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME + "="))
                 .anyMatch(value -> value.contains("Max-Age=0"));
         assertFalse(deletedRefreshCookie);
+
+        boolean deletedAccessCookie = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "="))
+                .anyMatch(value -> value.contains("Max-Age=0"));
+        assertFalse(deletedAccessCookie);
     }
 
     @Test
