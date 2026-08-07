@@ -108,6 +108,12 @@ public class PropertyService {
         String notice = buildNoticeIfNeeded(request.propertyType(), addressResult);
         MarketComparisonResponse marketComparison = marketComparisonService.compare(saved);
 
+        // update()와 동일하게 위험 신호·전세가율 계산을 risk-analysis에 위임한다 - 이 이벤트가 없으면
+        // 등록 직후엔 checkSignalCount/jeonseRatio가 계속 null로 남아있다가(목록에 "준비 중"만 표시됨)
+        // 사용자가 상세/위험분석 페이지를 한 번 열어야만(그쪽에서 별도로 POST /risk-analysis를 트리거함)
+        // 값이 채워지는 문제가 있었다.
+        eventPublisher.publishEvent(new PropertyUpdatedEvent(saved.getId()));
+
         return PropertyRegisterResponse.of(saved, notice, marketComparison);
     }
 

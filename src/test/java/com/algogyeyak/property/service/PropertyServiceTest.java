@@ -139,6 +139,9 @@ class PropertyServiceTest {
         assertThat(response.address().latitude()).isEqualTo(37.4995539438207);
         assertThat(response.marketComparison().status()).isEqualTo("UNAVAILABLE");
         assertThat(response.notice()).isNull();
+        // 등록 직후에도 update()와 동일하게 위험 신호·전세가율 계산을 risk-analysis에 위임한다 - 이
+        // 이벤트가 없으면 등록 직후 목록/상세에서 checkSignalCount/jeonseRatio가 계속 null로 남는다.
+        verify(eventPublisher).publishEvent(any(PropertyUpdatedEvent.class));
     }
 
     @Test
