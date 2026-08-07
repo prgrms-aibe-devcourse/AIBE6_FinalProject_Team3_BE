@@ -127,6 +127,44 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
+    @DisplayName("trailing comma로 생긴 빈 토큰은 존재하지 않는 매물유형으로 취급하지 않는다")
+    void createAllowsTrailingCommaInApplicablePropertyTypes() {
+        // 회귀 테스트 - split(",")가 "OFFICETEL,"에서 만드는 빈 문자열 토큰을 거르지 않으면, 오타가
+        // 아니라 단순 구분자 습관 차이일 뿐인데도 ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE로
+        // 거부됐다.
+        when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,"
+                )
+        );
+
+        assertThat(result.applicablePropertyTypes()).isEqualTo("OFFICETEL,");
+    }
+
+    @Test
+    @DisplayName("구분자만 있고 유효한 매물유형 토큰이 하나도 없으면 예외가 발생한다")
+    void createThrowsWhenApplicablePropertyTypesHasOnlySeparators() {
+        // 회귀 테스트 - trailing comma 허용 수정이 만든 새 버그. "," 하나만 있으면 필터링 후 토큰이
+        // 0개가 되어 검증은 통과하지만, null이 아니라서 ChecklistItemTemplate.isApplicableTo()가
+        // "전체 적용"으로 봐주지 않고 빈 배열과 어떤 매물유형도 매칭시키지 못해 그 문항이 모든
+        // 매물유형에서 조용히 숨겨진다 - 이 검증 메서드가 원래 막으려던 바로 그 실패 모드다.
+        assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, " , "
+                )
+        ))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
+    }
+
+    @Test
     @DisplayName("존재하는 문항을 수정하면 변경된 필드가 반영된다")
     void updateChangesExistingTemplateFields() {
         ChecklistItemTemplate existing = template(1L, 2, 1);

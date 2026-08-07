@@ -26,6 +26,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -48,6 +49,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Optional;
 
 @Tag(name = "Auth", description = "회원가입, 로그인(로컬/소셜), 토큰 재발급, 비밀번호 관리 API")
 @RestController
@@ -281,13 +283,20 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Redis 장애로 refresh token 저장소에 연결할 수 없음 (AUTH_TOKEN_STORE_UNAVAILABLE)")
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<Void>> refresh(HttpServletRequest request, HttpServletResponse response) {
-        String rawRefreshToken = CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
-                .map(cookie -> cookie.getValue())
-                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_MISSING));
+        Optional<String> rawRefreshToken = CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
+                .map(Cookie::getValue);
+        if (rawRefreshToken.isEmpty()) {
+            // refresh 쿠키가 아예 없는 것도 AUTH_REFRESH_TOKEN_INVALID와 같은 성격의 확정 실패다 -
+            // access 쿠키만 자연 만료 전까지 남아있으면(예: 다른 탭 로그아웃으로 refresh만 지워진
+            // 상태) 반쪽 세션처럼 보일 수 있다. cross-origin 배포에서는 프론트가 이 httpOnly
+            // 쿠키를 직접 지울 수 없으므로 여기서 지워야 한다.
+            cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
+            throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_MISSING);
+        }
 
         RefreshTokenService.RotationResult result;
         try {
-            result = refreshTokenService.rotate(rawRefreshToken);
+            result = refreshTokenService.rotate(rawRefreshToken.get());
         } catch (BusinessException e) {
             // 확정적으로 무효한 토큰(AUTH_REFRESH_TOKEN_INVALID)일 때만 쿠키를 지운다 - Redis 장애로
             // 인한 AUTH_TOKEN_STORE_UNAVAILABLE(503)은 토큰이 실제로 무효한지 알 수 없는 상태이므로

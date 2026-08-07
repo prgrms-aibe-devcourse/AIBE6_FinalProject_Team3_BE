@@ -156,11 +156,21 @@ public class AdminChecklistTemplateService {
         if (applicablePropertyTypes == null || applicablePropertyTypes.isBlank()) {
             return;
         }
-        boolean hasUnknownToken = Arrays.stream(applicablePropertyTypes.split(","))
+        List<String> tokens = Arrays.stream(applicablePropertyTypes.split(","))
                 .map(String::trim)
-                .anyMatch(token -> Arrays.stream(PropertyType.values())
+                // trailing/중복 콤마("OFFICETEL,")가 만드는 빈 토큰은 오타가 아니라 구분자 사용
+                // 습관의 문제일 뿐이라, 존재하지 않는 매물유형과 같은 취급(검증 실패)을 하면 안 된다.
+                .filter(token -> !token.isBlank())
+                .toList();
+        // 필터링 후 남은 토큰이 하나도 없다는 것("," 하나만 있거나 " , "처럼 구분자뿐인 경우)은
+        // null(=전체 매물유형에 적용)과 다르다 - isApplicableTo()는 이 non-null 빈 값을 "전체 적용"
+        // 으로 봐주지 않고 빈 배열과 어떤 매물유형도 매칭시키지 못해 모든 매물유형에서 조용히
+        // 숨겨버린다. 존재하지 않는 매물유형과 동일하게 취급해 저장 자체를 막는다 - 앞서 "빈 토큰은
+        // 허용"으로만 고쳤다가 이 케이스를 새로 뚫어버렸던 회귀.
+        boolean hasInvalidToken = tokens.isEmpty()
+                || tokens.stream().anyMatch(token -> Arrays.stream(PropertyType.values())
                         .noneMatch(propertyType -> propertyType.name().equals(token)));
-        if (hasUnknownToken) {
+        if (hasInvalidToken) {
             throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE);
         }
     }

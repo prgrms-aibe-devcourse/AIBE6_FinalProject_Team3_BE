@@ -772,6 +772,22 @@ class AuthControllerTest {
     }
 
     @Test
+    void refreshDeletesAccessTokenCookieWhenRefreshTokenCookieIsMissing() throws Exception {
+        // 회귀 테스트 - refresh 쿠키가 아예 없는 것도 AUTH_REFRESH_TOKEN_INVALID와 같은 확정 실패인데,
+        // access 쿠키 삭제 로직이 그쪽 catch에만 있고 이 경로엔 없었다. cross-origin 배포에서는
+        // 프론트가 이 httpOnly 쿠키를 직접 지울 수 없으므로 여기서도 지워야 한다.
+        MvcResult result = mockMvc.perform(post("/auth/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        List<String> accessTokenCookies = result.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(value -> value.startsWith(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "="))
+                .toList();
+        assertFalse(accessTokenCookies.isEmpty());
+        assertTrue(accessTokenCookies.get(accessTokenCookies.size() - 1).contains("Max-Age=0"));
+    }
+
+    @Test
     void refreshIssuesNewAccessAndRefreshTokenCookiesForValidToken() throws Exception {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         ReflectionTestUtils.setField(user, "id", 1L);
