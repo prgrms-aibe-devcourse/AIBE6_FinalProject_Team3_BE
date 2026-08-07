@@ -43,12 +43,11 @@ public class CsrfHeaderFilter extends OncePerRequestFilter {
     private static final Set<String> STATE_CHANGING_METHODS = Set.of("POST", "PUT", "PATCH", "DELETE");
     private static final String REQUIRED_HEADER = "X-Requested-With";
     private static final String ORIGIN_HEADER = "Origin";
-    // 트레일링 슬래시를 붙이지 않는다 - 붙이면 "/h2-console"(슬래시 없는 베이스 경로) 자체는
-    // 매칭에서 빠져 이 예외의 사각지대가 된다. startsWith("/h2-console")는 "/h2-console"과
-    // "/h2-console/..." 양쪽을 모두 잡으면서, "/h2-console-something"처럼 실제로는 다른 경로인
-    // 케이스는 H2 콘솔 경로가 항상 "/h2-console"(정확히 일치) 또는 "/h2-console/..."로만
-    // 열리므로 실질적으로 걱정할 필요가 없다.
-    private static final String H2_CONSOLE_PATH_PREFIX = "/h2-console";
+    // "/h2-console" 자체(트레일링 슬래시 없음)와 "/h2-console/..." 양쪽만 정확히 잡는다 -
+    // 단순 startsWith("/h2-console")는 지금은 존재하지 않지만 앞으로 "/h2-console-admin" 같은
+    // 상태 변경 API가 생기면 그 경로까지 CSRF 검사를 우회시키는 사각지대가 된다.
+    private static final String H2_CONSOLE_PATH = "/h2-console";
+    private static final String H2_CONSOLE_PATH_WITH_SLASH = H2_CONSOLE_PATH + "/";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Set<String> allowedOrigins;
@@ -61,7 +60,7 @@ public class CsrfHeaderFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         boolean requiresCheck = STATE_CHANGING_METHODS.contains(request.getMethod())
-                && !request.getRequestURI().startsWith(H2_CONSOLE_PATH_PREFIX);
+                && !isH2ConsolePath(request.getRequestURI());
 
         if (requiresCheck && !hasValidCsrfSignal(request)) {
             writeErrorResponse(response);
@@ -69,6 +68,10 @@ public class CsrfHeaderFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private static boolean isH2ConsolePath(String requestURI) {
+        return requestURI.equals(H2_CONSOLE_PATH) || requestURI.startsWith(H2_CONSOLE_PATH_WITH_SLASH);
     }
 
     private boolean hasValidCsrfSignal(HttpServletRequest request) {
