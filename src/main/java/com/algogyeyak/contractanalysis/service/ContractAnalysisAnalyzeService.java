@@ -15,15 +15,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 public class ContractAnalysisAnalyzeService {
-
-    private static final Logger log = LoggerFactory.getLogger(ContractAnalysisAnalyzeService.class);
 
     private final GeminiClient geminiClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -126,9 +122,6 @@ public class ContractAnalysisAnalyzeService {
                     || normalizedMaskedText.contains(withoutArticleTitle)
                     || matchesByWords(withoutArticleTitle, maskedWords);
             if (!contained) {
-                log.error("[HALLUCINATION_DEBUG] normalizedMaskedText={}", normalizedMaskedText);
-                log.error("[HALLUCINATION_DEBUG] normalizedOriginalText={}", normalizedOriginalText);
-                log.error("[HALLUCINATION_DEBUG] withoutArticleTitle={}", withoutArticleTitle);
                 throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_AI_HALLUCINATION);
             }
         }
