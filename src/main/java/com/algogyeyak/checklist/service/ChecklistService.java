@@ -10,19 +10,22 @@ import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.global.pagination.PageableUtils;
+import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -144,20 +147,19 @@ public class ChecklistService {
     }
 
     /**
-     * 로그인 유저의 매물 전체 + 매물별 체크리스트 현황을 반환한다. 체크리스트를 아직 시작 안 한
-     * 매물도 포함되며(checklistId=null, status=NOT_STARTED), 삭제된 매물은 제외한다.
-     * 정렬은 최종 점검일(lastCheckedAt) 최신순 - 매물 조회 자체가 이미 등록일(createdAt) 최신순으로
-     * 오기 때문에, 안정 정렬(Stream.sorted)로 lastCheckedAt만 덮어씌우면 동률일 때 자연히
-     * 등록일 최신순으로 유지된다.
+     * 로그인 유저의 매물 전체 + 매물별 체크리스트 현황을 페이지네이션으로 반환한다. 체크리스트를
+     * 아직 시작 안 한 매물도 포함되며(checklistId=null, status=NOT_STARTED), 삭제된 매물은 제외한다.
+     * 정렬(최종 점검일 최신순)은 항상 고정이라 사용자가 고를 수 없다 - pageable에 담긴 sort는
+     * 무시하고 page/size만 뽑아 새 Pageable로 리포지토리에 넘긴다(그렇지 않으면 리포지토리 쿼리의
+     * 고정 ORDER BY 뒤에 클라이언트가 지정한 정렬이 덧붙어 의도와 다른 결과가 나올 수 있음).
      */
-    public List<ChecklistOverviewResponse> listMyChecklists(Long userId) {
-        List<Property> properties = propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(userId, PropertyStatus.ACTIVE);
-        Map<Long, Checklist> checklistsByPropertyId = checklistRepository.findAllByUserId(userId).stream()
-                .collect(Collectors.toMap(checklist -> checklist.getProperty().getId(), checklist -> checklist));
+    public PageResponse<ChecklistOverviewResponse> listMyChecklists(Long userId, Pageable pageable) {
+        PageableUtils.validateMaxSize(pageable);
+        Pageable fixedSortPageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
 
-        return properties.stream()
-                .map(property -> ChecklistOverviewResponse.from(property, checklistsByPropertyId.get(property.getId())))
-                .sorted(Comparator.comparing(ChecklistOverviewResponse::lastCheckedAt).reversed())
-                .toList();
+        Page<Object[]> page = checklistRepository.findOverviewByUserId(userId, PropertyStatus.ACTIVE, fixedSortPageable);
+
+        return PageResponse.from(page.map(row ->
+                ChecklistOverviewResponse.from((Property) row[0], (Checklist) row[1])));
     }
 }

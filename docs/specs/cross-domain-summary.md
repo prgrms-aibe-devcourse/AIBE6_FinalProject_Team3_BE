@@ -9,9 +9,9 @@
 | 도메인 | 상태 | 비고 |
 |---|---|---|
 | `auth` | 거의 완전 구현 | **(2026-07-28 갱신)** 확인 필요 2개로 축소 — 다중 소셜 연동(`UserSocialAccount`)/jti 블랙리스트/토큰 실패 사유 구분 등 4개 해결. 남은 2개는 코드 문제가 아니라 카카오 email 심사 신청 여부(팀 결정)와 Refresh Token "별도 저장소 없음" 원문 의도(원작성자 확인) |
-| `checklist` | 거의 완전 구현 | 요구사항 대비 확인 필요 8개 항목 전부 처리 완료(코드 5건 수정 + 문서화 3건 + 노션 명세서 반영). 거래유형별 분기 미도입만 열려있는 논의 사항으로 남음 |
+| `checklist` | 거의 완전 구현 | 요구사항 대비 확인 필요 8개 항목 전부 처리 완료(코드 5건 수정 + 문서화 3건 + 노션 명세서 반영). 거래유형별 분기 미도입만 열려있는 논의 사항으로 남음. **(2026-08-06 추가)** `GET /checklists`(내 체크리스트 목록)에 DB 레벨 페이지네이션 추가 — 매물 목록(`GET /properties`)과 동일한 `PageResponse` 봉투 구조로 응답이 바뀜(기존 배열 응답에서 breaking change) |
 | `user` | 부분 구현 | 이미지 업로드 자체가 없음, 탈퇴 처리 미완성 |
-| `property` | 부분 구현, 명세보다 크게 좁음 | 시세·위험신호·체크리스트 연동 전무, 검색/페이지네이션 없음 |
+| `property` | 부분 구현, 명세보다 크게 좁음 | 시세·위험신호·체크리스트 연동 전무. **(2026-08-06 정정)** "검색/페이지네이션 없음"은 더 이상 사실이 아님 — `GET /properties`가 지역/면적/가격 등 검색 조건 + `Pageable` 기반 페이지네이션(`PropertyRepository.search()`, `PageResponse`)을 이미 지원함 |
 | `contract-analysis` | 부분 구현(진행 중) | 핵심 단계인 AI 분석(`/analyze`) 자체가 없음 |
 | `market-data` | 거의 완전 구현 | 반경 기반 실거래가 비교 로직 동작, `property`에 실제 연결됨. 남은 건 FE 연동, 실시간재계산→캐싱 전환 여부 등 4개 |
 | `risk-analysis` | 완전 구현 | **(2026-08-04 완료)** 신호 탐지기 4종, API 4개(`POST /risk-analysis`, `GET /risk-signals`, `GET /deposit-safety`, `POST /deposit-safety/recalculate`), market-data 어댑터(전세+매매), `DepositSafetyCheckService`(전세가율), checklist 연계 보조 신호, 매물 수정 시 자동 재계산 트리거(이벤트 기반)까지 전부 구현 완료. 완전 미해결 이슈 없음 — 남은 건 "동일 계정 다수 등록" 활성화 여부·선순위보증금 입력 화면 배치 등 팀/FE 결정 2건뿐 |
@@ -20,12 +20,12 @@
 
 ### 1. 정의만 되어 있고 실제로 안 쓰이는 에러코드 (죽은 코드)
 
-`ErrorCode.java`에 있는 도메인별 커스텀 코드 중 다음 9개는 어디에서도 참조되지 않습니다(전체 커스텀 코드 26개 중 약 1/3).
+`ErrorCode.java`에 있는 도메인별 커스텀 코드 중 다음 8개는 어디에서도 참조되지 않습니다(전체 커스텀 코드 26개 중 약 1/3).
 
-- `property`: `PROPERTY_REQUIRED_FIELD_MISSING`, `PROPERTY_TYPE_NOT_SUPPORTED`, `PROPERTY_IMAGE_INVALID`, `PROPERTY_INVALID_SEARCH_CONDITION`
+- `property`: `PROPERTY_REQUIRED_FIELD_MISSING`, `PROPERTY_TYPE_NOT_SUPPORTED`, `PROPERTY_IMAGE_INVALID`
 - `contract-analysis`: `CONTRACT_ANALYSIS_NOT_RELATED`, `CONTRACT_ANALYSIS_MASKING_NOT_CONFIRMED`, `CONTRACT_ANALYSIS_AI_RESPONSE_INVALID`, `CONTRACT_ANALYSIS_AI_HALLUCINATION`, `CONTRACT_ANALYSIS_AI_API_ERROR`
 
-두 도메인 다 "요구사항 명세서를 읽고 실패 사유별로 코드를 미리 다 만들어뒀지만, 정작 그 코드를 던지는 검증 로직은 아직 못 짠" 상태로 보입니다. 특히 contract-analysis의 5개는 전부 아직 없는 `/analyze` 단계용이라 자연스러운 반면, property의 4개는 해당 기능(이미지 검증, 검색 조건, 매물유형 검증)이 애초에 스코프에서 빠졌는지 확인이 필요합니다.
+두 도메인 다 "요구사항 명세서를 읽고 실패 사유별로 코드를 미리 다 만들어뒀지만, 정작 그 코드를 던지는 검증 로직은 아직 못 짠" 상태로 보입니다. 특히 contract-analysis의 5개는 전부 아직 없는 `/analyze` 단계용이라 자연스러운 반면, property의 3개는 해당 기능(이미지 검증, 매물유형 검증)이 애초에 스코프에서 빠졌는지 확인이 필요합니다. (**2026-08-06 정정**: 원래 이 목록에 있던 `PROPERTY_INVALID_SEARCH_CONDITION`은 이후 `PropertyService`의 검색/페이지네이션 조건 검증(`getMyProperties`)에서 실제로 4곳에서 던져지고 있어 죽은 코드가 아님을 확인해 제외함.)
 
 ### 2. market-data는 해소됨, risk-analysis에는 아직 같은 흔적이 남아있음
 
