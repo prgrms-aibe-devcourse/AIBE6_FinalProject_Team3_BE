@@ -76,7 +76,7 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 | 항목 | 상태 |
 |---|---|
 | 동일 입력·동일 정책 버전이면 동일 결과 보장 | ✅ **(2026-08-03 완료)** 탐지기 4종 전부 순수 함수적 판정(DB 조회 + 정책값 비교) — 결정적(deterministic). `PriceAnomalyDetector`도 같은 `MarketComparison` 입력이면 항상 같은 결과 |
-| 위험도 계산 실패가 매물 상세 조회 전체 실패로 이어지지 않음 | ⚠️ `FakeListingSignalService`는 market-data 실패/판정불가를 예외 없이 상태값으로 흡수하지만, `PropertyService.getProperty()` 쪽에 이 결과를 읽어오는 연동 지점 자체가 없어 실제 조회 흐름에서 검증 불가(위 "다른 도메인에 남아있는 연계 흔적" 참고) |
+| 위험도 계산 실패가 매물 상세 조회 전체 실패로 이어지지 않음 | ✅ **(2026-08-07 확인)** `FakeListingSignalService`는 market-data 실패/판정불가를 예외 없이 상태값으로 흡수한다. BE `PropertyService.getProperty()`는 애초에 risk-analysis를 호출하지 않지만, FE `page.tsx`가 `GET /risk-signals`·`GET /deposit-safety`를 매물 조회와 별개로 호출해 실패해도 `.catch()`로 흡수하고 매물 본문은 그대로 렌더링함(위 "다른 도메인에 남아있는 연계 흔적" 참고) — 결과적으로 요구사항이 만족됨 |
 | 실거래가 조회 실패와 위험도 계산 실패 구분 | ⚠️ 모델 수준에서는 `RiskCheckReason.DATA_FETCH_FAILURE`(FAILED)와 `NO_COMPARABLE_TRANSACTION`(UNDETERMINABLE)로 구분되지만, 실제 market-data 구현(`MolitRentClientImpl`)이 외부 API 실패를 예외로 던지지 않고 빈 리스트로 삼켜버려 "실패"와 "판정불가"가 원천 데이터부터 구분되지 않음 — `MarketDataClientImpl` 어댑터도 이 한계를 그대로 물려받아 항상 `UNDETERMINABLE`로만 매핑함(위 'market-data 도메인 연동' 참고). market-data 쪽에서 API 실패를 예외로 구분해 던지는 선행 작업이 있어야 완전히 해결됨 |
 | 매물 정보/시세 변경 시에만 재계산(불필요한 재계산 방지) | ✅ **(2026-08-04 구현)** `PropertyUpdatedEvent`가 매물 수정 시에만 발행되므로, 조회만으로는 재계산이 트리거되지 않음 |
 | 동일계정 다수등록 탐지를 정책 플래그로 켜고 끌 수 있게 | ✅ **(2026-08-03 구현)** `SameAccountMultipleDetector.isEnabled()`가 `RiskPolicyConfig.multiAccountDetectionEnabled`를 그대로 반환 — 탐지 로직 자체는 완성됐고 플래그로만 켜고 끔(기본값 `false`) |
