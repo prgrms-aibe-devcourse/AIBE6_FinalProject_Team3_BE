@@ -170,7 +170,8 @@ class AdminUserControllerTest {
         // 승격시키지 않으므로 앱 안에서 되돌릴 방법이 없다 - 그 경로를 막는 회귀 테스트.
         User target = buildUser(TARGET_ID, "target@example.com", "관리자타겟", Role.ADMIN);
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
-        when(userRepository.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).thenReturn(1L);
+        when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
+                .thenReturn(List.of(target));
 
         mockMvc.perform(patch("/admin/users/{userId}/role", TARGET_ID)
                         .cookie(adminCookie())
@@ -185,8 +186,10 @@ class AdminUserControllerTest {
     @Test
     void 다른_활성_관리자가_남아있으면_강등할_수_있다() throws Exception {
         User target = buildUser(TARGET_ID, "target@example.com", "관리자타겟", Role.ADMIN);
+        User otherAdmin = buildUser(99L, "other-admin@example.com", "다른관리자", Role.ADMIN);
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
-        when(userRepository.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).thenReturn(2L);
+        when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
+                .thenReturn(List.of(target, otherAdmin));
 
         mockMvc.perform(patch("/admin/users/{userId}/role", TARGET_ID)
                         .cookie(adminCookie())
@@ -202,7 +205,8 @@ class AdminUserControllerTest {
     void 마지막_남은_활성_관리자는_정지할_수_없다() throws Exception {
         User target = buildUser(TARGET_ID, "target@example.com", "관리자타겟", Role.ADMIN);
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
-        when(userRepository.countByRoleAndStatus(Role.ADMIN, UserStatus.ACTIVE)).thenReturn(1L);
+        when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
+                .thenReturn(List.of(target));
 
         mockMvc.perform(patch("/admin/users/{userId}/status", TARGET_ID)
                         .cookie(adminCookie())

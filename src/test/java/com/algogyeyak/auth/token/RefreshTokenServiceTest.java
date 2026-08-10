@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -91,13 +92,37 @@ class RefreshTokenServiceTest {
     @Test
     void rotateSucceedsAndIssuesNewTokenWhenValid() {
         User user = user(1L);
-        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
+        ArgumentCaptor<String> newHashCaptor = ArgumentCaptor.forClass(String.class);
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), newHashCaptor.capture(), any(), any());
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        stubByUserPointer("1", () -> newHashCaptor.getValue());
 
         RefreshTokenService.RotationResult result = refreshTokenService.rotate("presented-raw-token");
 
         assertEquals(user, result.user());
         assertNotEquals("presented-raw-token", result.rawToken());
+    }
+
+    // rotate()가 ROTATE_SCRIPT 커밋 이후 by-user를 다시 읽어 동시 로그인(issue())에 가로채이지
+    // 않았는지 재확인한다 - 여기서는 그 재확인이 불일치를 실제로 잡아내는지만 본다(Mockito로는 진짜
+    // 동시성을 재현할 수 없어, 재확인 시점에 다른 값이 보이는 상황을 직접 스텁으로 흉내낸다).
+    @Test
+    void rotateThrowsWhenByUserPointerWasSupersededByConcurrentLoginBeforeReturn() {
+        User user = user(1L);
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        stubByUserPointer("1", () -> "some-other-session-hash-from-concurrent-login");
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> refreshTokenService.rotate("presented-raw-token"));
+
+        assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
+    }
+
+    private void stubByUserPointer(String userId, java.util.function.Supplier<String> value) {
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("auth:refresh-token:by-user:" + userId)).thenAnswer(invocation -> value.get());
     }
 
     @Test
