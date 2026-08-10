@@ -1,0 +1,10 @@
+package com.algogyeyak.admin.entity;
+
+public enum AdminAuditAction {
+    UPDATE_ROLE,
+    UPDATE_STATUS,
+    CREATE_CHECKLIST_TEMPLATE,
+    UPDATE_CHECKLIST_TEMPLATE,
+    DELETE_CHECKLIST_TEMPLATE,
+    REVIEW_PROPERTY_REPORT
+}

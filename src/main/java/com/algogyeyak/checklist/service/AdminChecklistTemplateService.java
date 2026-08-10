@@ -1,5 +1,7 @@
 package com.algogyeyak.checklist.service;
 
+import com.algogyeyak.admin.entity.AdminAuditAction;
+import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateUpdateRequest;
@@ -40,6 +42,7 @@ public class AdminChecklistTemplateService {
     );
 
     private final ChecklistItemTemplateRepository checklistItemTemplateRepository;
+    private final AdminAuditLogger adminAuditLogger;
 
     public List<AdminChecklistItemTemplateResponse> list() {
         return checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc().stream()
@@ -52,7 +55,7 @@ public class AdminChecklistTemplateService {
      * (문항이 하나도 없으면 1로 시작).
      */
     @Transactional
-    public AdminChecklistItemTemplateResponse create(AdminChecklistItemTemplateCreateRequest request) {
+    public AdminChecklistItemTemplateResponse create(Long actorId, AdminChecklistItemTemplateCreateRequest request) {
         // 새로 만드는 문항은 항상 active=true라, 다른 활성 문항과의 code 중복도 그 기준으로 검사한다.
         validateCode(request.code(), request.itemType(), true, null);
         validateApplicablePropertyTypes(request.applicablePropertyTypes());
@@ -76,7 +79,10 @@ public class AdminChecklistTemplateService {
                 .applicablePropertyTypes(request.applicablePropertyTypes())
                 .build();
 
-        return AdminChecklistItemTemplateResponse.from(checklistItemTemplateRepository.save(template));
+        ChecklistItemTemplate saved = checklistItemTemplateRepository.save(template);
+        adminAuditLogger.log(actorId, AdminAuditAction.CREATE_CHECKLIST_TEMPLATE, saved.getId(),
+                Map.of("content", saved.getContent(), "category", saved.getCategory(), "active", saved.isActive()));
+        return AdminChecklistItemTemplateResponse.from(saved);
     }
 
     /**
@@ -89,12 +95,15 @@ public class AdminChecklistTemplateService {
      * 도입한다.
      */
     @Transactional
-    public AdminChecklistItemTemplateResponse update(Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
+    public AdminChecklistItemTemplateResponse update(
+            Long actorId, Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
         ChecklistItemTemplate template = findTemplate(templateId);
         validateCode(request.code(), request.itemType(), request.active(), templateId);
         validateNotDeactivatingLastActiveTemplate(template, request.active());
         validateApplicablePropertyTypes(request.applicablePropertyTypes());
 
+        String previousContent = template.getContent();
+        boolean previousActive = template.isActive();
         template.update(
                 request.category(),
                 request.content(),
@@ -107,6 +116,9 @@ public class AdminChecklistTemplateService {
                 request.applicablePropertyTypes(),
                 request.active()
         );
+        adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_CHECKLIST_TEMPLATE, templateId, Map.of(
+                "beforeContent", previousContent, "afterContent", template.getContent(),
+                "beforeActive", previousActive, "afterActive", template.isActive()));
         return AdminChecklistItemTemplateResponse.from(template);
     }
 
@@ -203,7 +215,7 @@ public class AdminChecklistTemplateService {
      * 동시에 삭제를 시도하면 둘 다 통과해 0개가 될 수 있다. 같은 이유(관리자 전용, 저빈도)로 감수한다.
      */
     @Transactional
-    public void delete(Long templateId) {
+    public void delete(Long actorId, Long templateId) {
         ChecklistItemTemplate template = findTemplate(templateId);
         if (checklistItemTemplateRepository.count() <= 1) {
             throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM);
@@ -213,7 +225,10 @@ public class AdminChecklistTemplateService {
         // update()의 validateNotDeactivatingLastActiveTemplate가 막으려던 것과 동일한 문제
         // (ChecklistService.createChecklist()가 문항 0개로 조용히 생성됨)가 다른 경로로 발생한다.
         validateNotDeactivatingLastActiveTemplate(template, false);
+        // 삭제 후에는 다시 조회할 수 없으니, 감사 로그에 남길 내용을 삭제 전에 미리 캡처해둔다.
+        Map<String, Object> deletedSummary = Map.of("content", template.getContent(), "category", template.getCategory());
         checklistItemTemplateRepository.delete(template);
+        adminAuditLogger.log(actorId, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE, templateId, deletedSummary);
     }
 
     private ChecklistItemTemplate findTemplate(Long templateId) {

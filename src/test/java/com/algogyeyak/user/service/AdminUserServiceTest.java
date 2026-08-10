@@ -1,5 +1,7 @@
 package com.algogyeyak.user.service;
 
+import com.algogyeyak.admin.entity.AdminAuditAction;
+import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
@@ -7,6 +9,7 @@ import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.user.repository.UserRepository;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -23,11 +26,15 @@ import static org.mockito.Mockito.when;
  * 마지막 활성 관리자 보호(rejectIfLastActiveAdmin)가 findAllByRoleAndStatusForUpdate(PESSIMISTIC_WRITE)를
  * 올바르게 사용하는지 검증한다. 실제 락이 두 트랜잭션을 직렬화하는지는 DB 엔진의 락 구현에 달려 있어
  * Mockito로는 확인할 수 없다 - 여기서는 그 조회 결과(size)에 따라 서비스가 옳게 분기하는지만 본다.
+ * AdminAuditLogger는 mock으로 대체해, 거부된 변경에는 감사 로그가 남지 않는지도 함께 확인한다.
  */
 class AdminUserServiceTest {
 
+    private static final Long ACTOR_ID = 100L;
+
     private final UserRepository userRepository = mock(UserRepository.class);
-    private final AdminUserService adminUserService = new AdminUserService(userRepository);
+    private final AdminAuditLogger adminAuditLogger = mock(AdminAuditLogger.class);
+    private final AdminUserService adminUserService = new AdminUserService(userRepository, adminAuditLogger);
 
     private User adminUser(Long id) {
         User user = User.createOAuthUser("admin" + id + "@example.com", "관리자" + id, "http://img");
@@ -50,10 +57,11 @@ class AdminUserServiceTest {
                 .thenReturn(List.of(admin));
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateRole(1L, Role.USER));
+                () -> adminUserService.updateRole(ACTOR_ID, 1L, Role.USER));
 
         assertEquals(ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT, exception.getErrorCode());
         assertEquals(Role.ADMIN, admin.getRole(), "거부됐다면 실제 강등이 적용되면 안 된다");
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
     }
 
     @Test
@@ -64,9 +72,11 @@ class AdminUserServiceTest {
         when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
                 .thenReturn(List.of(admin, otherAdmin));
 
-        adminUserService.updateRole(1L, Role.USER);
+        adminUserService.updateRole(ACTOR_ID, 1L, Role.USER);
 
         assertEquals(Role.USER, admin.getRole());
+        verify(adminAuditLogger).log(ACTOR_ID, AdminAuditAction.UPDATE_ROLE, 1L,
+                Map.of("beforeRole", Role.ADMIN, "afterRole", Role.USER));
     }
 
     @Test
@@ -77,10 +87,11 @@ class AdminUserServiceTest {
                 .thenReturn(List.of(admin));
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateStatus(1L, UserStatus.SUSPENDED));
+                () -> adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED));
 
         assertEquals(ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT, exception.getErrorCode());
         assertEquals(UserStatus.ACTIVE, admin.getStatus());
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
     }
 
     @Test
@@ -91,9 +102,11 @@ class AdminUserServiceTest {
         when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
                 .thenReturn(List.of(admin, otherAdmin));
 
-        adminUserService.updateStatus(1L, UserStatus.SUSPENDED);
+        adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED);
 
         assertEquals(UserStatus.SUSPENDED, admin.getStatus());
+        verify(adminAuditLogger).log(ACTOR_ID, AdminAuditAction.UPDATE_STATUS, 1L,
+                Map.of("beforeStatus", UserStatus.ACTIVE, "afterStatus", UserStatus.SUSPENDED));
     }
 
     // 강등/정지 대상이 이미 ADMIN+ACTIVE가 아니면(예: 일반 유저 정지) 마지막 관리자와 무관하므로
@@ -103,7 +116,7 @@ class AdminUserServiceTest {
         User user = normalUser(1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
-        adminUserService.updateStatus(1L, UserStatus.SUSPENDED);
+        adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED);
 
         assertEquals(UserStatus.SUSPENDED, user.getStatus());
         verify(userRepository, never()).findAllByRoleAndStatusForUpdate(any(), any());

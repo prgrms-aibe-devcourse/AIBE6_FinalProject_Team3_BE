@@ -1,5 +1,7 @@
 package com.algogyeyak.user.service;
 
+import com.algogyeyak.admin.entity.AdminAuditAction;
+import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.pagination.PageableUtils;
@@ -11,6 +13,7 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.user.repository.UserRepository;
+import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -25,6 +28,7 @@ public class AdminUserService {
     private static final Set<String> ALLOWED_SORT_PROPERTIES = Set.of("createdAt", "nickname", "email");
 
     private final UserRepository userRepository;
+    private final AdminAuditLogger adminAuditLogger;
 
     @Transactional(readOnly = true)
     public PageResponse<AdminUserListItemResponse> list(Pageable pageable, UserSearchCondition condition) {
@@ -42,30 +46,36 @@ public class AdminUserService {
     }
 
     @Transactional
-    public AdminUserDetailResponse updateRole(Long userId, Role role) {
+    public AdminUserDetailResponse updateRole(Long actorId, Long userId, Role role) {
         User user = findUser(userId);
         if (role != Role.ADMIN) {
             rejectIfLastActiveAdmin(user);
         }
+        Role previousRole = user.getRole();
         user.changeRole(role);
+        adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_ROLE, userId,
+                Map.of("beforeRole", previousRole, "afterRole", role));
         return AdminUserDetailResponse.from(user);
     }
 
     // status는 컨트롤러 DTO 단계에서 이미 ACTIVE/SUSPENDED로 제한되어 있고, 탈퇴 유저에 대한 거부는
     // User.suspend()/activate()가 던진다 - 여기서는 그 두 값 중 어느 쪽으로 갈지만 분기한다.
     @Transactional
-    public AdminUserDetailResponse updateStatus(Long userId, UserStatus status) {
+    public AdminUserDetailResponse updateStatus(Long actorId, Long userId, UserStatus status) {
         if (status != UserStatus.ACTIVE && status != UserStatus.SUSPENDED) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "ACTIVE/SUSPENDED로만 변경할 수 있습니다.");
         }
 
         User user = findUser(userId);
+        UserStatus previousStatus = user.getStatus();
         if (status == UserStatus.SUSPENDED) {
             rejectIfLastActiveAdmin(user);
             user.suspend();
         } else {
             user.activate();
         }
+        adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_STATUS, userId,
+                Map.of("beforeStatus", previousStatus, "afterStatus", status));
         return AdminUserDetailResponse.from(user);
     }
 
