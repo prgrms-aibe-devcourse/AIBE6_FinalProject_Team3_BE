@@ -2,6 +2,8 @@ package com.algogyeyak.user.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -115,6 +117,40 @@ class AdminUserControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.content[0].nickname").value("타겟유저"))
                 .andExpect(jsonPath("$.data.totalElements").value(1));
+    }
+
+    // UserRepository는 mock이라 LIKE/정확일치가 실제로 동작하는지는 확인할 수 없다(그건
+    // UserRepositoryTest가 실제 H2로 검증) - 여기서는 쿼리 파라미터가 서비스/리포지토리
+    // 호출까지 그대로 전달되는지만 확인한다.
+    @Test
+    void 목록조회_검색조건이_리포지토리_호출까지_그대로_전달된다() throws Exception {
+        when(userRepository.search(any(), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        mockMvc.perform(get("/admin/users")
+                        .param("email", "target@example.com")
+                        .param("nickname", "타겟")
+                        .param("role", "ADMIN")
+                        .param("status", "SUSPENDED")
+                        .cookie(adminCookie()))
+                .andExpect(status().isOk());
+
+        verify(userRepository).search(
+                eq("target@example.com"), eq("타겟"), eq(Role.ADMIN), eq(UserStatus.SUSPENDED), any());
+    }
+
+    @Test
+    void 허용되지_않는_정렬_필드로_목록조회하면_400이다() throws Exception {
+        mockMvc.perform(get("/admin/users").param("sort", "id").cookie(adminCookie()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_SORT_FIELD"));
+    }
+
+    @Test
+    void 페이지_크기가_100을_초과하면_목록조회가_400이다() throws Exception {
+        mockMvc.perform(get("/admin/users").param("size", "101").cookie(adminCookie()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
     }
 
     @Test
@@ -234,11 +270,174 @@ class AdminUserControllerTest {
     }
 
     @Test
+    void 정지된_유저를_다시_활성화할_수_있다() throws Exception {
+        User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
+        target.suspend();
+        when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+
+        mockMvc.perform(patch("/admin/users/{userId}/status", TARGET_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"ACTIVE"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"));
+    }
+
+    @Test
+    void 자기자신의_상태는_변경할_수_없다() throws Exception {
+        mockMvc.perform(patch("/admin/users/{userId}/status", ADMIN_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void 탈퇴한_유저의_상태는_변경할_수_없다() throws Exception {
+        User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
+        target.withdraw();
+        when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+
+        mockMvc.perform(patch("/admin/users/{userId}/status", TARGET_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_INVALID_STATUS_TRANSITION"));
+    }
+
+    @Test
+    void status에_ACTIVE_SUSPENDED_외_값을_넣으면_409이다() throws Exception {
+        User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
+        when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+
+        mockMvc.perform(patch("/admin/users/{userId}/status", TARGET_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"WITHDRAWN"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_INVALID_STATUS_TRANSITION"));
+    }
+
+    @Test
+    void 존재하지_않는_유저의_상태변경은_404이다() throws Exception {
+        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(patch("/admin/users/{userId}/status", 999L)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_USER_NOT_FOUND"));
+    }
+
+    @Test
+    void 상태변경은_토큰_없이_호출하면_401이다() throws Exception {
+        mockMvc.perform(patch("/admin/users/{userId}/status", TARGET_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 상태변경은_비관리자면_403이다() throws Exception {
+        mockMvc.perform(patch("/admin/users/{userId}/status", TARGET_ID)
+                        .cookie(userCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void 존재하지_않는_유저의_권한변경은_404이다() throws Exception {
+        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(patch("/admin/users/{userId}/role", 999L)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"role":"ADMIN"}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_USER_NOT_FOUND"));
+    }
+
+    @Test
+    void role_필드가_없으면_권한변경이_400이다() throws Exception {
+        mockMvc.perform(patch("/admin/users/{userId}/role", TARGET_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void 권한변경은_토큰_없이_호출하면_401이다() throws Exception {
+        mockMvc.perform(patch("/admin/users/{userId}/role", TARGET_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"role":"ADMIN"}
+                                """))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 권한변경은_비관리자면_403이다() throws Exception {
+        mockMvc.perform(patch("/admin/users/{userId}/role", TARGET_ID)
+                        .cookie(userCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"role":"ADMIN"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void 유저_상세조회에_성공한다() throws Exception {
+        User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
+        when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+
+        mockMvc.perform(get("/admin/users/{userId}", TARGET_ID).cookie(adminCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.nickname").value("타겟유저"));
+    }
+
+    @Test
     void 존재하지_않는_유저_상세조회는_404이다() throws Exception {
         when(userRepository.findById(999L)).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/admin/users/{userId}", 999L).cookie(adminCookie()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("ADMIN_USER_NOT_FOUND"));
+    }
+
+    @Test
+    void 상세조회는_토큰_없이_호출하면_401이다() throws Exception {
+        mockMvc.perform(get("/admin/users/{userId}", TARGET_ID))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 상세조회는_비관리자면_403이다() throws Exception {
+        mockMvc.perform(get("/admin/users/{userId}", TARGET_ID).cookie(userCookie()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 }

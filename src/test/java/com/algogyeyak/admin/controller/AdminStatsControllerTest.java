@@ -91,6 +91,12 @@ class AdminStatsControllerTest {
     }
 
     @Test
+    void 인증토큰_없이_접근하면_401이다() throws Exception {
+        mockMvc.perform(get("/admin/stats/dashboard"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void 관리자_토큰으로_대시보드_통계를_조회한다() throws Exception {
         List<Long> userIdsJoinedInRange = LongStream.rangeClosed(1, 10).boxed().toList();
 
