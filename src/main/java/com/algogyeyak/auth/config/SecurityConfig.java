@@ -97,6 +97,8 @@ public class SecurityConfig {
                         // 없어지는 건 아니다.
                         .requestMatchers("/users/nickname-check").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
+                        // Prometheus
+                        .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .anyRequest().authenticated()
                 )
                 // H2 콘솔은 내부적으로 프레임(iframe)을 사용하는데, 기본 X-Frame-Options: DENY가 이를 막는다.
