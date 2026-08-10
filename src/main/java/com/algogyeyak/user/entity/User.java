@@ -52,6 +52,9 @@ public class User {
     @Column(nullable = false)
     private UserStatus status;
 
+    @Column(name = "withdrawn_at")
+    private LocalDateTime withdrawnAt;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Role role;
@@ -150,6 +153,7 @@ public class User {
         }
 
         this.status = UserStatus.WITHDRAWN;
+        this.withdrawnAt = LocalDateTime.now();
         this.nickname = WITHDRAWN_NICKNAME_PREFIX + this.id;
         this.email = (this.email != null) ? "withdrawn_" + this.id + "@" + WITHDRAWN_EMAIL_DOMAIN : null;
         this.passwordHash = null;
