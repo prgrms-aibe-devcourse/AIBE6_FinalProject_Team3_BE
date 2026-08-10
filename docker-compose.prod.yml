@@ -2,6 +2,8 @@ services:
   backend:
     environment:
       SERVER_FORWARD_HEADERS_STRATEGY: framework
+    ports:
+      - "127.0.0.1:8080:8080"
 
   nginx-proxy-manager:
     image: 'jc21/nginx-proxy-manager:latest'

@@ -40,7 +40,6 @@ dependencies {
     developmentOnly("me.paulschwarz:springboot4-dotenv:5.1.0")
     runtimeOnly("com.h2database:h2")
     runtimeOnly("com.mysql:mysql-connector-j")
-    runtimeOnly("io.micrometer:micrometer-registry-prometheus")
     annotationProcessor("org.projectlombok:lombok")
     testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")
     testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
@@ -72,6 +71,9 @@ dependencies {
     // S3
     implementation(platform("software.amazon.awssdk:bom:2.25.0"))
     implementation("software.amazon.awssdk:s3")
+
+    // Prometheus
+    runtimeOnly("io.micrometer:micrometer-registry-prometheus")
 }
 
 tasks.withType<Test> {
