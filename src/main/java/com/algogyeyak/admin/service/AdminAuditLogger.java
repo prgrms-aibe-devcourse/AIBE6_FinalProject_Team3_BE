@@ -10,12 +10,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 관리자 액션 감사 로그 기록의 단일 진입점. 호출하는 서비스 메서드가 이미 @Transactional이므로
  * 여기서 저장하는 행은 그 메서드의 실제 변경(role 변경, 문항 삭제 등)과 같은 트랜잭션에 묶여
  * 함께 커밋/롤백된다 - 이 저장이 실패하면(제약 위반 등) 실제 변경도 함께 롤백된다. 감사 기록을
  * 남길 수 없으면 관리자 변경 자체도 실패해야 한다는 의도적 정책이다.
+ *
+ * <p>이 정책은 호출부가 실제로 활성 트랜잭션 안에 있을 때만 성립한다 - 그래서 javadoc만으로 두지
+ * 않고 {@link #log}가 시작 시점에 {@link TransactionSynchronizationManager#isActualTransactionActive()}로
+ * 직접 확인한다. 앞으로 누군가 트랜잭션 밖에서(예: @Async, 별도 스레드) 실수로 호출해도, 감사 기록이
+ * 조용히 트랜잭션 보장 없이 저장되는 대신 즉시 실패한다.
  */
 @Component
 @RequiredArgsConstructor
@@ -34,6 +40,11 @@ public class AdminAuditLogger {
      *               {"beforeRole": "USER", "afterRole": "ADMIN"}처럼 JSON 직렬화할 Map으로 받는다.
      */
     public void log(Long adminUserId, AdminAuditAction action, Long targetId, Map<String, Object> detail) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException(
+                    "AdminAuditLogger.log()는 실제 변경과 같은 트랜잭션 안에서만 호출할 수 있습니다 - "
+                            + "호출부가 @Transactional 메서드 안에 있는지 확인하세요.");
+        }
         String adminEmailSnapshot = userRepository.findById(adminUserId)
                 .map(User::getEmail)
                 .orElse(null);

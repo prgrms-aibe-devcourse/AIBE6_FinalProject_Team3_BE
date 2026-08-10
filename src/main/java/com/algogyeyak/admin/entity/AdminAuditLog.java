@@ -53,6 +53,14 @@ public class AdminAuditLog {
     @Column(nullable = false, length = 40)
     private AdminAuditAction action;
 
+    // action에서 그대로 유추 가능한 값이지만(예: UPDATE_ROLE → USER), 나중에 도메인 단위 조회 API가
+    // 생겼을 때 action 목록을 매번 나열하지 않고 바로 필터링할 수 있도록 별도 컬럼으로 저장한다
+    // (AdminAuditTargetType 참고). action과 항상 1:1로 맞으므로 AdminAuditLog.of()에서 자동으로
+    // 채워지고, 호출부가 직접 넘기지는 않는다.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "target_type", nullable = false, length = 30)
+    private AdminAuditTargetType targetType;
+
     @Column(name = "target_id", nullable = false)
     private Long targetId;
 
@@ -66,20 +74,26 @@ public class AdminAuditLog {
     private LocalDateTime createdAt;
 
     @Builder
-    private AdminAuditLog(Long adminUserId, String adminEmailSnapshot, AdminAuditAction action, Long targetId, String detail) {
+    private AdminAuditLog(
+            Long adminUserId, String adminEmailSnapshot, AdminAuditAction action,
+            AdminAuditTargetType targetType, Long targetId, String detail) {
         this.adminUserId = adminUserId;
         this.adminEmailSnapshot = adminEmailSnapshot;
         this.action = action;
+        this.targetType = targetType;
         this.targetId = targetId;
         this.detail = detail;
     }
 
+    // targetType은 action.targetType()에서 자동으로 채운다 - 호출부(AdminAuditLogger)가 매번
+    // 대응하는 타입을 직접 골라 넘기면, action은 바꾸고 targetType은 안 바꾸는 실수가 생길 수 있다.
     public static AdminAuditLog of(
             Long adminUserId, String adminEmailSnapshot, AdminAuditAction action, Long targetId, String detail) {
         return AdminAuditLog.builder()
                 .adminUserId(adminUserId)
                 .adminEmailSnapshot(adminEmailSnapshot)
                 .action(action)
+                .targetType(action.targetType())
                 .targetId(targetId)
                 .detail(detail)
                 .build();

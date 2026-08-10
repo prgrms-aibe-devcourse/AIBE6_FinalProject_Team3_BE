@@ -1,27 +1,51 @@
 package com.algogyeyak.admin.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.entity.AdminAuditLog;
+import com.algogyeyak.admin.entity.AdminAuditTargetType;
 import com.algogyeyak.admin.repository.AdminAuditLogRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+/**
+ * AdminAuditLogger.log()는 실제 활성 트랜잭션 안에서만 호출되도록 방어한다 - 그래서 이 mock 기반
+ * 단위 테스트는 실제 서비스 호출부와 같은 조건을 흉내내기 위해 TransactionSynchronizationManager의
+ * "활성 트랜잭션" 플래그를 직접 세팅한다(가벼운 페이크 - 실제 DataSourceTransactionManager 없이도
+ * isActualTransactionActive()만 true로 만들면 충분하다). 실제 트랜잭션 안에서 끝까지 실행되는
+ * 경로는 AdminAuditLoggerIntegrationTest가 별도로 검증한다.
+ */
 class AdminAuditLoggerTest {
 
     private final AdminAuditLogRepository adminAuditLogRepository = mock(AdminAuditLogRepository.class);
     private final UserRepository userRepository = mock(UserRepository.class);
     private final AdminAuditLogger adminAuditLogger = new AdminAuditLogger(adminAuditLogRepository, userRepository);
+
+    @BeforeEach
+    void fakeActiveTransaction() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+    }
+
+    @AfterEach
+    void clearFakeTransaction() {
+        TransactionSynchronizationManager.setActualTransactionActive(false);
+    }
 
     private User user(Long id, String email) {
         User user = User.createOAuthUser(email, "관리자", "http://img");
@@ -47,6 +71,19 @@ class AdminAuditLoggerTest {
         assertThat(saved.getDetail()).isEqualTo("{\"beforeRole\":\"USER\",\"afterRole\":\"ADMIN\"}");
     }
 
+    // targetType은 호출부가 넘기지 않고 action에서 자동으로 유추된다 - action은 바뀌는데 targetType은
+    // 안 바뀌는 실수 자체가 애초에 불가능해야 한다는 걸 보장한다.
+    @Test
+    void logDerivesTargetTypeFromAction() {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L, "admin@example.com")));
+
+        adminAuditLogger.log(1L, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE, 5L, Map.of("content", "누수 확인"));
+
+        ArgumentCaptor<AdminAuditLog> captor = ArgumentCaptor.forClass(AdminAuditLog.class);
+        verify(adminAuditLogRepository).save(captor.capture());
+        assertThat(captor.getValue().getTargetType()).isEqualTo(AdminAuditTargetType.CHECKLIST_TEMPLATE);
+    }
+
     @Test
     void logCapturesActorEmailSnapshotAtWriteTime() {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user(1L, "admin@example.com")));
@@ -69,5 +106,17 @@ class AdminAuditLoggerTest {
         ArgumentCaptor<AdminAuditLog> captor = ArgumentCaptor.forClass(AdminAuditLog.class);
         verify(adminAuditLogRepository).save(captor.capture());
         assertThat(captor.getValue().getAdminEmailSnapshot()).isNull();
+    }
+
+    // 이 테스트만 예외적으로 활성 트랜잭션 플래그를 다시 꺼서, 호출부가 트랜잭션 밖에 있는 상황을
+    // 재현한다 - 조용히 저장되면 안 되고 즉시 실패해야 한다(클래스 상단 정책 참고).
+    @Test
+    void logThrowsWhenCalledOutsideAnActiveTransaction() {
+        TransactionSynchronizationManager.setActualTransactionActive(false);
+
+        assertThatThrownBy(() -> adminAuditLogger.log(1L, AdminAuditAction.UPDATE_ROLE, 5L, Map.of("beforeRole", "USER")))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(adminAuditLogRepository, never()).save(any());
     }
 }
