@@ -1,9 +1,9 @@
 package com.algogyeyak.auth.controller;
 
-import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.oauth.CookieUtils;
 import com.algogyeyak.auth.service.LocalAuthService;
+import com.algogyeyak.auth.service.SessionLogoutService;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
@@ -30,7 +30,7 @@ class AuthControllerDevLoginStartupTest {
                     mock(JwtProvider.class),
                     mock(RefreshTokenService.class),
                     mock(LocalAuthService.class),
-                    mock(AccessTokenRevocationService.class)));
+                    mock(SessionLogoutService.class)));
 
     @Test
     void failsToStartWhenDevLoginEnabledWithoutSecret() {

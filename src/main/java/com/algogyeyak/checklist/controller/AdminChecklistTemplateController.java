@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -38,13 +40,14 @@ public class AdminChecklistTemplateController {
     }
 
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<AdminChecklistItemTemplateResponse> create(
             @AuthenticationPrincipal JwtUserPrincipal principal,
             @Valid @RequestBody AdminChecklistItemTemplateCreateRequest request
     ) {
-        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(request);
-        // 감사 로그: 문항 추가/수정/삭제는 이후 생성되는 모든 유저 체크리스트에 영향을 미치는데도
-        // 별도 DB 감사 테이블이 없으므로 최소한 로그로는 누가 바꿨는지 남긴다.
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(principal.userId(), request);
+        // 영구 감사 기록은 AdminChecklistTemplateService가 AdminAuditLogger로 남긴다(실제 변경과
+        // 같은 트랜잭션) - 이 로그는 실시간 관측(Prometheus/Grafana)용으로 별도 유지한다.
         log.info("관리자 액션: actorId={} action=CREATE_CHECKLIST_TEMPLATE templateId={}", principal.userId(), result.id());
         return ApiResponse.success(result);
     }
@@ -55,14 +58,15 @@ public class AdminChecklistTemplateController {
             @PathVariable Long templateId,
             @Valid @RequestBody AdminChecklistItemTemplateUpdateRequest request
     ) {
-        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(templateId, request);
+        AdminChecklistItemTemplateResponse result =
+                adminChecklistTemplateService.update(principal.userId(), templateId, request);
         log.info("관리자 액션: actorId={} action=UPDATE_CHECKLIST_TEMPLATE templateId={}", principal.userId(), templateId);
         return ApiResponse.success(result);
     }
 
     @DeleteMapping("/{templateId}")
     public ApiResponse<Void> delete(@AuthenticationPrincipal JwtUserPrincipal principal, @PathVariable Long templateId) {
-        adminChecklistTemplateService.delete(templateId);
+        adminChecklistTemplateService.delete(principal.userId(), templateId);
         log.info("관리자 액션: actorId={} action=DELETE_CHECKLIST_TEMPLATE templateId={}", principal.userId(), templateId);
         return ApiResponse.successWithoutData();
     }

@@ -1,6 +1,8 @@
 package com.algogyeyak.property.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -13,6 +15,7 @@ import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyReport;
 import com.algogyeyak.property.entity.PropertyReportReason;
+import com.algogyeyak.property.entity.PropertyReportStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.repository.PropertyReportRepository;
@@ -149,6 +152,68 @@ class AdminPropertyReportControllerTest {
     }
 
     @Test
+    void 인증토큰_없이_목록조회하면_401이다() throws Exception {
+        mockMvc.perform(get("/admin/property-reports"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // PropertyReportRepository는 mock이라 필터가 실제로 동작하는지는 확인할 수 없다 - 쿼리
+    // 파라미터가 리포지토리 호출까지 그대로 전달되는지만 확인한다.
+    @Test
+    void 목록조회_필터가_리포지토리_호출까지_그대로_전달된다() throws Exception {
+        when(propertyReportRepository.search(any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        mockMvc.perform(get("/admin/property-reports")
+                        .param("status", "RESOLVED")
+                        .param("reason", "DUPLICATE")
+                        .cookie(adminCookie()))
+                .andExpect(status().isOk());
+
+        verify(propertyReportRepository).search(
+                eq(PropertyReportStatus.RESOLVED), eq(PropertyReportReason.DUPLICATE), any());
+    }
+
+    @Test
+    void 허용되지_않는_정렬_필드로_목록조회하면_400이다() throws Exception {
+        mockMvc.perform(get("/admin/property-reports").param("sort", "id").cookie(adminCookie()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_SORT_FIELD"));
+    }
+
+    @Test
+    void 페이지_크기가_100을_초과하면_목록조회가_400이다() throws Exception {
+        mockMvc.perform(get("/admin/property-reports").param("size", "101").cookie(adminCookie()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void 신고_상세조회에_성공한다() throws Exception {
+        when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(buildReport()));
+        when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(buildProperty()));
+        when(userRepository.findById(REPORTER_ID)).thenReturn(Optional.of(buildReporter()));
+
+        mockMvc.perform(get("/admin/property-reports/{reportId}", REPORT_ID).cookie(adminCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.reporterNickname").value("신고자"))
+                .andExpect(jsonPath("$.data.status").value("RECEIVED"));
+    }
+
+    @Test
+    void 상세조회는_토큰_없이_호출하면_401이다() throws Exception {
+        mockMvc.perform(get("/admin/property-reports/{reportId}", REPORT_ID))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 상세조회는_비관리자면_403이다() throws Exception {
+        mockMvc.perform(get("/admin/property-reports/{reportId}", REPORT_ID).cookie(userCookie()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
     void 신고를_조치완료로_처리한다() throws Exception {
         PropertyReport report = buildReport();
         when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(report));
@@ -203,6 +268,96 @@ class AdminPropertyReportControllerTest {
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("ADMIN_PROPERTY_REPORT_SELF_REVIEW"));
+    }
+
+    @Test
+    void 신고를_반려로_처리한다() throws Exception {
+        PropertyReport report = buildReport();
+        when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(report));
+        when(propertyRepository.findById(PROPERTY_ID)).thenReturn(Optional.of(buildProperty()));
+        when(userRepository.findById(REPORTER_ID)).thenReturn(Optional.of(buildReporter()));
+
+        mockMvc.perform(patch("/admin/property-reports/{reportId}/review", REPORT_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"REJECTED","memo":"근거 불충분"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("REJECTED"))
+                .andExpect(jsonPath("$.data.reviewMemo").value("근거 불충분"));
+    }
+
+    @Test
+    void 존재하지_않는_신고를_검토처리하면_404이다() throws Exception {
+        when(propertyReportRepository.findById(999L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(patch("/admin/property-reports/{reportId}/review", 999L)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"RESOLVED"}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_PROPERTY_REPORT_NOT_FOUND"));
+    }
+
+    @Test
+    void status에_RESOLVED_REJECTED_외_값을_넣으면_409이다() throws Exception {
+        when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(buildReport()));
+
+        mockMvc.perform(patch("/admin/property-reports/{reportId}/review", REPORT_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"RECEIVED"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_INVALID_STATUS_TRANSITION"));
+    }
+
+    @Test
+    void status_필드가_없으면_검토처리가_400이다() throws Exception {
+        mockMvc.perform(patch("/admin/property-reports/{reportId}/review", REPORT_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void memo가_500자를_넘으면_검토처리가_400이다() throws Exception {
+        String tooLong = "가".repeat(501);
+
+        mockMvc.perform(patch("/admin/property-reports/{reportId}/review", REPORT_ID)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"RESOLVED","memo":"%s"}
+                                """.formatted(tooLong)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void 검토처리는_토큰_없이_호출하면_401이다() throws Exception {
+        mockMvc.perform(patch("/admin/property-reports/{reportId}/review", REPORT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"RESOLVED"}
+                                """))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 검토처리는_비관리자면_403이다() throws Exception {
+        mockMvc.perform(patch("/admin/property-reports/{reportId}/review", REPORT_ID)
+                        .cookie(userCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"RESOLVED"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
     @Test

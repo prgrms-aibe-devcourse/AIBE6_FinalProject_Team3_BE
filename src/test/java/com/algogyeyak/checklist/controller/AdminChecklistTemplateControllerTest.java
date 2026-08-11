@@ -132,8 +132,16 @@ class AdminChecklistTemplateControllerTest {
     @Test
     void 관리자_토큰으로_문항생성에_성공한다() throws Exception {
         when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of(template(10L)));
+        // 실제 JPA save()는 IDENTITY 전략이라 저장 즉시 생성된 id를 채워 리턴한다 - 이 mock도 그
+        // 동작을 흉내내야 한다. AdminAuditLogger.log()가 saved.getId()를 targetId(nullable=false)로
+        // 쓰는데, id가 안 채워진 채로 리턴하면(원래 mock처럼 인자를 그대로 돌려주기만 하면) 여기서
+        // NULL 제약 위반이 난다.
         when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+                .thenAnswer(invocation -> {
+                    ChecklistItemTemplate saved = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(saved, "id", 11L);
+                    return saved;
+                });
 
         mockMvc.perform(post("/admin/checklist-templates")
                         .cookie(adminCookie())
@@ -147,7 +155,7 @@ class AdminChecklistTemplateControllerTest {
                                   "displayOrder":30
                                 }
                                 """))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.content").value("주차 공간이 충분한가요?"))
                 .andExpect(jsonPath("$.data.version").value(2));
     }
@@ -204,6 +212,25 @@ class AdminChecklistTemplateControllerTest {
     }
 
     @Test
+    void 존재하지_않는_매물유형으로_생성하면_400이다() throws Exception {
+        mockMvc.perform(post("/admin/checklist-templates")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "category":"AREA",
+                                  "content":"주차 공간이 충분한가요?",
+                                  "importance":"GENERAL",
+                                  "itemType":"CHECK",
+                                  "displayOrder":1,
+                                  "applicablePropertyTypes":"APARTMENT"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE"));
+    }
+
+    @Test
     void code에_맞지_않는_itemType으로_생성하면_400이다() throws Exception {
         mockMvc.perform(post("/admin/checklist-templates")
                         .cookie(adminCookie())
@@ -243,6 +270,36 @@ class AdminChecklistTemplateControllerTest {
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE"));
+    }
+
+    private String validCreateRequest() {
+        return """
+                {
+                  "category":"AREA",
+                  "content":"주차 공간이 충분한가요?",
+                  "importance":"GENERAL",
+                  "itemType":"CHECK",
+                  "displayOrder":1
+                }
+                """;
+    }
+
+    @Test
+    void 문항생성은_토큰_없이_호출하면_401이다() throws Exception {
+        mockMvc.perform(post("/admin/checklist-templates")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validCreateRequest()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 문항생성은_비관리자면_403이다() throws Exception {
+        mockMvc.perform(post("/admin/checklist-templates")
+                        .cookie(userCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validCreateRequest()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
     @Test
@@ -294,6 +351,59 @@ class AdminChecklistTemplateControllerTest {
     }
 
     @Test
+    void code에_맞지_않는_itemType으로_수정하면_400이다() throws Exception {
+        when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(template(10L)));
+
+        mockMvc.perform(patch("/admin/checklist-templates/{id}", 10L)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "category":"DOCUMENTS",
+                                  "content":"신탁등기가 되어 있나요?",
+                                  "importance":"REQUIRED",
+                                  "itemType":"CHECK",
+                                  "code":"TRUST_REGISTRATION",
+                                  "displayOrder":1,
+                                  "active":true
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE"));
+    }
+
+    private String validUpdateRequest() {
+        return """
+                {
+                  "category":"SAFETY",
+                  "content":"창문 잠금장치가 정상 작동하나요?",
+                  "importance":"REQUIRED",
+                  "itemType":"CHECK",
+                  "displayOrder":9,
+                  "active":true
+                }
+                """;
+    }
+
+    @Test
+    void 문항수정은_토큰_없이_호출하면_401이다() throws Exception {
+        mockMvc.perform(patch("/admin/checklist-templates/{id}", 10L)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validUpdateRequest()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 문항수정은_비관리자면_403이다() throws Exception {
+        mockMvc.perform(patch("/admin/checklist-templates/{id}", 10L)
+                        .cookie(userCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validUpdateRequest()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
     void 관리자_토큰으로_문항삭제에_성공한다() throws Exception {
         ChecklistItemTemplate target = template(10L);
         when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(target));
@@ -325,5 +435,18 @@ class AdminChecklistTemplateControllerTest {
         mockMvc.perform(delete("/admin/checklist-templates/{id}", 10L).cookie(adminCookie()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM"));
+    }
+
+    @Test
+    void 문항삭제는_토큰_없이_호출하면_401이다() throws Exception {
+        mockMvc.perform(delete("/admin/checklist-templates/{id}", 10L))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 문항삭제는_비관리자면_403이다() throws Exception {
+        mockMvc.perform(delete("/admin/checklist-templates/{id}", 10L).cookie(userCookie()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 }
