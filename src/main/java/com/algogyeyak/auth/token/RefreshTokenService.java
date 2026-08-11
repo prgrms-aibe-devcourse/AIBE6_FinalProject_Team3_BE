@@ -130,15 +130,16 @@ public class RefreshTokenService {
     }
 
     /**
-     * 알려진 한계: 이 메서드가 반환하는 새 refresh token은 ROTATE_SCRIPT가 Redis에 커밋된
-     * "직후"에 유효하다는 보장일 뿐, 이 메서드가 리턴하고 {@link com.algogyeyak.auth.controller.AuthController#refresh}가
-     * 그 값을 쿠키로 실어 응답을 완료하는 그 사이에, 같은 유저에 대한 {@link #issue}(새 로그인)가
-     * 끼어들면 by-user 포인터가 그 issue() 쪽으로 넘어가고 방금 만든 새 refresh token의
-     * by-hash 항목은 지워진다 - 클라이언트는 200과 함께 쿠키를 받지만 그 쿠키는 이미 죽어있어
-     * 다음 요청에서 AUTH_REFRESH_TOKEN_INVALID를 보게 된다. "유저당 세션 1개"라는 불변식 자체는
-     * 깨지지 않고(정확히 하나의 세션만 살아남음, 보안 우회 없음) 실제로는 "동시에 로그인 vs 갱신"이라는
-     * 극히 드문 타이밍에서만 발생하므로, rotate/issue 두 Lua 스크립트를 하나로 묶는 등의 복잡도를
-     * 들이지 않고 감수하기로 함(AdminUserService.rejectIfLastActiveAdmin과 같은 종류의 판단).
+     * ROTATE_SCRIPT가 Redis에 커밋된 "직후"부터 이 메서드가 실제로 리턴하기 직전까지는, 같은
+     * 유저에 대한 {@link #issue}(새 로그인)가 끼어들면 by-user 포인터가 그 issue() 쪽으로 넘어가고
+     * 방금 만든 새 refresh token의 by-hash 항목이 지워질 수 있다 - 아래
+     * {@link #rejectIfSessionAlreadySupersededByConcurrentLogin}이 리턴 직전에 by-user를 다시
+     * 읽어 바로 이 상황을 잡아낸다. "유저당 세션 1개"라는 불변식 자체는 이 재확인이 없어도 깨지지
+     * 않았다(정확히 하나의 세션만 살아남음, 보안 우회 없음) - 문제는 클라이언트가 200과 함께 이미
+     * 죽어있는 쿠키를 받고 *다음* 요청에서야 AUTH_REFRESH_TOKEN_INVALID로 실패하는 지연된 UX였다.
+     * 이 재확인은 그 실패를 이 요청 자체의 즉시 실패로 앞당긴다 - "동시에 로그인 vs 갱신"이라는 극히
+     * 드문 타이밍이라 rotate/issue 두 Lua 스크립트를 하나로 묶는 근본적 해결(훨씬 큰 복잡도)까지는
+     * 가지 않고, 이 정도로 감수하기로 함(AdminUserService.rejectIfLastActiveAdmin과 같은 종류의 판단).
      */
     public RotationResult rotate(String rawToken) {
         String tokenHash = hash(rawToken);
@@ -170,7 +171,25 @@ public class RefreshTokenService {
             throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, "존재하지 않거나 탈퇴한 사용자입니다.");
         }
 
+        rejectIfSessionAlreadySupersededByConcurrentLogin(userId, newHash);
+
         return new RotationResult(user, newRawToken);
+    }
+
+    // 동시 로그인(issue())이 이미 by-user를 가로챘다면, 위에서 방금 커밋한 newHash 항목은 issue()가
+    // 자기 자신의 ISSUE_SCRIPT 안에서 이미 지운 뒤다 - 여기서 별도로 지울 것이 없고, 클라이언트에
+    // 유효하지 않은 세션을 성공으로 돌려주지 않도록 즉시 거부하기만 하면 된다.
+    private void rejectIfSessionAlreadySupersededByConcurrentLogin(String userId, String newHash) {
+        String currentPointer;
+        try {
+            currentPointer = redisTemplate.opsForValue().get(byUserKey(userId));
+        } catch (DataAccessException e) {
+            throw redisUnavailable(e);
+        }
+        if (!newHash.equals(currentPointer)) {
+            throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID,
+                    "다른 로그인으로 세션이 갱신되어 이 refresh token은 더 이상 유효하지 않습니다.");
+        }
     }
 
     public void revoke(String rawToken) {
