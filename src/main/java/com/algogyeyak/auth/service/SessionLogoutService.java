@@ -18,8 +18,10 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 // AuthController.logout()에서 쓰던 세션 무효화 로직을 user 도메인(회원 탈퇴)에서도 재사용할 수 있도록
-// 뽑아낸 컴포넌트. 탈퇴 트랜잭션 커밋 이후에 호출돼도 안전해야 하므로, 토큰이 없거나 이미 무효해도
-// 예외를 던지지 않고 조용히 끝나는 계약을 유지한다.
+// 뽑아낸 컴포넌트. 토큰이 없거나 이미 무효한 토큰(만료/서명 오류)이면 예외 없이 조용히 끝나지만,
+// Redis 장애 시에는 기존 /auth/logout과 동일하게 fail-closed로 BusinessException(AUTH_TOKEN_STORE_UNAVAILABLE)을
+// 그대로 던진다(RefreshTokenService.revoke / AccessTokenRevocationService.revoke 참고) — 완전한
+// "예외 없음" 계약이 아니므로, 회원 탈퇴 후처리에서 이 예외를 어떻게 다룰지는 호출부에서 결정해야 한다.
 @Service
 public class SessionLogoutService {
 
