@@ -23,10 +23,12 @@ import org.springframework.util.StringUtils;
 public class ContractAnalysisAnalyzeService {
 
     private final GeminiClient geminiClient;
+    private final ContractAnalysisMaskingService maskingService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ContractAnalysisAnalyzeService(GeminiClient geminiClient) {
+    public ContractAnalysisAnalyzeService(GeminiClient geminiClient, ContractAnalysisMaskingService maskingService) {
         this.geminiClient = geminiClient;
+        this.maskingService = maskingService;
     }
 
     public ContractAnalysisAnalyzeResponse analyze(ContractAnalysisAnalyzeRequest request) {
@@ -36,13 +38,29 @@ public class ContractAnalysisAnalyzeService {
         if (!StringUtils.hasText(request.maskedText())) {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_INVALID_INPUT);
         }
+        // userConfirmed만으로는 클라이언트가 /masking을 실제로 거쳤는지 보장할 수 없으므로,
+        // 마스킹 패턴 자체를 재사용해 주민등록번호/전화번호/계좌번호가 남아있으면 서버가 직접 거부한다.
+        if (maskingService.containsUnmaskedPii(request.maskedText())) {
+            throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_UNMASKED_PII_DETECTED);
+        }
 
         GeminiGenerateContentResponse response = geminiClient.analyzeClauses(request.maskedText());
         String responseText = extractResponseText(response);
-        List<ContractAnalysisClause> clauses = parseAndValidateSchema(responseText);
-        validateNoHallucination(clauses, request.maskedText());
+        GeminiClauseAnalysisResult result = parseAndValidateSchema(responseText);
+        validateNoHallucination(result.clauses(), request.maskedText());
 
-        return ContractAnalysisAnalyzeResponse.of(clauses);
+        return ContractAnalysisAnalyzeResponse.of(result.clauses(), sanitizeAiSummary(result.summary()));
+    }
+
+    // clauses.isEmpty()일 때만 사용되는 summary라 원문 대조(환각 검증)는 애초에 성립하지 않는다 -
+    // 대신 rule 7(마크다운 금지)을 어긴 응답만 걸러내고, 걸리면 count 기반 기본 문구로 대체한다.
+    private static final Pattern MARKDOWN_PATTERN = Pattern.compile("\\*\\*.+?\\*\\*|^\\s*[-*]\\s|^#{1,6}\\s", Pattern.MULTILINE);
+
+    private String sanitizeAiSummary(String aiSummary) {
+        if (!StringUtils.hasText(aiSummary) || MARKDOWN_PATTERN.matcher(aiSummary).find()) {
+            return null;
+        }
+        return aiSummary;
     }
 
     private String extractResponseText(GeminiGenerateContentResponse response) {
@@ -63,7 +81,7 @@ public class ContractAnalysisAnalyzeService {
         return text;
     }
 
-    private List<ContractAnalysisClause> parseAndValidateSchema(String responseText) {
+    private GeminiClauseAnalysisResult parseAndValidateSchema(String responseText) {
         GeminiClauseAnalysisResult result;
         try {
             result = objectMapper.readValue(responseText, GeminiClauseAnalysisResult.class);
@@ -81,7 +99,7 @@ public class ContractAnalysisAnalyzeService {
             }
         }
 
-        return result.clauses();
+        return result;
     }
 
     private boolean isSchemaValid(ContractAnalysisClause clause) {
