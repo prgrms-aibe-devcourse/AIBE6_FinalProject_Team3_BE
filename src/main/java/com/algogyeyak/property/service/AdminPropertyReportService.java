@@ -1,5 +1,7 @@
 package com.algogyeyak.property.service;
 
+import com.algogyeyak.admin.entity.AdminAuditAction;
+import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.pagination.PageableUtils;
@@ -39,6 +41,7 @@ public class AdminPropertyReportService {
     private final PropertyReportRepository propertyReportRepository;
     private final PropertyRepository propertyRepository;
     private final UserRepository userRepository;
+    private final AdminAuditLogger adminAuditLogger;
 
     @Transactional(readOnly = true)
     public PageResponse<AdminPropertyReportListItemResponse> list(Pageable pageable, PropertyReportSearchCondition condition) {
@@ -83,12 +86,16 @@ public class AdminPropertyReportService {
         if (report.getReporterId().equals(reviewerId)) {
             throw new BusinessException(ErrorCode.ADMIN_PROPERTY_REPORT_SELF_REVIEW);
         }
+        PropertyReportStatus previousStatus = report.getStatus();
         if (status == PropertyReportStatus.RESOLVED) {
             report.resolve(reviewerId, memo);
         } else {
             report.reject(reviewerId, memo);
         }
 
+        adminAuditLogger.log(reviewerId, AdminAuditAction.REVIEW_PROPERTY_REPORT, reportId, Map.of(
+                "beforeStatus", previousStatus, "afterStatus", status,
+                "memo", memo == null ? "" : memo));
         return toDetailResponse(report);
     }
 

@@ -1,5 +1,6 @@
 package com.algogyeyak.checklist.service;
 
+import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateUpdateRequest;
@@ -21,15 +22,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * AdminAuditLogger는 mock으로 대체한다 - 실제 감사 로그 저장(JSON 직렬화, 이메일 스냅샷 조회 등)은
+ * AdminAuditLogger 자체의 관심사이고, 여기서는 각 액션이 실패했을 때 감사 로그가 남지 않는지(정책:
+ * 거부된 변경에는 기록도 남지 않는다)만 함께 확인한다.
+ */
 @DisplayName("AdminChecklistTemplateService")
 class AdminChecklistTemplateServiceTest {
 
+    private static final Long ACTOR_ID = 100L;
+
     private final ChecklistItemTemplateRepository checklistItemTemplateRepository = mock(ChecklistItemTemplateRepository.class);
+    private final AdminAuditLogger adminAuditLogger = mock(AdminAuditLogger.class);
     private final AdminChecklistTemplateService adminChecklistTemplateService =
-            new AdminChecklistTemplateService(checklistItemTemplateRepository);
+            new AdminChecklistTemplateService(checklistItemTemplateRepository, adminAuditLogger);
 
     private ChecklistItemTemplate template(Long id, int version, int displayOrder) {
         ChecklistItemTemplate template = ChecklistItemTemplate.builder()
@@ -60,6 +70,10 @@ class AdminChecklistTemplateServiceTest {
         return template;
     }
 
+    private void verifyNoAuditLog() {
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
+    }
+
     @Test
     @DisplayName("전체 문항을 displayOrder 순으로 반환한다")
     void listReturnsAllTemplatesOrderedByDisplayOrder() {
@@ -81,6 +95,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
+                ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 30, null
@@ -100,6 +115,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
+                ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, null
@@ -116,6 +132,7 @@ class AdminChecklistTemplateServiceTest {
         // 저장 시점에 막지 않으면 ChecklistItemTemplate.isApplicableTo()가 이 토큰을 어떤
         // 매물유형과도 매칭시키지 못해 그 문항이 조용히 전체 매물유형에서 노출되지 않게 된다.
         assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,TYPO"
@@ -124,6 +141,7 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
+        verifyNoAuditLog();
     }
 
     @Test
@@ -137,6 +155,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
+                ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,"
@@ -154,6 +173,7 @@ class AdminChecklistTemplateServiceTest {
         // "전체 적용"으로 봐주지 않고 빈 배열과 어떤 매물유형도 매칭시키지 못해 그 문항이 모든
         // 매물유형에서 조용히 숨겨진다 - 이 검증 메서드가 원래 막으려던 바로 그 실패 모드다.
         assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, " , "
@@ -162,6 +182,7 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
+        verifyNoAuditLog();
     }
 
     @Test
@@ -175,6 +196,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(existing, template(2L, 2, 2)));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
+                ACTOR_ID,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", "안내", null,
@@ -197,6 +219,7 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> adminChecklistTemplateService.update(
+                ACTOR_ID,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
@@ -206,6 +229,7 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
+        verifyNoAuditLog();
     }
 
     @Test
@@ -214,6 +238,7 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> adminChecklistTemplateService.update(
+                ACTOR_ID,
                 999L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.AREA, "내용", null, null,
@@ -223,12 +248,14 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+        verifyNoAuditLog();
     }
 
     @Test
     @DisplayName("code에 맞지 않는 itemType으로 생성하면 ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE 예외가 발생한다")
     void createThrowsWhenCodeAndItemTypeMismatch() {
         assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
                         ChecklistImportance.REQUIRED, ChecklistItemType.CHECK,
@@ -238,6 +265,7 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE));
+        verifyNoAuditLog();
     }
 
     @Test
@@ -247,6 +275,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(templateWithCode(1L, ChecklistItemCode.TRUST_REGISTRATION, ChecklistItemType.YES_NO)));
 
         assertThatThrownBy(() -> adminChecklistTemplateService.create(
+                ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (중복)", null, null,
                         ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
@@ -256,6 +285,7 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE));
+        verifyNoAuditLog();
     }
 
     @Test
@@ -267,6 +297,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(existing));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
+                ACTOR_ID,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (문구 수정)", null, null,
@@ -288,6 +319,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(other));
 
         assertThatThrownBy(() -> adminChecklistTemplateService.update(
+                ACTOR_ID,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
@@ -298,6 +330,7 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE));
+        verifyNoAuditLog();
     }
 
     @Test
@@ -311,7 +344,7 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
                 .thenReturn(List.of(existing, template(2L, 2, 2)));
 
-        adminChecklistTemplateService.delete(1L);
+        adminChecklistTemplateService.delete(ACTOR_ID, 1L);
 
         verify(checklistItemTemplateRepository).delete(existing);
     }
@@ -328,12 +361,13 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
                 .thenReturn(List.of(activeTemplate));
 
-        assertThatThrownBy(() -> adminChecklistTemplateService.delete(1L))
+        assertThatThrownBy(() -> adminChecklistTemplateService.delete(ACTOR_ID, 1L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
 
-        verify(checklistItemTemplateRepository, org.mockito.Mockito.never()).delete(any(ChecklistItemTemplate.class));
+        verify(checklistItemTemplateRepository, never()).delete(any(ChecklistItemTemplate.class));
+        verifyNoAuditLog();
     }
 
     @Test
@@ -341,10 +375,11 @@ class AdminChecklistTemplateServiceTest {
     void deleteThrowsWhenTemplateNotFound() {
         when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> adminChecklistTemplateService.delete(999L))
+        assertThatThrownBy(() -> adminChecklistTemplateService.delete(ACTOR_ID, 999L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+        verifyNoAuditLog();
     }
 
     @Test
@@ -358,6 +393,7 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of(existing));
 
         assertThatThrownBy(() -> adminChecklistTemplateService.update(
+                ACTOR_ID,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
@@ -367,6 +403,7 @@ class AdminChecklistTemplateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
+        verifyNoAuditLog();
     }
 
     @Test
@@ -379,6 +416,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(existing, other));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
+                ACTOR_ID,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
@@ -396,11 +434,12 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
         when(checklistItemTemplateRepository.count()).thenReturn(1L);
 
-        assertThatThrownBy(() -> adminChecklistTemplateService.delete(1L))
+        assertThatThrownBy(() -> adminChecklistTemplateService.delete(ACTOR_ID, 1L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
 
-        verify(checklistItemTemplateRepository, org.mockito.Mockito.never()).delete(any(ChecklistItemTemplate.class));
+        verify(checklistItemTemplateRepository, never()).delete(any(ChecklistItemTemplate.class));
+        verifyNoAuditLog();
     }
 }
