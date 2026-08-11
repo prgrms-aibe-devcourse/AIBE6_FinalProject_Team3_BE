@@ -85,7 +85,7 @@
 | 본인 여부 확인 | ✅ |
 | 상태를 탈퇴로 변경 | ✅ |
 | 개인정보 삭제/익명화 | ✅ **(2026-08-10)** `User`의 nickname/email/passwordHash/profileImageUrl은 복원 불가능한 값으로 치환되고 `withdrawnAt`에 탈퇴 시각도 기록됩니다. `UserSocialAccount`(OAuth 연동정보)·`UserPreference`(관심지역/거래유형/자취여부)·본인 소유 `Checklist`는 하드 삭제되고, 본인 소유 `Property`는 기존 soft-delete(`Property.delete()`)를 재사용해 상태만 `DELETED`로 바꿉니다(다른 유저의 체크리스트·risk-analysis 기록이 이 매물을 참조하고 있어 row 자체는 보존) |
-| 클라이언트 인증정보 제거 | ❌ **이 API는 쿠키를 지우지 않습니다.** 쿠키 삭제는 `POST /auth/logout`에서만 일어나는 별도 동작이라, 탈퇴 후에도 클라이언트에 만료 전 Access Token 쿠키가 남아있을 수 있음(단, 이후 `/auth/me` 등 재조회 시 탈퇴 상태로 401/404 처리됨) |
+| 클라이언트 인증정보 제거 | ✅ **(2026-08-11)** `AuthController.logout()`에서 뽑아낸 `SessionLogoutService`를 재사용해, 탈퇴 커밋 후 refresh token 무효화(Redis)·access token jti 블랙리스트 등록·access/refresh 쿠키 삭제까지 처리합니다. 단, Redis 장애로 이 세션 무효화가 실패해도 탈퇴 자체는 이미 커밋된 뒤라 되돌리지 않고, `UserController.withdraw()`가 그 예외를 로그만 남기고 삼켜 응답은 항상 200으로 나갑니다 — 이 경우 쿠키가 자연 만료 전까지 남아있을 수 있지만, 이후 요청은 `JwtAuthenticationFilter`가 탈퇴 상태를 다시 확인해 차단하므로 보안 구멍은 아닙니다 |
 | 실패: 인증 실패 | ✅ 401 |
 | 실패: 이미 탈퇴한 사용자 | ✅ **(2026-08-11)** 도달 불가능했던 `User.withdraw()` 내부 가드는 제거했습니다 — 유일한 호출부인 `UserService.withdraw()`가 그보다 먼저 `getActiveUserOrThrow()`로 활성 사용자만 걸러내기 때문에 애초에 실행될 수 없는 코드였습니다. 대신 `getActiveUserOrThrow()` 자체가 탈퇴한 사용자를 404 `USER_WITHDRAWN`("이미 탈퇴한 사용자입니다.")으로, 정지된 사용자를 404 `USER_SUSPENDED`("정지된 사용자입니다.")로 구분해서 던지도록 변경해 실제로 구분되는 실패 사유를 응답합니다 |
 | 실패: 사용자 데이터 처리 실패 | 전용 처리 없음 (일반 500) |
@@ -122,7 +122,7 @@
 2. `currentStage` 기반 홈 위젯 우선순위 로직이 백엔드에 없음 — 프론트가 currentStage 값만 받아서 직접 계산하는 구조인지 확인
 3. **(2026-08-10 해결됨)** 탈퇴 시 `UserPreference`(관심지역/거래유형/자취여부) 하드 삭제 처리 완료
 4. **(2026-08-10 해결됨)** 탈퇴 시 OAuth 연동 정보(하드 삭제) / `Checklist`(하드 삭제) / `Property`(soft-delete 재사용) 처리 완료. `ContractAnalysis`는 stateless라 처리 대상 자체가 없음을 확인
-5. 탈퇴 시 쿠키를 지우지 않음(로그아웃과 별개 동작) — 의도된 것인지, 탈퇴 API에서도 쿠키를 지워야 하는지 확인
+5. **(2026-08-11 해결됨)** 탈퇴 시 쿠키를 지우지 않던 문제 — `SessionLogoutService`(auth 도메인에서 로그아웃 로직을 공용화) 도입 후 `UserController.withdraw()`에서 탈퇴 커밋 뒤 호출하도록 통합 완료. Redis 장애 시의 처리 방식(예외를 삼키고 200 응답)은 `SessionLogoutService` 클래스 주석과 위 표의 "클라이언트 인증정보 제거" 항목 참고
 6. **(2026-08-11 해결됨)** "이미 탈퇴한 사용자" 실패 사유가 "존재하지 않는 사용자"와 구분 없이 같은 404로 나가던 문제 해결 — 도달 불가능했던 `User.withdraw()` 내부 가드는 제거하고, 대신 `UserService.getActiveUserOrThrow()`에서 탈퇴(`USER_WITHDRAWN`)/정지(`USER_SUSPENDED`)를 서로 다른 `ErrorCode`로 구분해서 던지도록 변경(상태 코드는 여전히 404로 동일, `code`/`message`만 구분)
 7. **(2026-07-31 해결됨, 문서 반영 누락 상태였음)** 프로필 등록 시 "이미 등록됨" 실패가 400으로 처리되던 문제 — 커밋 `9daefca`("User 프로필/닉네임 중복을 409 CONFLICT로 정리")에서 `USER_PROFILE_ALREADY_EXISTS`/`USER_NICKNAME_ALREADY_EXISTS`(둘 다 409)를 신설해 이미 해결되어 있었습니다. `docs/specs/auth-design.md`의 `AUTH_EMAIL_ALREADY_EXISTS`/`AUTH_NICKNAME_ALREADY_EXISTS`(둘 다 409)와 동일한 패턴으로 정리된 것으로, 코드는 맞았는데 이 문서(위 "프로필 등록"/"프로필 수정" 표)만 갱신되지 않고 400으로 잘못 남아있었습니다 — 위 표도 함께 수정했습니다
 8. **(2026-08-04, `deleteReplacedObject`로 완화됨)** confirm/reset 시 이전 S3 이미지 삭제는 여전히 best-effort지만, 즉시 삭제 전에 `status=pending`으로 다시 태깅해두는 안전망이 추가됨 — 즉시 삭제가 실패해도 버킷 Lifecycle 규칙(만료 기간 1일, AWS 콘솔에서 설정 확인함)이 최대 1일 내로 정리해줌. 태깅 자체와 즉시 삭제가 둘 다 실패하는 이중 실패 케이스만 여전히 영구 고아로 남을 수 있음 — 발생 확률이 낮아 별도 정리 배치까지는 아직 논의 안 됨
