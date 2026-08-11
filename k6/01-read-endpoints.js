@@ -1,12 +1,12 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { BASE_URL } from './common/config.js';
-import { login } from './common/auth.js';
+import { login, extractAuthCookies, authCookieHeader } from './common/auth.js';
 
 // 스모크 테스트 단계: VU 1명, 30초만 - 스크립트 자체가 정상 동작하는지만 확인.
 // 검증되면 stages를 늘려서(예: 0→20명 ramp-up, 5분 유지) baseline 측정으로 전환.
 export const options = {
-  vus: 1,
+  vus: 20,
   duration: '30s',
 };
 
@@ -21,20 +21,14 @@ const TEST_ADMIN_PASSWORD = __ENV.TEST_ADMIN_PASSWORD;
 // 여기서 받은 쿠키를 이후 default() 안에서 재사용한다.
 export function setup() {
   const res = login(TEST_EMAIL, TEST_PASSWORD);
-  const adminCookies = (TEST_ADMIN_EMAIL && TEST_ADMIN_PASSWORD)
-    ? login(TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD).cookies
+  const adminAuthCookies = (TEST_ADMIN_EMAIL && TEST_ADMIN_PASSWORD)
+    ? extractAuthCookies(login(TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD))
     : null;
-  return { cookies: res.cookies, adminCookies };
-}
-
-function cookieHeader(cookies) {
-  return Object.entries(cookies)
-    .map(([name, jar]) => `${name}=${jar[0].value}`)
-    .join('; ');
+  return { authCookies: extractAuthCookies(res), adminAuthCookies };
 }
 
 export default function (data) {
-  const headers = { Cookie: cookieHeader(data.cookies) };
+  const headers = { Cookie: authCookieHeader(data.authCookies) };
 
   // 1-1. 매물 목록 (검색/페이지네이션)
   const listRes = http.get(`${BASE_URL}/properties?page=0&size=20`, { headers });
@@ -76,9 +70,9 @@ export default function (data) {
     });
   }
 
-  // 1-5. 관리자 통계 대시보드 - ROLE_ADMIN 필요. adminCookies가 없으면(관리자 계정 env를 안 넘기면) 건너뜀.
-  if (data.adminCookies) {
-    const adminHeaders = { Cookie: cookieHeader(data.adminCookies) };
+  // 1-5. 관리자 통계 대시보드 - ROLE_ADMIN 필요. adminAuthCookies가 없으면(관리자 계정 env를 안 넘기면) 건너뜀.
+  if (data.adminAuthCookies) {
+    const adminHeaders = { Cookie: authCookieHeader(data.adminAuthCookies) };
     const statsRes = http.get(`${BASE_URL}/admin/stats/dashboard`, { headers: adminHeaders });
     check(statsRes, {
       '관리자 통계 200': (r) => r.status === 200,

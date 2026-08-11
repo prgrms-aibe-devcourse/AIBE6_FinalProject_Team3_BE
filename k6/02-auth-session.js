@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { BASE_URL } from './common/config.js';
-import { login } from './common/auth.js';
+import { BASE_URL, CSRF_HEADERS } from './common/config.js';
+import { login, extractAuthCookies, authCookieHeader } from './common/auth.js';
 
 const TEST_EMAIL = __ENV.TEST_EMAIL;
 const TEST_PASSWORD = __ENV.TEST_PASSWORD;
@@ -45,21 +45,15 @@ export const options = {
   },
 };
 
-function cookieHeader(cookies) {
-  return Object.entries(cookies)
-    .map(([name, jar]) => `${name}=${jar[0].value}`)
-    .join('; ');
-}
-
 // 전체 테스트 시작 전 딱 한 번 실행된다(시나리오별이 아니라 test-run 전체 기준).
 export function setup() {
   const res = login(TEST_EMAIL, TEST_PASSWORD);
-  return { cookies: res.cookies };
+  return { authCookies: extractAuthCookies(res) };
 }
 
 // 2-2. 동시 refresh 경쟁
 export function refreshScenario(data) {
-  const headers = { Cookie: cookieHeader(data.cookies) };
+  const headers = { Cookie: authCookieHeader(data.authCookies), ...CSRF_HEADERS };
   const res = http.post(`${BASE_URL}/auth/refresh`, null, { headers });
   check(res, {
     'refresh 200(승자) 또는 401(경쟁 패배)': (r) => r.status === 200 || r.status === 401,
@@ -69,7 +63,7 @@ export function refreshScenario(data) {
 
 // 2-3. JWT 필터 오버헤드(access token만 사용, /auth/me로 가장 가벼운 인증 경로 반복 호출)
 export function meScenario(data) {
-  const headers = { Cookie: cookieHeader(data.cookies) };
+  const headers = { Cookie: authCookieHeader(data.authCookies) };
   const res = http.get(`${BASE_URL}/auth/me`, { headers });
   check(res, {
     '/auth/me 200': (r) => r.status === 200,
