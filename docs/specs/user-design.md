@@ -84,12 +84,12 @@
 |---|---|
 | 본인 여부 확인 | ✅ |
 | 상태를 탈퇴로 변경 | ✅ |
-| 개인정보 삭제/익명화 | **부분 구현** — `User`의 nickname/email/passwordHash/profileImageUrl은 복원 불가능한 값으로 치환됨. **`UserPreference`(관심지역/거래유형/자취여부)는 전혀 건드리지 않고 그대로 남습니다.** |
+| 개인정보 삭제/익명화 | ✅ **(2026-08-10)** `User`의 nickname/email/passwordHash/profileImageUrl은 복원 불가능한 값으로 치환되고 `withdrawnAt`에 탈퇴 시각도 기록됩니다. `UserSocialAccount`(OAuth 연동정보)·`UserPreference`(관심지역/거래유형/자취여부)·본인 소유 `Checklist`는 하드 삭제되고, 본인 소유 `Property`는 기존 soft-delete(`Property.delete()`)를 재사용해 상태만 `DELETED`로 바꿉니다(다른 유저의 체크리스트·risk-analysis 기록이 이 매물을 참조하고 있어 row 자체는 보존) |
 | 클라이언트 인증정보 제거 | ❌ **이 API는 쿠키를 지우지 않습니다.** 쿠키 삭제는 `POST /auth/logout`에서만 일어나는 별도 동작이라, 탈퇴 후에도 클라이언트에 만료 전 Access Token 쿠키가 남아있을 수 있음(단, 이후 `/auth/me` 등 재조회 시 탈퇴 상태로 401/404 처리됨) |
 | 실패: 인증 실패 | ✅ 401 |
 | 실패: 이미 탈퇴한 사용자 | ⚠️ **코드 경로상 도달 불가능한 분기입니다.** `User.withdraw()` 안에 "이미 탈퇴했으면 예외" 로직이 있지만, `UserService.withdraw()`가 그보다 먼저 활성 사용자만 걸러내는 조회를 하기 때문에(`getActiveUserOrThrow`) 탈퇴한 사용자는 그 시점에 이미 **404**로 걸러집니다. 결과적으로 "이미 탈퇴함"이라는 전용 실패 메시지는 실제로 응답되지 않고, 항상 "존재하지 않거나 탈퇴한 사용자입니다"(404)로만 나갑니다 |
 | 실패: 사용자 데이터 처리 실패 | 전용 처리 없음 (일반 500) |
-| *(요구사항에 없음, TODO로만 존재)* | 코드에 명시적 TODO 2개: **① OAuth 연동 정보(`user_social_accounts`, `UserSocialAccount` 엔티티 — 2026-07-28 구현됨) 탈퇴 시 처리 정책 미정**, **② 탈퇴 사용자의 Property/ContractAnalysis 등 연관 데이터 처리 방식 미정** — 둘 다 아직 실제 처리 로직 없이 TODO 주석으로만 남아있음. (참고: `CustomOAuth2UserService`가 OAuth 로그인 시 탈퇴 여부(`isWithdrawn()`)를 확인하지 않아, 탈퇴한 유저가 소셜 계정으로 재로그인하면 그대로 로그인되는 것으로 보임 — auth 담당자 확인 필요) |
+| *(요구사항에 없음)* | **(2026-08-10 해결됨)** 탈퇴 시 연관 데이터 처리 정책을 확정하고 구현했습니다 — OAuth 연동정보(`UserSocialAccount`)는 하드 삭제(안 지우면 `(provider, provider_id)` unique 제약 때문에 같은 소셜 계정으로 재가입이 영구히 막힘), 본인 소유 `Checklist`는 하드 삭제, 본인 소유 `Property`는 기존 soft-delete를 재사용(다른 유저의 체크리스트·risk-analysis 기록이 이 매물을 참조하므로 row는 보존). `ContractAnalysis`는 영속성 계층(`@Entity`/`@Repository`) 자체가 없는 stateless 도메인이라 별도 처리가 필요 없음을 확인했습니다. (참고: `CustomOAuth2UserService.rejectIfBlocked`가 이미 `isWithdrawn()`을 확인하고 있어 — 이 문서 초안 작성 이후 수정된 것으로 보임 — 탈퇴한 유저의 소셜 재로그인은 이미 차단되고 있습니다) |
 
 ## 비기능 요구사항 — 대조
 
@@ -99,8 +99,8 @@
 | 이메일/소셜 식별정보 비공개 | O | ✅ 본인 데이터만 반환하는 구조라 타인에게 노출될 경로 없음 |
 | 이미지 형식/크기 검증 | O | ✅ **(2026-08-03 구현)** presign/confirm 이중 검증 — 위 "프로필 이미지 업로드/초기화" 절 참고 |
 | 불필요한 개인정보 미수집 | O | 판단 어려움 — 확인 필요 |
-| 탈퇴 시 삭제/익명화 | O | ⚠️ `User`만 익명화, `UserPreference`는 그대로 남음 |
-| OAuth 연동정보 탈퇴 처리 기준 | O(별도 정의) | ❌ TODO만 있고 미정의 |
+| 탈퇴 시 삭제/익명화 | O | ✅ **(2026-08-10)** `User` 익명화 + `UserSocialAccount`/`UserPreference`/본인 `Checklist` 하드 삭제 + 본인 `Property` soft-delete |
+| OAuth 연동정보 탈퇴 처리 기준 | O(별도 정의) | ✅ **(2026-08-10)** 하드 삭제로 확정 — 재가입 시 동일 소셜 계정 재연동이 가능해야 하므로 |
 | 선택 정보는 건너뛰기 가능 | O | ✅ `currentStage` 등 선택 필드는 실제로 선택 |
 | 오류 항목/수정 방법 명확 표시 | O | ✅ Bean Validation 메시지가 필드별로 내려감 |
 | 불필요한 필수 입력 강제 안 함 | O | ✅ |
@@ -120,8 +120,8 @@
 
 1. "생성형 AI 서비스 사전 고지"가 백엔드에 전혀 없음 — 프론트 전담인지 확인
 2. `currentStage` 기반 홈 위젯 우선순위 로직이 백엔드에 없음 — 프론트가 currentStage 값만 받아서 직접 계산하는 구조인지 확인
-3. 탈퇴 시 `UserPreference`(관심지역/거래유형/자취여부)가 익명화되지 않고 그대로 남음 — 개인정보 정책상 문제없는지 확인
-4. 탈퇴 시 OAuth 연동 정보 / Property·ContractAnalysis 연관 데이터 처리가 TODO 상태로 미구현 — 언제 처리할지 확인
+3. **(2026-08-10 해결됨)** 탈퇴 시 `UserPreference`(관심지역/거래유형/자취여부) 하드 삭제 처리 완료
+4. **(2026-08-10 해결됨)** 탈퇴 시 OAuth 연동 정보(하드 삭제) / `Checklist`(하드 삭제) / `Property`(soft-delete 재사용) 처리 완료. `ContractAnalysis`는 stateless라 처리 대상 자체가 없음을 확인
 5. 탈퇴 시 쿠키를 지우지 않음(로그아웃과 별개 동작) — 의도된 것인지, 탈퇴 API에서도 쿠키를 지워야 하는지 확인
 6. "이미 탈퇴한 사용자" 실패 사유가 실제로는 "존재하지 않는 사용자"와 구분 없이 같은 404로 나감 — `User.withdraw()` 내부의 관련 예외 처리가 사실상 도달 불가능한 죽은 코드인 상태
 7. 프로필 등록 시 "이미 등록됨"이라는, 요구사항에 없던 실패 케이스가 400으로 처리됨 (적절한 409 코드가 없어서) — auth 쪽과 동일한 패턴의 "확인 필요" 항목

@@ -2,7 +2,7 @@
 
 이 문서는 도메인별 실제 구현 상태를 요약합니다. 상세 설계 이력·트러블슈팅·남은 이슈는 각 `docs/specs/{도메인}-design.md`를 참고하세요. 도메인 간에 반복적으로 나타나는 패턴(죽은 에러코드, 권한 처리 방식 등)은 `docs/specs/cross-domain-summary.md`에 모아뒀습니다.
 
-마지막 갱신: 2026-08-07
+마지막 갱신: 2026-08-11
 
 ## auth — 거의 완전 구현
 
@@ -12,7 +12,7 @@
 
 ## user — 부분 구현
 
-프로필 등록/조회/수정, 닉네임 중복확인, S3 presign/confirm 방식의 프로필 이미지 업로드·삭제까지 되어 있습니다. 회원 탈퇴는 `User`만 익명화되고, `UserPreference`/OAuth 연동정보/Property·ContractAnalysis 연관 데이터 처리 방식은 아직 TODO로 남아있습니다.
+프로필 등록/조회/수정, 닉네임 중복확인, S3 presign/confirm 방식의 프로필 이미지 업로드·삭제까지 되어 있습니다. 회원 탈퇴 시 `User` 익명화에 더해 OAuth 연동정보(하드 삭제) · `UserPreference`(하드 삭제) · 본인 소유 체크리스트(하드 삭제) · 본인 소유 매물(기존 soft-delete 재사용)까지 처리됩니다. ContractAnalysis는 영속성 계층이 없는 stateless 도메인이라 별도 처리가 필요 없음을 확인했습니다.
 
 → 상세: [`docs/specs/user-design.md`](./docs/specs/user-design.md)
 
