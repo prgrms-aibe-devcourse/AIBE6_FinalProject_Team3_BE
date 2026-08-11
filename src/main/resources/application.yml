@@ -116,3 +116,16 @@ aws:
     region: ap-northeast-2
     access-key: ${AWS_ACCESS_KEY:dummy-access-key-for-local}
     secret-key: ${AWS_SECRET_KEY:dummy-secret-key-for-local}
+
+# Prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: algogyeyak-backend
