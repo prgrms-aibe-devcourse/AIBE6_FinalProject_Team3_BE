@@ -64,9 +64,9 @@ public class AdminUserController {
             @Valid @RequestBody AdminUserRoleUpdateRequest request
     ) {
         rejectSelf(principal, userId);
-        AdminUserDetailResponse result = adminUserService.updateRole(userId, request.role());
-        // 감사 로그: 권한 변경(특히 USER→ADMIN 승격)은 누가 언제 누구에게 했는지 추적 가능해야 한다 -
-        // 별도 DB 감사 테이블은 없으므로 최소한 로그로는 남긴다.
+        AdminUserDetailResponse result = adminUserService.updateRole(principal.userId(), userId, request.role());
+        // 권한 변경(특히 USER→ADMIN 승격)은 누가 언제 누구에게 했는지 추적 가능해야 한다 -
+        // AdminUserService가 AdminAuditLogger로 영구 기록을 남기고, 이 로그는 실시간 관측용으로 별도 유지한다.
         log.info("관리자 액션: actorId={} action=UPDATE_ROLE targetUserId={} newRole={}",
                 principal.userId(), userId, request.role());
         return ResponseEntity.ok(ApiResponse.success(result));
@@ -79,7 +79,7 @@ public class AdminUserController {
             @Valid @RequestBody AdminUserStatusUpdateRequest request
     ) {
         rejectSelf(principal, userId);
-        AdminUserDetailResponse result = adminUserService.updateStatus(userId, request.status());
+        AdminUserDetailResponse result = adminUserService.updateStatus(principal.userId(), userId, request.status());
         log.info("관리자 액션: actorId={} action=UPDATE_STATUS targetUserId={} newStatus={}",
                 principal.userId(), userId, request.status());
         return ResponseEntity.ok(ApiResponse.success(result));

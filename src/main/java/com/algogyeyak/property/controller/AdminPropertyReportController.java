@@ -60,8 +60,9 @@ public class AdminPropertyReportController {
     ) {
         AdminPropertyReportDetailResponse response =
                 adminPropertyReportService.review(principal.userId(), reportId, request.status(), request.memo());
-        // 감사 로그: 신고 처리 결과는 재조회 시 reviewerId/reviewedAt으로 남지만, 나중에 다른 관리자가
-        // 덮어쓰면(review() javadoc의 알려진 한계) 이전 처리자 기록이 사라진다 - 최소한 로그로는 남긴다.
+        // 신고 처리 결과는 재조회 시 reviewerId/reviewedAt으로 남지만, 나중에 다른 관리자가 덮어쓰면
+        // (review() javadoc의 알려진 한계) 이전 처리자 기록이 사라진다 - AdminPropertyReportService가
+        // AdminAuditLogger로 영구 기록을 남기고, 이 로그는 실시간 관측용으로 별도 유지한다.
         log.info("관리자 액션: actorId={} action=REVIEW_PROPERTY_REPORT reportId={} newStatus={}",
                 principal.userId(), reportId, request.status());
         return ResponseEntity.ok(ApiResponse.success(response));

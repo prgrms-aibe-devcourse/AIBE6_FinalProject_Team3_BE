@@ -5,12 +5,12 @@ import com.algogyeyak.auth.dto.PasswordPolicy;
 import com.algogyeyak.auth.dto.PasswordUpdateRequest;
 import com.algogyeyak.auth.dto.SignupRequest;
 import com.algogyeyak.auth.util.EmailNormalizer;
-import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.auth.oauth.CookieUtils;
 import com.algogyeyak.auth.service.LocalAuthService;
+import com.algogyeyak.auth.service.SessionLogoutService;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -22,16 +22,12 @@ import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.JwtException;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -47,8 +43,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Optional;
 
 @Tag(name = "Auth", description = "회원가입, 로그인(로컬/소셜), 토큰 재발급, 비밀번호 관리 API")
@@ -56,14 +50,12 @@ import java.util.Optional;
 @RequestMapping("/auth")
 public class AuthController {
 
-    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
-
     private final CookieUtils cookieUtils;
     private final UserRepository userRepository;
     private final JwtProvider jwtProvider;
     private final RefreshTokenService refreshTokenService;
     private final LocalAuthService localAuthService;
-    private final AccessTokenRevocationService accessTokenRevocationService;
+    private final SessionLogoutService sessionLogoutService;
 
     @Value("${app.dev-login.enabled}")
     private boolean devLoginEnabled;
@@ -93,13 +85,13 @@ public class AuthController {
             JwtProvider jwtProvider,
             RefreshTokenService refreshTokenService,
             LocalAuthService localAuthService,
-            AccessTokenRevocationService accessTokenRevocationService) {
+            SessionLogoutService sessionLogoutService) {
         this.cookieUtils = cookieUtils;
         this.userRepository = userRepository;
         this.jwtProvider = jwtProvider;
         this.refreshTokenService = refreshTokenService;
         this.localAuthService = localAuthService;
-        this.accessTokenRevocationService = accessTokenRevocationService;
+        this.sessionLogoutService = sessionLogoutService;
     }
 
     public record MeResponse(
@@ -242,37 +234,8 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Redis 장애로 blacklist/refresh token 저장소에 연결할 수 없어 무효화를 보장할 수 없음 (AUTH_TOKEN_STORE_UNAVAILABLE) — 쿠키 삭제도 진행되지 않으므로 재시도가 필요하다")
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest request, HttpServletResponse response) {
-        CookieUtils.getCookie(request, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME)
-                .ifPresent(cookie -> refreshTokenService.revoke(cookie.getValue()));
-
-        // 쿠키만 보면 안 된다 — /auth/me 등 다른 엔드포인트와 동일하게 JwtAuthenticationFilter.resolveToken로
-        // 찾아야, Authorization: Bearer 헤더로 인증한 클라이언트(Swagger/Postman 등)도 로그아웃 시
-        // access token이 실제로 무효화된다. 쿠키만 확인하던 이전 버전은 이 경로를 놓쳐 Bearer
-        // 클라이언트의 access token이 로그아웃 후에도 자연 만료 전까지 계속 유효한 채로 남아 있었다.
-        String accessToken = JwtAuthenticationFilter.resolveToken(request);
-        if (StringUtils.hasText(accessToken)) {
-            revokeAccessToken(accessToken);
-        }
-
-        cookieUtils.deleteCookie(response, JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME);
-        cookieUtils.deleteCookie(response, JwtAuthenticationFilter.REFRESH_TOKEN_COOKIE_NAME);
+        sessionLogoutService.logout(request, response);
         return ResponseEntity.ok(ApiResponse.successWithoutData());
-    }
-
-    // 이미 만료되었거나 서명이 잘못된 access token은 애초에 인증에 쓰일 수 없으므로 블랙리스트에
-    // 등록할 필요가 없다 — parseClaims가 던지는 JwtException은 그대로 무시하고 로그아웃을 계속 진행한다.
-    private void revokeAccessToken(String accessToken) {
-        try {
-            Claims claims = jwtProvider.parseClaims(accessToken);
-            LocalDateTime expiresAt = claims.getExpiration().toInstant()
-                    .atZone(ZoneId.systemDefault())
-                    .toLocalDateTime();
-            accessTokenRevocationService.revoke(claims.getId(), expiresAt);
-        } catch (JwtException | IllegalArgumentException e) {
-            // 무시: 이미 무효한 토큰이라 블랙리스트에 올릴 대상이 없다. 로그아웃 자체는 계속
-            // 진행되므로 warn/error는 과하고, 원인 진단이 필요할 때 확인할 수 있게 debug만 남긴다.
-            log.debug("로그아웃 시 access token 무효화를 건너뜁니다(이미 무효한 토큰)", e);
-        }
     }
 
     // Access Token이 만료된 상태에서 호출되는 것이 전제이므로 인증 없이 접근 가능해야 한다 (SecurityConfig permitAll).

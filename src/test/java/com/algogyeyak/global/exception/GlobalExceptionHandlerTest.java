@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.response.ApiResponse;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 class GlobalExceptionHandlerTest {
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
@@ -23,6 +25,18 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody().data()).isNull();
         assertThat(response.getBody().error().code()).isEqualTo("NOT_FOUND");
         assertThat(response.getBody().error().message()).isEqualTo("매물을 찾을 수 없습니다.");
+    }
+
+    @Test
+    void noResourceFoundExceptionRespondsWithNotFound() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleNoResourceFoundException(
+                new NoResourceFoundException(HttpMethod.GET, "users/me/activity-history", "/users/me/activity-history")
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().success()).isFalse();
+        assertThat(response.getBody().error().code()).isEqualTo("NOT_FOUND");
     }
 
     @Test
