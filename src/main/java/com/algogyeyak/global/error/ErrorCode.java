@@ -45,6 +45,10 @@ public enum ErrorCode {
     CSRF_HEADER_MISSING(HttpStatus.FORBIDDEN, "CSRF_HEADER_MISSING", "잘못된 요청입니다."),
 
     // User 도메인
+    // getActiveUserOrThrow()에서 "존재하지 않음"(공용 NOT_FOUND)과 구분해서 던진다 - 셋 다 404라
+    // 상태 코드는 같지만, code/message가 달라야 프론트가 탈퇴/정지 상태를 구분해 안내할 수 있다.
+    USER_WITHDRAWN(HttpStatus.NOT_FOUND, "USER_WITHDRAWN", "이미 탈퇴한 사용자입니다."),
+    USER_SUSPENDED(HttpStatus.NOT_FOUND, "USER_SUSPENDED", "정지된 사용자입니다."),
     USER_PROFILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_PROFILE_ALREADY_EXISTS", "이미 프로필이 등록되어 있습니다."),
     USER_NICKNAME_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_NICKNAME_ALREADY_EXISTS", "이미 사용 중인 닉네임입니다."),
 

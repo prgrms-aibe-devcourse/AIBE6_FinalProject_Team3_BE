@@ -241,10 +241,18 @@ public class UserService {
         properties.forEach(Property::delete);
     }
 
+    // "존재하지 않음"/"탈퇴함"/"정지됨"을 서로 다른 ErrorCode로 구분해서 던진다 - 프론트가 각
+    // 상태에 맞는 안내 문구를 보여줄 수 있어야 하기 때문이다.
     private User getActiveUserOrThrow(Long userId) {
-        return userRepository.findById(userId)
-                .filter(user -> !user.isWithdrawn() && !user.isSuspended())
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+        if (user.isWithdrawn()) {
+            throw new BusinessException(ErrorCode.USER_WITHDRAWN);
+        }
+        if (user.isSuspended()) {
+            throw new BusinessException(ErrorCode.USER_SUSPENDED);
+        }
+        return user;
     }
 
     private void validateNicknameNotDuplicated(Long userId, String nickname) {

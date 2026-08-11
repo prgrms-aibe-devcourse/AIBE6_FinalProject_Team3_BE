@@ -71,7 +71,20 @@ class UserServiceTest {
 
         BusinessException exception = assertThrows(BusinessException.class, () -> userService.withdraw(1L));
 
-        assertEquals(ErrorCode.NOT_FOUND, exception.getErrorCode());
+        assertEquals(ErrorCode.USER_SUSPENDED, exception.getErrorCode());
+    }
+
+    @Test
+    void withdrawThrowsWithDistinctErrorCodeWhenUserAlreadyWithdrawn() {
+        // "존재하지 않음"과 "이미 탈퇴함"이 예전엔 같은 ErrorCode.NOT_FOUND로 뭉뚱그려져 있었다 -
+        // 프론트가 두 경우를 구분해 안내할 수 있도록 별도 코드로 분리한 회귀 테스트.
+        User withdrawn = activeUser(1L);
+        withdrawn.withdraw();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(withdrawn));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> userService.withdraw(1L));
+
+        assertEquals(ErrorCode.USER_WITHDRAWN, exception.getErrorCode());
     }
 
     @Test
