@@ -147,7 +147,7 @@ class AdminChecklistTemplateControllerTest {
                                   "displayOrder":30
                                 }
                                 """))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.content").value("주차 공간이 충분한가요?"))
                 .andExpect(jsonPath("$.data.version").value(2));
     }
