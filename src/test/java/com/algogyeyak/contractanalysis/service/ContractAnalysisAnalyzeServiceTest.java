@@ -164,6 +164,58 @@ class ContractAnalysisAnalyzeServiceTest {
         assertEquals(ErrorCode.CONTRACT_ANALYSIS_AI_HALLUCINATION, exception.getErrorCode());
     }
 
+    @Test
+    void analyzeThrowsAiHallucinationWhenClauseIsWordsRecombinedFromScatteredLocations() {
+        // 아래 11개 단어는 전부 MASKED_TEXT 어딘가에 개별 토큰으로 존재하지만("계약"은 두 문장에
+        // 각각 등장), 이 순서로 이어붙인 문장 자체는 원문 어디에도 연속해서 존재하지 않는다.
+        // 기존의 순서 무관 단어 집합 비교(11/11 = 100%)였다면 이 허구 조항이 그대로 통과했을
+        // 것이다. n-gram(3-word) 비교로 바뀐 뒤에는, 실제로 원문과 연속으로 겹치는 3-gram이
+        // "반려동물을 키울 수"와 "키울 수 없다." 단 2개(9개 중)뿐이라 임계값(85%)에 크게
+        // 못 미쳐 환각으로 정확히 거부되어야 한다.
+        String fabricatedClause = "임차인은 계약 종료 후 즉시 반환하지 않고 반려동물을 키울 수 없다.";
+        String json = clauseJson(fabricatedClause, true, "설명", "질문", "제안");
+        when(geminiClient.analyzeClauses(MASKED_TEXT)).thenReturn(responseWithText(json));
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> analyze(MASKED_TEXT, true)
+        );
+
+        assertEquals(ErrorCode.CONTRACT_ANALYSIS_AI_HALLUCINATION, exception.getErrorCode());
+    }
+
+    @Test
+    void analyzeAcceptsClauseWhenMaskedTextUsesFullWidthSpaceInsteadOfAsciiSpace() {
+        // Clova OCR/HWP 등에서 복사된 계약서 원문에는 U+3000(전각 공백)이 섞여 들어올 수 있다.
+        // AI가 원문을 그대로 인용해도 공백 문자 종류가 다르면 정규화 후 비교가 실패해서는 안 된다.
+        String maskedTextWithFullWidthSpace =
+                "제3조　임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다.";
+        String clauseText = "제3조 임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다.";
+        String json = clauseJson(clauseText, true, "설명", "질문", "제안");
+        when(geminiClient.analyzeClauses(maskedTextWithFullWidthSpace)).thenReturn(responseWithText(json));
+
+        ContractAnalysisAnalyzeResponse response = analyze(maskedTextWithFullWidthSpace, true);
+
+        assertEquals(1, response.clauses().size());
+    }
+
+    @Test
+    void analyzeAcceptsClauseWithSubNumberedArticleTitleGluedToDifferentParagraph() {
+        // AI가 "제10조의2(비용의 정산)" 제목을 실제로는 이어져 있지 않은 다른 항(②)에 붙여
+        // 반환하는 경우, 제목을 정확히 벗겨내야만 남은 본문("②주차비는...")이 원문에서
+        // 그대로 발견되어 정상 조항으로 인정된다. "의N" 가지번호를 인식하지 못하는 예전
+        // 정규식이었다면 "의2(비용의 정산)"가 본문에 그대로 남아 이 매칭이 실패했을 것이다.
+        String maskedTextWithSubArticle =
+                "제10조의2(비용의 정산) ①관리비는 임차인이 부담한다. ②주차비는 별도로 정산한다.";
+        String clauseText = "제10조의2(비용의 정산) ②주차비는 별도로 정산한다.";
+        String json = clauseJson(clauseText, true, "설명", "질문", "제안");
+        when(geminiClient.analyzeClauses(maskedTextWithSubArticle)).thenReturn(responseWithText(json));
+
+        ContractAnalysisAnalyzeResponse response = analyze(maskedTextWithSubArticle, true);
+
+        assertEquals(1, response.clauses().size());
+    }
+
     // ---------- 성공 케이스 ----------
 
     @Test
