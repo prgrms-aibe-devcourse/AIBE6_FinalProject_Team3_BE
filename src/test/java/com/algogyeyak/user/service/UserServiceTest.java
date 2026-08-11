@@ -6,11 +6,15 @@ import com.algogyeyak.user.dto.NicknameCheckResponse;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
+import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.s3.service.S3PresignService;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.TransactionType;
 import com.algogyeyak.user.repository.UserPreferenceRepository;
 import com.algogyeyak.user.repository.UserRepository;
+import com.algogyeyak.user.repository.UserSocialAccountRepository;
+import java.util.Collections;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -34,9 +38,13 @@ class UserServiceTest {
 
     private final UserRepository userRepository = mock(UserRepository.class);
     private final UserPreferenceRepository userPreferenceRepository = mock(UserPreferenceRepository.class);
+    private final UserSocialAccountRepository userSocialAccountRepository = mock(UserSocialAccountRepository.class);
+    private final ChecklistRepository checklistRepository = mock(ChecklistRepository.class);
+    private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final S3PresignService s3PresignService = mock(S3PresignService.class);
     private final UserService userService = new UserService(
-            userRepository, userPreferenceRepository, s3PresignService, mock(PlatformTransactionManager.class));
+            userRepository, userPreferenceRepository, userSocialAccountRepository, checklistRepository,
+            propertyRepository, s3PresignService, mock(PlatformTransactionManager.class));
 
     private User activeUser(Long id) {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
