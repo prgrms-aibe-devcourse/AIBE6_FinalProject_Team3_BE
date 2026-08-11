@@ -45,7 +45,8 @@ public class ContractAnalysisInputService {
     }
 
     private void validateImage(MultipartFile image) {
-        if (!ALLOWED_IMAGE_CONTENT_TYPES.contains(image.getContentType())) {
+        String contentType = image.getContentType();
+        if (contentType == null || !ALLOWED_IMAGE_CONTENT_TYPES.contains(contentType)) {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_UNSUPPORTED_FILE_TYPE);
         }
 
@@ -65,7 +66,10 @@ public class ContractAnalysisInputService {
             return;
         }
 
-        // TODO: Property 엔티티/레포지토리 도입 후 propertyId 소유자와 currentUserId 비교하여
-        // 불일치 시 BusinessException(ErrorCode.CONTRACT_ANALYSIS_FORBIDDEN) throw
+        // TODO: Property/PropertyRepository는 이미 존재하고 property.isOwnedBy(userId)로
+        // 다른 도메인(PropertyService 등)에서 동일한 검증을 하고 있다 - 여기서는 아직
+        // 그 호출만 연결되지 않았을 뿐이다. PropertyRepository로 propertyId를 조회해
+        // property.isOwnedBy(currentUserId)가 false면
+        // BusinessException(ErrorCode.CONTRACT_ANALYSIS_FORBIDDEN) throw
     }
 }

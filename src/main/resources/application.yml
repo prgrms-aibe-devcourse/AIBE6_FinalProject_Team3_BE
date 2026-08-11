@@ -1,6 +1,12 @@
 spring:
   application:
     name: algogyeyak
+  servlet:
+    multipart:
+      # contract-analysis /inputs, /ocr가 자체적으로 10MB까지 허용하므로, Spring의 기본값(1MB)에
+      # 막혀 정상 크기의 계약서 사진조차 거부되지 않도록 그 상한과 맞춘다.
+      max-file-size: 10MB
+      max-request-size: 10MB
   # access token blacklist/refresh token 저장소(auth) + 캐싱 연결 준비용(그 외 도메인 - 실제
   # 캐시 대상/TTL 설계는 별도 작업). 로컬은 docker-compose의 redis 서비스(localhost:6379)를
   # 그대로 쓴다. Lettuce는 연결이 지연 생성이라 Redis가 안 떠 있어도 앱 기동 자체는 영향받지 않는다.

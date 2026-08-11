@@ -5,6 +5,7 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.retention.time=7d'   # t3.small 디스크 감안, 보관기간 짧게
+      - '--web.enable-remote-write-receiver'
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus

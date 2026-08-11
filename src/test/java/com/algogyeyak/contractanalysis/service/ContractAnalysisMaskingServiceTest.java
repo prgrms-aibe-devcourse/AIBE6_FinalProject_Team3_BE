@@ -260,4 +260,39 @@ class ContractAnalysisMaskingServiceTest {
 
         assertEquals(true, response.requiresUserConfirmation());
     }
+
+    // ---------- containsUnmaskedPii (/analyze의 마스킹 우회 방지 게이트) ----------
+
+    @Test
+    void containsUnmaskedPiiTrueForResidentRegistrationNumber() {
+        assertEquals(true, service.containsUnmaskedPii("주민등록번호 901231-1234567 입니다."));
+    }
+
+    @Test
+    void containsUnmaskedPiiTrueForPhoneNumber() {
+        assertEquals(true, service.containsUnmaskedPii("연락처 010-1234-5678 입니다."));
+    }
+
+    @Test
+    void containsUnmaskedPiiTrueForLabeledAccountNumber() {
+        assertEquals(true, service.containsUnmaskedPii("계좌: 123-4567-8901"));
+    }
+
+    @Test
+    void containsUnmaskedPiiFalseAfterMaskingTokensReplaceAllPii() {
+        ContractAnalysisMaskingResponse masked = mask(
+                "임대인 홍길동(주민등록번호 901231-1234567, 연락처 010-1234-5678)과 "
+                        + "임차인 김철수는 국민은행 계좌: 123-4567-8901 로 입금하기로 한다."
+        );
+
+        assertEquals(false, service.containsUnmaskedPii(masked.maskedText()));
+    }
+
+    @Test
+    void containsUnmaskedPiiFalseForPlainClauseTextWithoutPii() {
+        assertEquals(
+                false,
+                service.containsUnmaskedPii("제3조 임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다.")
+        );
+    }
 }
