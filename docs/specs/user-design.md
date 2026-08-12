@@ -25,11 +25,11 @@
 | currentStage에 따른 홈 위젯 우선순위 결정 | ❌ **백엔드는 currentStage 값을 그대로 저장만 하고, 우선순위를 계산하거나 응답에 담는 로직이 없습니다.** 위젯 우선순위 자체가 프론트엔드 책임으로 보임 — 확인 필요 |
 | 성공: 온보딩 분기 반영된 홈으로 이동 | 백엔드는 이동 경로를 결정하지 않고 저장된 `UserProfileResponse`만 반환 — 라우팅은 프론트 담당으로 추정 |
 | 실패: 필수 입력값 누락 | ✅ 400 |
-| 실패: 중복된 닉네임 | ✅ 400 (닉네임을 입력하고, 기존과 다를 때만 검사) |
+| 실패: 중복된 닉네임 | ~~✅ 400 (닉네임을 입력하고, 기존과 다를 때만 검사)~~ **(2026-08-12 정정)** 실제로는 409(`ErrorCode.USER_NICKNAME_ALREADY_EXISTS`, CONFLICT) — 닉네임을 입력하고, 기존과 다를 때만 검사(전수조사 결과 코드 품질 1번 참고) |
 | 실패: 허용되지 않는 닉네임 | ❌ **길이 제한(2~20자)만 있고, 특수문자/금칙어 등 형식 검증은 없습니다.** |
 | 실패: 입력값 길이 초과 | ✅ 닉네임만 해당 (`@Size`) |
 | 실패: 인증되지 않은 사용자 | ✅ 401 (JWT 필터) |
-| *(요구사항에 없음)* | **이미 프로필이 등록된 경우** 실패 처리됨 — "이미 프로필이 등록되어 있습니다." (400). 요구사항 실패 목록엔 없던 케이스 |
+| *(요구사항에 없음)* | **이미 프로필이 등록된 경우** 실패 처리됨 — "이미 프로필이 등록되어 있습니다." ~~(400)~~ **(2026-08-12 정정)** 실제로는 409(`ErrorCode.USER_PROFILE_ALREADY_EXISTS`, CONFLICT)(전수조사 결과 코드 품질 1번 참고). 요구사항 실패 목록엔 없던 케이스 |
 
 ## 프로필 조회 (`GET /users/me`) — 요구사항 대비
 
@@ -50,7 +50,7 @@
 | 닉네임 중복 확인 | ✅ (변경 시에만) |
 | 변경 저장 | ✅ — 요청에 담긴 필드만 부분 업데이트 (null이 아닌 것만 반영) |
 | 실패: 인증 실패 | ✅ 401 |
-| 실패: 중복된 닉네임 | ✅ 400 |
+| 실패: 중복된 닉네임 | ~~✅ 400~~ **(2026-08-12 정정)** 실제로는 409(CONFLICT)(전수조사 결과 코드 품질 1번 참고) |
 | 실패: 잘못된 입력값 | 부분 — 길이 초과 정도만 |
 
 **(2026-08-03 변경)** `ProfileUpdateRequest`에서 `profileImageUrl` 필드가 제거되어, 이 API로는 더 이상 프로필 이미지를 바꿀 수 없습니다. 이미지 형식/크기 검증을 포함한 프로필 이미지 변경은 아래 "프로필 이미지 업로드/초기화" 절의 전용 엔드포인트로 이관됐습니다.
@@ -89,7 +89,7 @@
 | 실패: 인증 실패 | ✅ 401 |
 | 실패: 이미 탈퇴한 사용자 | ⚠️ **코드 경로상 도달 불가능한 분기입니다.** `User.withdraw()` 안에 "이미 탈퇴했으면 예외" 로직이 있지만, `UserService.withdraw()`가 그보다 먼저 활성 사용자만 걸러내는 조회를 하기 때문에(`getActiveUserOrThrow`) 탈퇴한 사용자는 그 시점에 이미 **404**로 걸러집니다. 결과적으로 "이미 탈퇴함"이라는 전용 실패 메시지는 실제로 응답되지 않고, 항상 "존재하지 않거나 탈퇴한 사용자입니다"(404)로만 나갑니다 |
 | 실패: 사용자 데이터 처리 실패 | 전용 처리 없음 (일반 500) |
-| *(요구사항에 없음, TODO로만 존재)* | 코드에 명시적 TODO 2개: **① OAuth 연동 정보(`user_social_accounts`, `UserSocialAccount` 엔티티 — 2026-07-28 구현됨) 탈퇴 시 처리 정책 미정**, **② 탈퇴 사용자의 Property/ContractAnalysis 등 연관 데이터 처리 방식 미정** — 둘 다 아직 실제 처리 로직 없이 TODO 주석으로만 남아있음. (참고: `CustomOAuth2UserService`가 OAuth 로그인 시 탈퇴 여부(`isWithdrawn()`)를 확인하지 않아, 탈퇴한 유저가 소셜 계정으로 재로그인하면 그대로 로그인되는 것으로 보임 — auth 담당자 확인 필요) |
+| *(요구사항에 없음, TODO로만 존재)* | 코드에 명시적 TODO 2개: **① OAuth 연동 정보(`user_social_accounts`, `UserSocialAccount` 엔티티 — 2026-07-28 구현됨) 탈퇴 시 처리 정책 미정**, **② 탈퇴 사용자의 Property/ContractAnalysis 등 연관 데이터 처리 방식 미정** — 둘 다 아직 실제 처리 로직 없이 TODO 주석으로만 남아있음. ~~(참고: `CustomOAuth2UserService`가 OAuth 로그인 시 탈퇴 여부(`isWithdrawn()`)를 확인하지 않아, 탈퇴한 유저가 소셜 계정으로 재로그인하면 그대로 로그인되는 것으로 보임 — auth 담당자 확인 필요)~~ — **(2026-08-12 정정)** 더 이상 사실이 아님. `CustomOAuth2UserService.rejectIfBlocked()`(재로그인 시점인 `findOrCreateUser`의 기존 `UserSocialAccount` 매칭 분기와, 이메일로 기존 계정에 연동하는 `linkToExistingAccountByEmail` 분기 둘 다에서 호출됨)가 `isWithdrawn() || isSuspended()`를 확인해 `account_blocked`로 거부한다 — 코드 주석에도 "로컬 로그인/refresh는 이미 거부하는데 소셜 로그인만 빠지면 안 된다"는 취지로 명시돼 있어 의도적으로 추가된 수정으로 보인다. 즉 탈퇴 계정은 OAuth 재로그인으로도 로그인할 수 없다(로컬/refresh/JWT 필터와 동일). |
 
 ## 비기능 요구사항 — 대조
 
@@ -124,5 +124,23 @@
 4. 탈퇴 시 OAuth 연동 정보 / Property·ContractAnalysis 연관 데이터 처리가 TODO 상태로 미구현 — 언제 처리할지 확인
 5. 탈퇴 시 쿠키를 지우지 않음(로그아웃과 별개 동작) — 의도된 것인지, 탈퇴 API에서도 쿠키를 지워야 하는지 확인
 6. "이미 탈퇴한 사용자" 실패 사유가 실제로는 "존재하지 않는 사용자"와 구분 없이 같은 404로 나감 — `User.withdraw()` 내부의 관련 예외 처리가 사실상 도달 불가능한 죽은 코드인 상태
-7. 프로필 등록 시 "이미 등록됨"이라는, 요구사항에 없던 실패 케이스가 400으로 처리됨 (적절한 409 코드가 없어서) — auth 쪽과 동일한 패턴의 "확인 필요" 항목
+7. ~~프로필 등록 시 "이미 등록됨"이라는, 요구사항에 없던 실패 케이스가 400으로 처리됨 (적절한 409 코드가 없어서) — auth 쪽과 동일한 패턴의 "확인 필요" 항목~~ **(2026-08-12 정정)** 더 이상 사실이 아님 — `ErrorCode.USER_NICKNAME_ALREADY_EXISTS`/`USER_PROFILE_ALREADY_EXISTS` 둘 다 이미 409(CONFLICT)로 정의돼 있고 테스트로도 검증됨(전수조사 결과 코드 품질 1번 참고)
 8. **(2026-08-04, `deleteReplacedObject`로 완화됨)** confirm/reset 시 이전 S3 이미지 삭제는 여전히 best-effort지만, 즉시 삭제 전에 `status=pending`으로 다시 태깅해두는 안전망이 추가됨 — 즉시 삭제가 실패해도 버킷 Lifecycle 규칙(만료 기간 1일, AWS 콘솔에서 설정 확인함)이 최대 1일 내로 정리해줌. 태깅 자체와 즉시 삭제가 둘 다 실패하는 이중 실패 케이스만 여전히 영구 고아로 남을 수 있음 — 발생 확률이 낮아 별도 정리 배치까지는 아직 논의 안 됨
+
+## 전수조사 결과 (2026-08-12)
+
+### 버그/정확성
+
+1. `UserPreference.interestRegion`에는 애플리케이션 레벨 길이 검증이 전혀 없다. `ProfileRegisterRequest.interestRegion`(`@NotBlank`만 있고 `@Size` 없음, `dto/ProfileRegisterRequest.java:18-19`)과 `ProfileUpdateRequest.interestRegion`(제약 없음, `dto/ProfileUpdateRequest.java:16`) 모두 닉네임과 달리 길이 제약이 없고, 엔티티 컬럼(`entity/UserPreference.java:30`)도 `@Column(length=...)` 지정 없이 Hibernate 기본값(VARCHAR(255))으로 생성된다. 실제 프런트(`ProfileClient.tsx`)는 3단계 select로만 값을 구성해 실무상 짧은 문자열만 만들어지지만, API를 직접 호출하면(Swagger/Postman 등) 255자를 넘는 문자열도 검증 없이 그대로 받아들여져 저장 시점에 DB 컬럼 길이 초과로 500(DataException)이 날 수 있다 — 닉네임처럼 400으로 정리되게 막히는 다른 실패 케이스들과 일관성이 없다. `interestRegion`에도 합리적인 `@Size(max = ...)`를 추가하는 것을 권장.
+2. **(신규 발견, 팀 자체 테스트가 이미 증명하고 있음)** `User.changeRole()`/`suspend()`/`activate()`의 "탈퇴한 사용자는 대상에서 제외" 가드(`entity/User.java:116-139`)는 해당 트랜잭션이 그 행을 읽은 시점의 메모리 스냅샷을 기준으로 판단하기 때문에, 사용자 본인의 탈퇴 커밋과 경쟁하면 TOCTOU로 우회될 수 있다. `UserWithdrawFieldOverwriteIntegrationTest.concurrentRoleChangeDoesNotResurrectFieldsAnonymizedByWithdraw`(`src/test/java/com/algogyeyak/user/service/UserWithdrawFieldOverwriteIntegrationTest.java`)가 정확히 이 경쟁 상황(관리자의 `changeRole` 트랜잭션이 탈퇴 전 상태를 먼저 읽고, 탈퇴가 커밋된 뒤에 `changeRole`이 커밋)을 재현하는데, 이 테스트의 목적은 "PII 필드가 되살아나지 않는다"를 확인하는 것이지만 마지막 assertion에서 `persisted.getRole()).isEqualTo(Role.ADMIN)`을 그대로 "정상 동작"으로 단언한다. 즉 결과적으로 **WITHDRAWN 상태이면서 Role=ADMIN인 계정**이 DB에 남을 수 있다는 사실을 테스트 스스로 증명하면서도, 그 함의는 별도로 짚어지지 않은 것으로 보인다. `changeNickname()`이 동일한 성격의 레이스에 대해 REQUIRES_NEW 재확인(최신 커밋 상태 재조회)을 두는 것과 달리, `changeRole`/`suspend`/`activate`에는 그런 안전망이 없다. 코드 주석의 판단은 "탈퇴 계정은 로그인 자체가 안 되니 role이 잘못 남아도 무해하다"는 것인데, 이 문서의 "남은 이슈" 4번에 있는 "`CustomOAuth2UserService`가 소셜 재로그인 시 `isWithdrawn()`을 확인하지 않는다"는 auth 쪽 미해결 지적이 실제 사실이라면, 두 이슈가 겹쳐 탈퇴 후 소셜 재로그인한 사용자가 ADMIN 권한을 가진 채로 활동할 수 있는 경로가 만들어진다 — auth 담당자와 함께 확인 필요.
+
+### 보안
+
+1. `confirmProfileImageUpload`가 호출하는 `S3KeyGenerator.isProfileImageOwnedBy(userId, key)`(`global/s3/util/S3KeyGenerator.java:25-27`)를 직접 확인했다. prefix 검사에 구분자 `/`까지 포함시켜(`"profile-images/" + userId + "/"`) 비교하므로, userId=1과 userId=12처럼 숫자 표현이 서로의 접두어가 되는 경우에도 다른 사용자의 key를 자기 것으로 오인하지 않는다 — 문서가 주장하는 IDOR 방어가 실제로 유효함을 코드 레벨에서 재확인했다.
+2. 그 외 이번 조사에서 새로 발견된 IDOR/권한 우회는 없다. `UserController`의 `/users/me*` 엔드포인트 전부가 예외 없이 `@AuthenticationPrincipal`의 `userId`만 사용하고, 경로/바디 어디에도 대상 사용자를 지정하는 파라미터가 없어 다른 사용자 리소스를 겨냥할 방법 자체가 없음을 코드로 재확인했다(기존 문서의 판단과 일치).
+
+### 코드 품질 (중복/구조/일관성)
+
+1. **문서-코드 불일치 정정**: 이 문서의 "프로필 등록"/"프로필 수정" 표와 "남은 이슈" 7번은 "실패: 중복된 닉네임"과 "이미 프로필이 등록된 경우"를 모두 **400**으로 서술하고 있으나, 실제 `ErrorCode.USER_NICKNAME_ALREADY_EXISTS`/`USER_PROFILE_ALREADY_EXISTS`(`global/error/ErrorCode.java:48-49`)는 `HttpStatus.CONFLICT`(**409**)로 정의되어 있고, `UserServiceTest`(`registerProfileThrowsWhenProfileAlreadyExists`/`registerProfileThrowsWhenNicknameAlreadyExists`/`updateMyProfileThrowsWhenNicknameAlreadyExists`/`updateMyProfileRecoversWithNicknameConflictWhenConcurrentChangeWinsTheRace`, 각각 `assertEquals(HttpStatus.CONFLICT, exception.getStatus())`)도 이를 명시적으로 검증한다. "적절한 409 코드가 없어서 400으로 처리했다"는 남은 이슈 7번의 전제는 더 이상 사실과 맞지 않는다 — 이미 auth 도메인과 동일하게 409로 정리되어 있으므로 해당 항목/표 내용은 갱신이 필요하다.
+2. `registerProfile()`(`service/UserService.java:80-85`)과 `updateMyProfile()`(`service/UserService.java:177-180`)이 "닉네임이 실제로 바뀌는지"를 판단하는 조건(`StringUtils.hasText(request.getNickname()) && !request.getNickname().equals(user.getNickname())`)을 각자 인라인으로 거의 동일하게 중복 구현하고 있다. 판단 이후의 처리(원자적 트랜잭션에 위임 vs `changeNickname()` 즉시 호출)는 서로 다르지만, 판단 조건 자체는 작은 private 헬퍼로 뽑아 재사용할 수 있는 반복이다.
+3. `getActiveUserOrThrow()`가 던지는 "존재하지 않거나 탈퇴한 사용자입니다." 메시지 문자열이 `UserService.java` 안에 3곳(`getActiveUserOrThrow`, `changeNickname`, `registerProfileAtomically`)에서 각각 리터럴로 반복돼 있다. 상수로 추출하면 이후 문구를 바꿀 때 일부만 놓치는 실수를 줄일 수 있다(기능적 문제는 아님).
