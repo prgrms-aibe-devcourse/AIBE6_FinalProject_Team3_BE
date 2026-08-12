@@ -11,6 +11,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,13 +24,15 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 관리자 전용 체크리스트 문항 템플릿 관리 API. /admin/** 는 SecurityConfig에서 ROLE_ADMIN으로만
- * 접근 가능하도록 막혀있다.
+ * 관리자 전용 체크리스트 문항 템플릿 관리 API. /admin/** 는 SecurityConfig의 URL 패턴
+ * (hasRole("ADMIN"))으로 우선 차단되고, 아래 @PreAuthorize는 그 매칭이 어떤 이유로든 빗나가는
+ * 경우를 위한 이중 방어다.
  */
 @Slf4j
 @RestController
 @RequestMapping("/admin/checklist-templates")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
 public class AdminChecklistTemplateController {
 
     private final AdminChecklistTemplateService adminChecklistTemplateService;

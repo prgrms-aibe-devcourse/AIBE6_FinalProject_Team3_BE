@@ -17,6 +17,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -27,12 +28,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 관리자 전용 매물 신고 검토 API. /admin/** 는 SecurityConfig에서 ROLE_ADMIN으로만 접근 가능하다.
+ * 관리자 전용 매물 신고 검토 API. /admin/** 는 SecurityConfig의 URL 패턴(hasRole("ADMIN"))으로
+ * 우선 차단되고, 아래 @PreAuthorize는 그 매칭이 어떤 이유로든 빗나가는 경우를 위한 이중 방어다.
  */
 @Slf4j
 @RestController
 @RequestMapping("/admin/property-reports")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
 public class AdminPropertyReportController {
 
     private final AdminPropertyReportService adminPropertyReportService;

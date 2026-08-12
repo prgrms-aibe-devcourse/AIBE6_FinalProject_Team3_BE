@@ -7,15 +7,14 @@ import java.util.UUID;
 
 public class S3KeyGenerator {
 
-    private static final String PROFILE_IMAGE_PREFIX = "profile-images/";
-
     private S3KeyGenerator() {
         // 유틸리티 클래스, 인스턴스화 방지
     }
 
     public static String profileImageKey(Long userId, String fileExt) {
         return String.format(
-                PROFILE_IMAGE_PREFIX + "%d/%s.%s", userId, UUID.randomUUID(), normalizeExtension(fileExt, S3ImagePurpose.PROFILE)
+                S3ImagePurpose.PROFILE.prefix() + "%d/%s.%s",
+                userId, UUID.randomUUID(), normalizeExtension(fileExt, S3ImagePurpose.PROFILE)
         );
     }
 
@@ -23,18 +22,29 @@ public class S3KeyGenerator {
     // key인지 확인한다 - 이 검증이 없으면 다른 사용자의 key(혹은 property-images/, contract-images/
     // 같은 다른 도메인 key)를 그대로 넘겨서 자기 프로필 사진으로 확정시키는 것을 막을 수 없다.
     public static boolean isProfileImageOwnedBy(Long userId, String key) {
-        return key != null && key.startsWith(PROFILE_IMAGE_PREFIX + userId + "/");
+        return key != null && key.startsWith(S3ImagePurpose.PROFILE.prefix() + userId + "/");
     }
 
     public static String propertyImageKey(Long propertyId, String fileExt) {
         return String.format(
-                "property-images/%d/%s.%s", propertyId, UUID.randomUUID(), normalizeExtension(fileExt, S3ImagePurpose.PROPERTY)
+                S3ImagePurpose.PROPERTY.prefix() + "%d/%s.%s",
+                propertyId, UUID.randomUUID(), normalizeExtension(fileExt, S3ImagePurpose.PROPERTY)
         );
+    }
+
+    // isProfileImageOwnedBy와 동일한 패턴 - 아직 어떤 컨트롤러도 이 검증을 호출하지 않는다
+    // (PropertyImageUploadController.confirm()에 소유권 검증 자체가 없음, backend property-design.md
+    // 전수조사 결과 참고). property 도메인 담당자가 그 컨트롤러에 @AuthenticationPrincipal을 받아
+    // 이 메서드로 호출자 소유 여부를 확인하도록 연결해야 실제로 막힌다 - 이 메서드는 그 연결을 위해
+    // 미리 준비해둔 공통 유틸이다.
+    public static boolean isPropertyImageOwnedBy(Long propertyId, String key) {
+        return key != null && key.startsWith(S3ImagePurpose.PROPERTY.prefix() + propertyId + "/");
     }
 
     public static String contractImageKey(Long userId, String fileExt) {
         return String.format(
-                "contract-images/%d/%s.%s", userId, UUID.randomUUID(), normalizeExtension(fileExt, S3ImagePurpose.CONTRACT)
+                S3ImagePurpose.CONTRACT.prefix() + "%d/%s.%s",
+                userId, UUID.randomUUID(), normalizeExtension(fileExt, S3ImagePurpose.CONTRACT)
         );
     }
 
