@@ -25,10 +25,14 @@ public class S3KeyGenerator {
         return key != null && key.startsWith(S3ImagePurpose.PROFILE.prefix() + userId + "/");
     }
 
-    public static String propertyImageKey(Long propertyId, String fileExt) {
+    // 매물 이미지는 propertyId가 아니라 userId로 네임스페이스가 나뉜다 - 신규 등록 시점엔 아직
+    // propertyId 자체가 없어서(PropertyImageUploadController 클래스 javadoc 참고) 로그인한 사용자
+    // 기준으로 키를 만들고, 매물 수정(이미지 교체) 시에도 동일하게 userId를 쓴다. 파라미터명을
+    // userId로 맞춰 이 사실을 코드에서도 바로 드러낸다.
+    public static String propertyImageKey(Long userId, String fileExt) {
         return String.format(
                 S3ImagePurpose.PROPERTY.prefix() + "%d/%s.%s",
-                propertyId, UUID.randomUUID(), normalizeExtension(fileExt, S3ImagePurpose.PROPERTY)
+                userId, UUID.randomUUID(), normalizeExtension(fileExt, S3ImagePurpose.PROPERTY)
         );
     }
 
@@ -37,8 +41,12 @@ public class S3KeyGenerator {
     // 전수조사 결과 참고). property 도메인 담당자가 그 컨트롤러에 @AuthenticationPrincipal을 받아
     // 이 메서드로 호출자 소유 여부를 확인하도록 연결해야 실제로 막힌다 - 이 메서드는 그 연결을 위해
     // 미리 준비해둔 공통 유틸이다.
-    public static boolean isPropertyImageOwnedBy(Long propertyId, String key) {
-        return key != null && key.startsWith(S3ImagePurpose.PROPERTY.prefix() + propertyId + "/");
+    //
+    // (2026-08-12 정정) 파라미터는 propertyId가 아니라 userId다 - propertyImageKey()가 위에서
+    // 설명한 대로 userId로 키를 생성하므로, 검증도 같은 기준으로 해야 한다. propertyId로 착각해서
+    // 호출하면 정상 소유자의 confirm까지 막히거나(다른 값이라 항상 false) 검증이 무의미해진다.
+    public static boolean isPropertyImageOwnedBy(Long userId, String key) {
+        return key != null && key.startsWith(S3ImagePurpose.PROPERTY.prefix() + userId + "/");
     }
 
     public static String contractImageKey(Long userId, String fileExt) {
