@@ -109,7 +109,7 @@
 
 ### 코드 품질 (중복/구조/일관성)
 
-1. "presign으로 발급받은 key가 실제로 이 사용자/이 용도의 것인지 confirm 시점에 검증한다"는 정책이 코드 어디에도 공통 유틸로 뽑혀 있지 않고, `user` 도메인의 `UserService`/`S3KeyGenerator.isProfileImageOwnedBy`에만 존재한다(위 보안 1번 참고). `S3ImagePurpose`가 이미 "여러 클래스에 각각 상수를 두면 나중에 한쪽만 바뀌어 어긋나는 걸 막기 위해" 정책을 한 곳에 모은 전례가 있으므로(`S3ImagePurpose.java` 상단 주석), 소유권 검증도 같은 정신으로 `S3KeyGenerator`/`S3PresignService` 레벨의 공통 로직으로 승격하는 게 이 코드베이스의 기존 설계 의도와도 맞다.
+1. ~~"presign으로 발급받은 key가 실제로 이 사용자/이 용도의 것인지 confirm 시점에 검증한다"는 정책이 코드 어디에도 공통 유틸로 뽑혀 있지 않고, `user` 도메인의 `UserService`/`S3KeyGenerator.isProfileImageOwnedBy`에만 존재한다(위 보안 1번 참고). `S3ImagePurpose`가 이미 "여러 클래스에 각각 상수를 두면 나중에 한쪽만 바뀌어 어긋나는 걸 막기 위해" 정책을 한 곳에 모은 전례가 있으므로(`S3ImagePurpose.java` 상단 주석), 소유권 검증도 같은 정신으로 `S3KeyGenerator`/`S3PresignService` 레벨의 공통 로직으로 승격하는 게 이 코드베이스의 기존 설계 의도와도 맞다.~~ — ✅ **(2026-08-12 부분 해결)** "key가 이 *purpose*의 것인지"(prefix 검증)는 `S3PresignService.confirmUpload()`/`generateDownloadUrl()` 레벨로 승격해 모든 호출부에 공통 적용됨(위 보안 1번 참고). 다만 "key가 이 *사용자*의 것인지"(per-user 소유권)는 여전히 공통화되지 않았다 — `S3KeyGenerator.isProfileImageOwnedBy`/`isPropertyImageOwnedBy`가 각각 존재하지만, 실제 호출은 여전히 각 도메인 서비스/컨트롤러가 개별적으로 해야 한다(호출자의 userId를 아는 건 컨트롤러 레벨뿐이라 `S3PresignService` 자체로는 승격이 불가능함). 이 부분은 여전히 "정책은 준비돼 있지만 강제되지 않는" 상태다.
 
 ## 배포/인프라 설정 전수조사 결과 (2026-08-12)
 
