@@ -1,5 +1,10 @@
 package com.algogyeyak.user.service;
 
+import com.algogyeyak.checklist.entity.Checklist;
+import com.algogyeyak.checklist.repository.ChecklistRepository;
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyStatus;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.dto.NicknameCheckResponse;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
@@ -8,6 +13,7 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.entity.UserPreference;
 import com.algogyeyak.user.repository.UserPreferenceRepository;
 import com.algogyeyak.user.repository.UserRepository;
+import com.algogyeyak.user.repository.UserSocialAccountRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.s3.dto.PresignedUploadRequest;
@@ -15,6 +21,7 @@ import com.algogyeyak.global.s3.dto.PresignedUploadResponse;
 import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.global.s3.util.S3ImagePurpose;
 import com.algogyeyak.global.s3.util.S3KeyGenerator;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -33,16 +40,25 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final UserPreferenceRepository userPreferenceRepository;
+    private final UserSocialAccountRepository userSocialAccountRepository;
+    private final ChecklistRepository checklistRepository;
+    private final PropertyRepository propertyRepository;
     private final S3PresignService s3PresignService;
     private final TransactionTemplate requiresNewTransactionTemplate;
 
     public UserService(
             UserRepository userRepository,
             UserPreferenceRepository userPreferenceRepository,
+            UserSocialAccountRepository userSocialAccountRepository,
+            ChecklistRepository checklistRepository,
+            PropertyRepository propertyRepository,
             S3PresignService s3PresignService,
             PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.userPreferenceRepository = userPreferenceRepository;
+        this.userSocialAccountRepository = userSocialAccountRepository;
+        this.checklistRepository = checklistRepository;
+        this.propertyRepository = propertyRepository;
         this.s3PresignService = s3PresignService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -204,14 +220,39 @@ public class UserService {
         String previousImageUrl = user.getProfileImageUrl();
         user.withdraw();
         deletePreviousProfileImageIfOwned(userId, previousImageUrl);
-        // TODO: user_social_accounts(OAuth 연동 정보, UserSocialAccount 엔티티) 처리 정책 적용 필요 — 확인 필요
-        // TODO: 탈퇴한 사용자의 Property/ContractAnalysis 등 연관 데이터 처리 방식 적용 필요 — 확인 필요
+
+        // OAuth 연동 정보는 하드 삭제한다 - 남겨두면 (provider, provider_id) unique 제약 때문에
+        // 같은 소셜 계정으로 재가입하려는 탈퇴자를 영구히 막게 된다. 다른 도메인이 이 테이블을
+        // 참조하지 않아 하드 삭제해도 안전하다.
+        userSocialAccountRepository.deleteAllByUserId(userId);
+
+        // 본인 전용 검색 선호도 설정도 하드 삭제한다 - 다른 도메인이 참조하지 않는다.
+        userPreferenceRepository.deleteByUserId(userId);
+
+        // 본인 소유 체크리스트도 하드 삭제한다 - 매물별 개인 임장노트라 다른 유저가 참조하지 않고,
+        // ChecklistItem은 cascade(orphanRemoval)로 함께 정리된다.
+        List<Checklist> checklists = checklistRepository.findAllByUserId(userId);
+        checklistRepository.deleteAll(checklists);
+
+        // 매물은 하드 삭제하지 않고 기존 soft-delete(Property.delete())를 그대로 재사용한다 - 다른
+        // 유저의 checklist/risk-analysis(PropertyRisk 등)가 이 매물을 참조하고 있어서, row 자체를
+        // 지우면 그쪽 데이터가 깨지거나(FK) 허위매물 탐지 이력이 함께 사라진다.
+        List<Property> properties = propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(userId, PropertyStatus.ACTIVE);
+        properties.forEach(Property::delete);
     }
 
+    // "존재하지 않음"/"탈퇴함"/"정지됨"을 서로 다른 ErrorCode로 구분해서 던진다 - 프론트가 각
+    // 상태에 맞는 안내 문구를 보여줄 수 있어야 하기 때문이다.
     private User getActiveUserOrThrow(Long userId) {
-        return userRepository.findById(userId)
-                .filter(user -> !user.isWithdrawn() && !user.isSuspended())
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+        if (user.isWithdrawn()) {
+            throw new BusinessException(ErrorCode.USER_WITHDRAWN);
+        }
+        if (user.isSuspended()) {
+            throw new BusinessException(ErrorCode.USER_SUSPENDED);
+        }
+        return user;
     }
 
     private void validateNicknameNotDuplicated(Long userId, String nickname) {

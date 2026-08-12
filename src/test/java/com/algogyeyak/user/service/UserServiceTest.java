@@ -6,11 +6,15 @@ import com.algogyeyak.user.dto.NicknameCheckResponse;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
+import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.s3.service.S3PresignService;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.TransactionType;
 import com.algogyeyak.user.repository.UserPreferenceRepository;
 import com.algogyeyak.user.repository.UserRepository;
+import com.algogyeyak.user.repository.UserSocialAccountRepository;
+import java.util.Collections;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -34,9 +38,13 @@ class UserServiceTest {
 
     private final UserRepository userRepository = mock(UserRepository.class);
     private final UserPreferenceRepository userPreferenceRepository = mock(UserPreferenceRepository.class);
+    private final UserSocialAccountRepository userSocialAccountRepository = mock(UserSocialAccountRepository.class);
+    private final ChecklistRepository checklistRepository = mock(ChecklistRepository.class);
+    private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final S3PresignService s3PresignService = mock(S3PresignService.class);
     private final UserService userService = new UserService(
-            userRepository, userPreferenceRepository, s3PresignService, mock(PlatformTransactionManager.class));
+            userRepository, userPreferenceRepository, userSocialAccountRepository, checklistRepository,
+            propertyRepository, s3PresignService, mock(PlatformTransactionManager.class));
 
     private User activeUser(Long id) {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
@@ -63,7 +71,20 @@ class UserServiceTest {
 
         BusinessException exception = assertThrows(BusinessException.class, () -> userService.withdraw(1L));
 
-        assertEquals(ErrorCode.NOT_FOUND, exception.getErrorCode());
+        assertEquals(ErrorCode.USER_SUSPENDED, exception.getErrorCode());
+    }
+
+    @Test
+    void withdrawThrowsWithDistinctErrorCodeWhenUserAlreadyWithdrawn() {
+        // "존재하지 않음"과 "이미 탈퇴함"이 예전엔 같은 ErrorCode.NOT_FOUND로 뭉뚱그려져 있었다 -
+        // 프론트가 두 경우를 구분해 안내할 수 있도록 별도 코드로 분리한 회귀 테스트.
+        User withdrawn = activeUser(1L);
+        withdrawn.withdraw();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(withdrawn));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> userService.withdraw(1L));
+
+        assertEquals(ErrorCode.USER_WITHDRAWN, exception.getErrorCode());
     }
 
     @Test

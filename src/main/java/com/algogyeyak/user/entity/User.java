@@ -52,6 +52,9 @@ public class User {
     @Column(nullable = false)
     private UserStatus status;
 
+    @Column(name = "withdrawn_at")
+    private LocalDateTime withdrawnAt;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Role role;
@@ -143,13 +146,14 @@ public class User {
      * - 상태를 WITHDRAWN으로 변경
      * - email, nickname, passwordHash, profileImageUrl을 복원 불가능한 형태로 익명화
      * - email/nickname은 unique 제약이 있어 id 기반으로 유일성을 보장하며 치환
+     *
+     * 이미 탈퇴한 사용자에 대한 가드가 없다 - 유일한 호출부인 UserService.withdraw()가 이
+     * 메서드를 부르기 전에 getActiveUserOrThrow()로 이미 탈퇴/정지 사용자를 걸러내므로, 여기서
+     * 다시 검사해도 도달할 수 없는 코드였다.
      */
     public void withdraw() {
-        if (isWithdrawn()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "이미 탈퇴한 사용자입니다.");
-        }
-
         this.status = UserStatus.WITHDRAWN;
+        this.withdrawnAt = LocalDateTime.now();
         this.nickname = WITHDRAWN_NICKNAME_PREFIX + this.id;
         this.email = (this.email != null) ? "withdrawn_" + this.id + "@" + WITHDRAWN_EMAIL_DOMAIN : null;
         this.passwordHash = null;
