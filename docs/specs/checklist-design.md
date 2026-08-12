@@ -131,3 +131,25 @@
 ## 남은 이슈 / 확인 필요
 
 1. **거래유형별 문항 분기는 여전히 없음** — 이번엔 매물유형 필터만 추가했고, 거래유형(전세/월세)에 따른 분기는 다루지 않음. 24개 문항을 다시 살펴봐도 전세/월세 중 하나에만 해당하는 항목은 없어 지금 당장 필요하진 않다고 판단 — 필요성이 확인되면 동일한 필터 메커니즘(`applicablePropertyTypes`와 유사한 방식)으로 확장 가능
+
+## 전수조사 결과 (2026-08-12)
+
+### 버그/정확성
+
+특별히 발견된 이슈 없음. 아래 항목들을 코드 기준으로 재검증했고 문제 없음을 확인:
+- `ChecklistItem.check()`/`markInsufficient()`/`answer()`가 각각 `itemType`을 검증해 CHECK/YES_NO/DATE/DOCUMENT_REQUEST 방식이 서로 섞여 호출될 수 없음(`ChecklistService.updateChecklistItem`에서 잘못된 조합을 보내면 전부 400).
+- `Checklist.refreshStatus()`/`computeResult()`는 `items`가 0개(모든 템플릿이 비활성화된 극단적 상황)여도 예외 없이 `NOT_STARTED`로 안전하게 계산됨(다만 `AdminChecklistTemplateService`가 활성 문항 0개를 이미 막고 있어 실제로 도달하기는 어려움).
+- `getChecklist`/`updateChecklistItem`/`getChecklistResult` 세 곳 모두 매물 소유권(`property.isOwnedBy`/`checklist.getUser().getId().equals(userId)`)과 매물 삭제 여부를 일관되게 재검증함.
+
+### 보안
+
+특별히 발견된 이슈 없음.
+- `GET /checklists` 목록(`ChecklistRepository.findOverviewByUserId`)이 `p.userId = :userId`와 `c.user.id = :userId` 조건을 모두 걸어 다른 유저의 매물/체크리스트가 섞여 나올 수 없음을 코드로 확인.
+- `updateChecklistItem`은 itemId를 해당 `checklist.getItems()`(이미 소유권 검증된 체크리스트) 컬렉션 내에서만 찾으므로, 다른 유저의 체크리스트에 속한 itemId를 넣어도 `CHECKLIST_ITEM_NOT_FOUND`로만 끝나고 크로스 체크리스트 접근이 되지 않음.
+- `/checklists/**`, `/properties/**/checklists` 모두 `SecurityConfig`의 `anyRequest().authenticated()`에 걸려 인증 없이 접근 가능한 구멍이 없음.
+
+### 코드 품질 (중복/구조/일관성)
+
+1. **`ChecklistItemResponse.from()`이 `ChecklistItem.hasIssue()`를 재사용하지 않고 같은 로직을 중복 구현** — `ChecklistItemResponse.java:31`에서 `item.isIssueFound() || item.getUserNote() != null`을 직접 계산하는데, 이건 엔티티의 `ChecklistItem.hasIssue()`(`ChecklistItem.java:191-193`)와 완전히 동일한 식이다. 지금은 두 곳이 우연히 일치하지만, 나중에 "주의 항목" 판정 규칙이 바뀔 때(예: 새로운 조건 추가) 한쪽만 고치고 다른 쪽을 잊으면 API 응답과 서버 내부 판정이 조용히 어긋날 수 있다. `ChecklistItemResponse.from()`에서 `item.hasIssue()`를 그대로 호출하도록 바꾸는 게 안전하다.
+2. **`ChecklistRepository.findAllByUserId(Long userId)`가 죽은 코드** — 선언은 있지만(`ChecklistRepository.java:23`) 실제로 호출하는 곳이 없다(`grep` 기준 정의부 외 참조 0건). "내 체크리스트 목록" 기능이 이제 `findOverviewByUserId()`(페이지네이션 쿼리)로 완전히 대체된 뒤에도 이전 메서드가 정리되지 않은 것으로 보인다. 실제로 쓰이지 않는다면 제거를 권장.
+3. **관리자 템플릿 신규 생성 시 `version` 산정이 "활성" 기준이 아니라 "전체(비활성 포함)" 기준** — `AdminChecklistTemplateService.create()`(`AdminChecklistTemplateService.java:63-66`)는 `findAllByOrderByDisplayOrderAsc()`(활성+비활성 전체)에서 최대 버전을 구해 새 문항에 배정한다. 반면 `ChecklistItemTemplate` 클래스 주석은 "버전 하나 = 전체 매물 공통"이라는 불변식을 전제한다. 만약 과거에 더 높은 버전 번호를 가진 비활성 문항이 남아있는 상태(예: 버전을 잘못 올렸다가 되돌린 이력)에서 관리자가 새 문항을 추가하면, 새 문항은 현재 활성 배치(예: v2)보다 더 높은 번호(예: v5)를 받게 되고, `ChecklistService.createChecklist()`는 `activeTemplates.get(0).getVersion()`(활성 목록의 첫 항목 버전)만 체크리스트의 `templateVersion`으로 저장하므로, 실제로는 서로 다른 버전 번호가 섞인 활성 문항 집합인데도 체크리스트에는 단일 버전 값만 기록되는 불일치가 생길 수 있다. 지금까지는 버전이 2까지만 올라갔고 비활성 문항에 더 높은 버전이 남아있는 상황이 실제로 발생하지 않아 잠재적 위험으로만 존재한다 — 버전 산정을 "활성 문항 기준 최대값"으로 바꾸거나, 애초에 버전을 템플릿 배치 단위의 별도 리소스로 승격하는 방향(기존 "남은 이슈" 7번과 같은 방향)을 고려할 만하다.
