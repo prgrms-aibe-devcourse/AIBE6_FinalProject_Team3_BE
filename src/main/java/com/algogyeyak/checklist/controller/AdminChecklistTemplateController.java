@@ -1,5 +1,6 @@
 package com.algogyeyak.checklist.controller;
 
+import com.algogyeyak.admin.service.AdminActionLog;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateResponse;
@@ -9,7 +10,6 @@ import com.algogyeyak.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -28,7 +28,6 @@ import org.springframework.web.bind.annotation.RestController;
  * (hasRole("ADMIN"))으로 우선 차단되고, 아래 @PreAuthorize는 그 매칭이 어떤 이유로든 빗나가는
  * 경우를 위한 이중 방어다.
  */
-@Slf4j
 @RestController
 @RequestMapping("/admin/checklist-templates")
 @RequiredArgsConstructor
@@ -51,7 +50,7 @@ public class AdminChecklistTemplateController {
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(principal.userId(), request);
         // 영구 감사 기록은 AdminChecklistTemplateService가 AdminAuditLogger로 남긴다(실제 변경과
         // 같은 트랜잭션) - 이 로그는 실시간 관측(Prometheus/Grafana)용으로 별도 유지한다.
-        log.info("관리자 액션: actorId={} action=CREATE_CHECKLIST_TEMPLATE templateId={}", principal.userId(), result.id());
+        AdminActionLog.record(principal.userId(), "CREATE_CHECKLIST_TEMPLATE", "templateId", result.id());
         return ApiResponse.success(result);
     }
 
@@ -63,14 +62,14 @@ public class AdminChecklistTemplateController {
     ) {
         AdminChecklistItemTemplateResponse result =
                 adminChecklistTemplateService.update(principal.userId(), templateId, request);
-        log.info("관리자 액션: actorId={} action=UPDATE_CHECKLIST_TEMPLATE templateId={}", principal.userId(), templateId);
+        AdminActionLog.record(principal.userId(), "UPDATE_CHECKLIST_TEMPLATE", "templateId", templateId);
         return ApiResponse.success(result);
     }
 
     @DeleteMapping("/{templateId}")
     public ApiResponse<Void> delete(@AuthenticationPrincipal JwtUserPrincipal principal, @PathVariable Long templateId) {
         adminChecklistTemplateService.delete(principal.userId(), templateId);
-        log.info("관리자 액션: actorId={} action=DELETE_CHECKLIST_TEMPLATE templateId={}", principal.userId(), templateId);
+        AdminActionLog.record(principal.userId(), "DELETE_CHECKLIST_TEMPLATE", "templateId", templateId);
         return ApiResponse.successWithoutData();
     }
 }

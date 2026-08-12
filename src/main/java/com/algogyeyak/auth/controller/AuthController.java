@@ -159,9 +159,12 @@ public class AuthController {
     }
 
     // 닉네임/프로필 사진/권한은 JWT 발급 시점(로그인 시점) 값이 아니라, 그 이후 변경돼도 항상 최신
-    // 값이 반영되도록 매 요청마다 User 엔티티에서 조회한다. role도 예외가 아니다 — 그렇지 않으면
-    // 관리자 권한이 회수된 사용자가 access token 만료(최대 30분) 전까지는 이 응답에서 계속 예전
-    // role을 보게 된다.
+    // 값이 반영되어야 한다 — 그렇지 않으면 관리자 권한이 회수된 사용자가 access token 만료(최대
+    // 30분) 전까지는 이 응답에서 계속 예전 role을 보게 된다. 이 최신성은 컨트롤러가 직접 DB를
+    // 조회해서가 아니라(2026-08-12 이전엔 그랬음), JwtAuthenticationFilter.authenticate()가 이미
+    // 매 요청 User를 재조회해 principal에 담아주기 때문에 보장된다 — 존재/탈퇴/정지 여부도 필터가
+    // 먼저 걸러내므로(통과 못 하면 이 메서드 자체가 호출되지 않음), 여기서 같은 조회를 반복할
+    // 필요가 없다(전수조사 결과 코드 품질 2번 참고).
     @Operation(summary = "내 정보 조회", description = "access token 쿠키로 인증된 사용자 본인의 정보를 반환한다. Authorization: Bearer 헤더로도 인증 가능하다.")
     @SecurityRequirement(name = "access_token")
     @SecurityRequirement(name = "bearerAuth")
@@ -169,13 +172,9 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증되지 않았거나 탈퇴한 사용자")
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<MeResponse>> me(@AuthenticationPrincipal JwtUserPrincipal principal) {
-        // Access Token 자체는 유효해도 그 사이 탈퇴했거나 계정이 삭제된 사용자라면 세션을 더 이상
-        // 유효하다고 취급하면 안 된다 — 실제 계정 없이 success 응답을 내려주는 것을 방지한다.
-        User user = userRepository.findById(principal.userId())
-                .filter(found -> !found.isWithdrawn() && !found.isSuspended())
-                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
-
-        return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
+        return ResponseEntity.ok(ApiResponse.success(new MeResponse(
+                principal.userId(), principal.email(), principal.nickname(), principal.profileImageUrl(),
+                principal.role().name())));
     }
 
     // 구글/카카오로만 가입한 계정도 여기서 비밀번호를 설정하면 그 즉시 같은 이메일로 로컬

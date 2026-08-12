@@ -1,5 +1,6 @@
 package com.algogyeyak.user.controller;
 
+import com.algogyeyak.admin.service.AdminActionLog;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -15,7 +16,6 @@ import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.user.service.AdminUserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -34,7 +34,6 @@ import org.springframework.web.bind.annotation.RestController;
  * 관리자 전용 유저 관리 API. /admin/** 는 SecurityConfig의 URL 패턴(hasRole("ADMIN"))으로 우선
  * 차단되고, 아래 @PreAuthorize는 그 매칭이 어떤 이유로든 빗나가는 경우를 위한 이중 방어다.
  */
-@Slf4j
 @RestController
 @RequestMapping("/admin/users")
 @RequiredArgsConstructor
@@ -70,8 +69,7 @@ public class AdminUserController {
         AdminUserDetailResponse result = adminUserService.updateRole(principal.userId(), userId, request.role());
         // 권한 변경(특히 USER→ADMIN 승격)은 누가 언제 누구에게 했는지 추적 가능해야 한다 -
         // AdminUserService가 AdminAuditLogger로 영구 기록을 남기고, 이 로그는 실시간 관측용으로 별도 유지한다.
-        log.info("관리자 액션: actorId={} action=UPDATE_ROLE targetUserId={} newRole={}",
-                principal.userId(), userId, request.role());
+        AdminActionLog.record(principal.userId(), "UPDATE_ROLE", "targetUserId", userId, "newRole", request.role());
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
@@ -83,8 +81,7 @@ public class AdminUserController {
     ) {
         rejectSelf(principal, userId);
         AdminUserDetailResponse result = adminUserService.updateStatus(principal.userId(), userId, request.status());
-        log.info("관리자 액션: actorId={} action=UPDATE_STATUS targetUserId={} newStatus={}",
-                principal.userId(), userId, request.status());
+        AdminActionLog.record(principal.userId(), "UPDATE_STATUS", "targetUserId", userId, "newStatus", request.status());
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 

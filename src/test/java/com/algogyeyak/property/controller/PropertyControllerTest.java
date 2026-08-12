@@ -68,7 +68,7 @@ class PropertyControllerTest {
     private PropertyService propertyService;
 
     private RequestPostProcessor asUser(Long userId) {
-        JwtUserPrincipal principal = new JwtUserPrincipal(userId, "test@example.com", Role.USER);
+        JwtUserPrincipal principal = new JwtUserPrincipal(userId, "test@example.com", Role.USER, "테스트유저", null);
         Authentication auth = new UsernamePasswordAuthenticationToken(principal, null, List.of());
         return authentication(auth);
     }
