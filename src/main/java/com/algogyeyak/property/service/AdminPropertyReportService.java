@@ -18,6 +18,7 @@ import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -105,13 +106,16 @@ public class AdminPropertyReportService {
      * 여러 신고를 한 번에 조치완료/반려 처리한다. 대상 하나하나가 이미 review()의 가드(본인 신고
      * 셀프 검토 금지, RECEIVED 상태만 처리 가능)를 그대로 적용받으므로, 이건 원자적
      * 전체성공-전체실패가 아니라 항목별 성공/실패가 갈리는 배치 처리다 - 하나가 가드에 막혀도
-     * 나머지는 계속 처리하고, 실패한 항목과 사유를 그대로 응답에 담아 돌려준다.
+     * 나머지는 계속 처리하고, 실패한 항목과 사유를 그대로 응답에 담아 돌려준다. 입력에 같은 id가
+     * 중복되면(프론트는 Set이라 안 만들지만 API 호출로는 가능) 첫 시도에서 RESOLVED/REJECTED로
+     * 확정된 신고가 두 번째 시도에서 "이미 검토 완료"로 다시 걸려 같은 id가 성공/실패 양쪽에
+     * 나타날 수 있다 - 순서를 보존한 채 중복만 제거해 이 문제를 없앤다.
      */
     @Transactional
     public AdminBulkActionResponse bulkReview(Long reviewerId, List<Long> reportIds, PropertyReportStatus status, String memo) {
         List<Long> succeededIds = new ArrayList<>();
         List<AdminBulkActionResponse.Failure> failures = new ArrayList<>();
-        for (Long reportId : reportIds) {
+        for (Long reportId : new LinkedHashSet<>(reportIds)) {
             try {
                 review(reviewerId, reportId, status, memo);
                 succeededIds.add(reportId);

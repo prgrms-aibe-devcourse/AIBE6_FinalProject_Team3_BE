@@ -414,6 +414,38 @@ class AdminPropertyReportControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    // 회귀 테스트 - 원소 null 검증(@NotNull List 원소)이 없으면 이 요청이 그대로 서비스까지
+    // 들어가 findById(null)에서 IllegalArgumentException으로 500이 됐다.
+    @Test
+    void 일괄_검토처리는_reportIds에_null이_섞이면_400이다() throws Exception {
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[null],"status":"RESOLVED"}
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    // 회귀 테스트 - 중복 제거 전에는 첫 시도에서 RESOLVED로 확정된 신고가 두 번째 시도에서
+    // "이미 검토 완료"(ADMIN_INVALID_STATUS_TRANSITION)로 걸려 같은 id가 성공/실패 양쪽에
+    // 나타날 수 있었다.
+    @Test
+    void 일괄_검토처리에서_중복된_id는_한_번만_처리된다() throws Exception {
+        PropertyReport report = buildReport();
+        when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(report));
+
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[%d,%d],"status":"RESOLVED"}
+                                """.formatted(REPORT_ID, REPORT_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.succeededIds.length()").value(1))
+                .andExpect(jsonPath("$.data.failures").isEmpty());
+    }
+
     @Test
     void 일괄_검토처리는_토큰_없이_호출하면_401이다() throws Exception {
         mockMvc.perform(patch("/admin/property-reports/bulk-review")

@@ -457,6 +457,37 @@ class AdminUserControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    // 회귀 테스트 - 원소 null 검증(@NotNull List 원소)이 없으면 이 요청이 그대로 서비스까지
+    // 들어가 findById(null)에서 IllegalArgumentException으로 500이 됐다.
+    @Test
+    void 일괄_상태변경은_userIds에_null이_섞이면_400이다() throws Exception {
+        mockMvc.perform(patch("/admin/users/bulk-status")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userIds":[null],"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    // 회귀 테스트 - 중복 제거 전에는 같은 id가 성공/실패 목록 양쪽에 나타날 수 있었다(정지 후
+    // 다시 정지 시도 시 상태 전이 규칙에 걸릴 수 있는 경우 등).
+    @Test
+    void 일괄_상태변경에서_중복된_id는_한_번만_처리된다() throws Exception {
+        User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
+        when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+
+        mockMvc.perform(patch("/admin/users/bulk-status")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userIds":[%d,%d],"status":"SUSPENDED"}
+                                """.formatted(TARGET_ID, TARGET_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.succeededIds.length()").value(1))
+                .andExpect(jsonPath("$.data.failures").isEmpty());
+    }
+
     @Test
     void 일괄_상태변경은_토큰_없이_호출하면_401이다() throws Exception {
         mockMvc.perform(patch("/admin/users/bulk-status")

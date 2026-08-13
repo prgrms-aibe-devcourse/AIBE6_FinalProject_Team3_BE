@@ -141,6 +141,22 @@ class AdminUserServiceTest {
         assertEquals(ErrorCode.BAD_REQUEST.name(), result.failures().get(0).errorCode());
     }
 
+    // 회귀 테스트 - 중복 제거 전에는 같은 id를 두 번 처리해 첫 시도는 성공(succeededIds)하고
+    // 두 번째 시도가 (이미 정지 상태라) 상태 전이 규칙에 걸려 같은 id가 failures에도 나타날 수
+    // 있었다. 순서를 보존한 채 중복만 제거해 같은 id가 성공/실패 양쪽에 나타나지 않아야 한다.
+    @Test
+    void bulkUpdateStatus는_중복된_id를_한_번만_처리한다() {
+        User target = normalUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+
+        AdminBulkActionResponse result =
+                adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, 1L), UserStatus.SUSPENDED);
+
+        assertEquals(List.of(1L), result.succeededIds());
+        assertEquals(0, result.failures().size());
+        verify(userRepository, org.mockito.Mockito.times(1)).findById(1L);
+    }
+
     // 마지막 활성 관리자 보호에 걸린 항목만 실패 목록에 담기고, 다른 대상은 정상 처리돼야 한다.
     @Test
     void bulkUpdateStatus는_마지막_관리자_보호에_걸린_항목만_실패한다() {
