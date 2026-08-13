@@ -157,7 +157,7 @@ class UserServiceTest {
         ReflectionTestUtils.setField(oauthUser, "id", 1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(oauthUser));
         when(userPreferenceRepository.findByUserId(1L)).thenReturn(Optional.empty());
-        when(userPreferenceRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userPreferenceRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         ProfileUpdateRequest request = new ProfileUpdateRequest();
         ReflectionTestUtils.setField(request, "nickname", "홍 길동");
