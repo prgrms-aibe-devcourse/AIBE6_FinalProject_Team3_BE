@@ -1,5 +1,6 @@
 package com.algogyeyak.user.service;
 
+import com.algogyeyak.admin.dto.AdminBulkActionResponse;
 import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.global.error.ErrorCode;
@@ -16,6 +17,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -120,5 +122,60 @@ class AdminUserServiceTest {
 
         assertEquals(UserStatus.SUSPENDED, user.getStatus());
         verify(userRepository, never()).findAllByRoleAndStatusForUpdate(any(), any());
+    }
+
+    // 셀프 대상(2L)이 가드에 막혀도, 목록의 나머지(1L)는 그대로 처리돼야 한다 - 하나의 실패가
+    // 전체 배치를 롤백시키지 않는다는 걸 확인한다.
+    @Test
+    void bulkUpdateStatus는_일부_실패해도_나머지는_그대로_처리된다() {
+        User target = normalUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+
+        AdminBulkActionResponse result =
+                adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, ACTOR_ID), UserStatus.SUSPENDED);
+
+        assertEquals(UserStatus.SUSPENDED, target.getStatus());
+        assertEquals(List.of(1L), result.succeededIds());
+        assertEquals(1, result.failures().size());
+        assertEquals(ACTOR_ID, result.failures().get(0).id());
+        assertEquals(ErrorCode.BAD_REQUEST.name(), result.failures().get(0).errorCode());
+    }
+
+    // 회귀 테스트 - 중복 제거 전에는 같은 id를 두 번 처리해 첫 시도는 성공(succeededIds)하고
+    // 두 번째 시도가 (이미 정지 상태라) 상태 전이 규칙에 걸려 같은 id가 failures에도 나타날 수
+    // 있었다. 순서를 보존한 채 중복만 제거해 같은 id가 성공/실패 양쪽에 나타나지 않아야 한다.
+    @Test
+    void bulkUpdateStatus는_중복된_id를_한_번만_처리한다() {
+        User target = normalUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+
+        AdminBulkActionResponse result =
+                adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, 1L), UserStatus.SUSPENDED);
+
+        assertEquals(List.of(1L), result.succeededIds());
+        assertEquals(0, result.failures().size());
+        verify(userRepository, org.mockito.Mockito.times(1)).findById(1L);
+    }
+
+    // 마지막 활성 관리자 보호에 걸린 항목만 실패 목록에 담기고, 다른 대상은 정상 처리돼야 한다.
+    @Test
+    void bulkUpdateStatus는_마지막_관리자_보호에_걸린_항목만_실패한다() {
+        User lastAdmin = adminUser(1L);
+        User normalTarget = normalUser(2L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(lastAdmin));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(normalTarget));
+        when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
+                .thenReturn(List.of(lastAdmin));
+
+        AdminBulkActionResponse result =
+                adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, 2L), UserStatus.SUSPENDED);
+
+        assertEquals(UserStatus.ACTIVE, lastAdmin.getStatus(), "실패한 항목은 실제로 적용되면 안 된다");
+        assertEquals(UserStatus.SUSPENDED, normalTarget.getStatus());
+        assertEquals(List.of(2L), result.succeededIds());
+        assertEquals(1, result.failures().size());
+        assertEquals(1L, result.failures().get(0).id());
+        assertEquals(ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT.name(), result.failures().get(0).errorCode());
+        assertTrue(result.failures().get(0).message() != null && !result.failures().get(0).message().isBlank());
     }
 }

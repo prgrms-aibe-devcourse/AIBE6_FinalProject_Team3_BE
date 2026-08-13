@@ -1,5 +1,6 @@
 package com.algogyeyak.user.service;
 
+import com.algogyeyak.admin.dto.AdminBulkActionResponse;
 import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.global.error.ErrorCode;
@@ -13,6 +14,9 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.user.repository.UserRepository;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -77,6 +81,35 @@ public class AdminUserService {
         adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_STATUS, userId,
                 Map.of("beforeStatus", previousStatus, "afterStatus", status));
         return AdminUserDetailResponse.from(user);
+    }
+
+    /**
+     * 여러 유저를 한 번에 정지/정지해제한다. 대상 하나하나가 이미 updateStatus()의 가드(자기 자신
+     * 변경 금지, 마지막 활성 관리자 보호, 탈퇴 유저 제외)를 그대로 적용받으므로, 이건 원자적
+     * 전체성공-전체실패가 아니라 항목별 성공/실패가 갈리는 배치 처리다 - 하나가 가드에 막혀도
+     * 나머지는 계속 처리하고, 실패한 항목과 사유를 그대로 응답에 담아 돌려준다. updateStatus() 호출은
+     * 같은 인스턴스 안에서의 일반 메서드 호출(self-invocation)이라 별도 트랜잭션을 열지 않고 이
+     * 메서드의 트랜잭션 안에서 실행되며, 여기서 잡아낸 예외는 그 트랜잭션을 롤백시키지 않는다.
+     * 입력에 같은 id가 중복되면(프론트는 Set이라 안 만들지만 API 호출로는 가능) 먼저 처리된 id가
+     * 두 번째 시도에서 상태 전이 실패로 다시 걸려 같은 id가 성공/실패 양쪽에 나타날 수 있다 -
+     * 순서를 보존한 채 중복만 제거해 이 문제를 없앤다.
+     */
+    @Transactional
+    public AdminBulkActionResponse bulkUpdateStatus(Long actorId, List<Long> userIds, UserStatus status) {
+        List<Long> succeededIds = new ArrayList<>();
+        List<AdminBulkActionResponse.Failure> failures = new ArrayList<>();
+        for (Long userId : new LinkedHashSet<>(userIds)) {
+            try {
+                if (actorId.equals(userId)) {
+                    throw new BusinessException(ErrorCode.BAD_REQUEST, "자기 자신의 권한/상태는 변경할 수 없습니다.");
+                }
+                updateStatus(actorId, userId, status);
+                succeededIds.add(userId);
+            } catch (BusinessException e) {
+                failures.add(new AdminBulkActionResponse.Failure(userId, e.getErrorCode().name(), e.getMessage()));
+            }
+        }
+        return new AdminBulkActionResponse(succeededIds, failures);
     }
 
     /**
