@@ -131,7 +131,7 @@ class AdminChecklistTemplateControllerTest {
 
     @Test
     void 관리자_토큰으로_문항생성에_성공한다() throws Exception {
-        when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of(template(10L)));
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of(template(10L)));
         // 실제 JPA save()는 IDENTITY 전략이라 저장 즉시 생성된 id를 채워 리턴한다 - 이 mock도 그
         // 동작을 흉내내야 한다. AdminAuditLogger.log()가 saved.getId()를 targetId(nullable=false)로
         // 쓰는데, id가 안 채워진 채로 리턴하면(원래 mock처럼 인자를 그대로 돌려주기만 하면) 여기서

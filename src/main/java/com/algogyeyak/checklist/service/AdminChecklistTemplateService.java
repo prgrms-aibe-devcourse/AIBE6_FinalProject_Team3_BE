@@ -60,7 +60,10 @@ public class AdminChecklistTemplateService {
         validateCode(request.code(), request.itemType(), true, null);
         validateApplicablePropertyTypes(request.applicablePropertyTypes());
 
-        int version = checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc().stream()
+        // 비활성 문항 중에 활성 문항보다 높은 버전이 남아있을 수 있어(과거에 비활성화된 문항),
+        // 전체가 아니라 "현재 활성 문항 집합" 기준으로만 최대 버전을 구한다 - 그래야 새 문항이
+        // 지금 실제로 쓰이는 버전과 같은 값을 받는다.
+        int version = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc().stream()
                 .mapToInt(ChecklistItemTemplate::getVersion)
                 .max()
                 .orElse(1);
