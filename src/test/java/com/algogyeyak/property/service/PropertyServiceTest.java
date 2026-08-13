@@ -581,7 +581,7 @@ class PropertyServiceTest {
         when(depositSafetyCheckRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
                 com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.calculated(
                         calculated, new java.math.BigDecimal("85.00"), null, null,
-                        java.time.LocalDate.of(2026, 6, 20), "설명", "v1.0"),
+                        java.time.LocalDate.of(2026, 6, 20), "설명", 5, 300, "v1.0"),
                 com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.unavailable(
                         unavailable, null, null,
                         com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason.TRANSACTION_TYPE_UNSUPPORTED, "v1.0")
