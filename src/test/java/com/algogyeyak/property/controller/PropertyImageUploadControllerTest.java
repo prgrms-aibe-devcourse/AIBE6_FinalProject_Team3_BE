@@ -119,4 +119,38 @@ class PropertyImageUploadControllerTest {
                         .content(OBJECT_MAPPER.writeValueAsString(request)))
                 .andExpect(status().isNotFound());
     }
+
+    // 다른 사용자 명의로 발급된 key(혹은 profile-images/, contract-images/ 같은 다른 도메인 key)를
+    // 그대로 넘겨서 확정시키는 것을 막는지 확인한다 - isPropertyImageOwnedBy 검증이 s3PresignService
+    // 호출보다 먼저 일어나야 하므로, 이 테스트는 confirmUpload가 아예 호출되지 않는 것까지 함께 검증한다.
+    @Test
+    void 다른_사용자의_key로_확인을_시도하면_403을_반환하고_S3_확인은_호출되지_않는다() throws Exception {
+        String otherUsersKey = "property-images/999/abc.jpg";
+        PropertyImageConfirmRequest request = new PropertyImageConfirmRequest(otherUsersKey);
+
+        mockMvc.perform(post("/properties/images/confirm")
+                        .with(asUser(USER_ID))
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content(OBJECT_MAPPER.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value(ErrorCode.FILE_KEY_ACCESS_DENIED.getCode()));
+
+        org.mockito.Mockito.verify(s3PresignService, org.mockito.Mockito.never())
+                .confirmUpload(anyString(), any());
+    }
+
+    @Test
+    void 다른_도메인_key로_확인을_시도하면_403을_반환한다() throws Exception {
+        String profileImageKey = "profile-images/1/abc.jpg";
+        PropertyImageConfirmRequest request = new PropertyImageConfirmRequest(profileImageKey);
+
+        mockMvc.perform(post("/properties/images/confirm")
+                        .with(asUser(USER_ID))
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content(OBJECT_MAPPER.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value(ErrorCode.FILE_KEY_ACCESS_DENIED.getCode()));
+    }
 }
