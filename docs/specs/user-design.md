@@ -50,14 +50,14 @@
 | 요구사항 | 실제 구현 |
 |---|---|
 | 본인 프로필인지 확인 | ✅ (경로에 별도 id 없이 JWT의 userId만 사용 — 애초에 남의 프로필 지정 자체가 불가능한 구조) |
-| 길이/형식 검증 | **(2026-08-11, `feat/user-nickname-format` 브랜치 — 아직 `dev` 미머지)** 닉네임은 길이+형식(한글/영문/숫자, `NicknamePolicy`) 둘 다 검증하지만 본인 기존 닉네임과 실제로 다를 때만 — DTO의 `@Pattern`이 아니라 `UserService`가 "바뀔 때만" 검사(아래 참고). **머지 전까지는 `dev`/배포판에서 여전히 닉네임 길이만 검증됩니다.** 나머지 필드는 형식 검증 없음 |
+| 길이/형식 검증 | **(2026-08-11)** 닉네임은 길이+형식(한글/영문/숫자, `NicknamePolicy`) 둘 다 검증하지만 본인 기존 닉네임과 실제로 다를 때만 — DTO의 `@Pattern`이 아니라 `UserService.updateMyProfile()`이 "바뀔 때만" 검사(아래 참고). 나머지 필드는 형식 검증 없음 |
 | 닉네임 중복 확인 | ✅ (변경 시에만) |
 | 변경 저장 | ✅ — 요청에 담긴 필드만 부분 업데이트 (null이 아닌 것만 반영) |
 | 실패: 인증 실패 | ✅ 401 |
 | 실패: 중복된 닉네임 | ✅ **(2026-07-31)** 409 `USER_NICKNAME_ALREADY_EXISTS` |
-| 실패: 잘못된 입력값 | **(2026-08-11, 미머지 브랜치)** 길이+형식(한글/영문/숫자) — 단, 욕설/금칙어는 아직 안 걸러짐(위 "프로필 등록" 표 참고) |
+| 실패: 잘못된 입력값 | **(2026-08-11)** 길이+형식(한글/영문/숫자, `NicknamePolicy`) 위반 시 400 — 욕설/금칙어 필터링은 하지 않기로 결정됨(아래 "남은 이슈" 9번 참고) |
 
-**(2026-08-11 설계 결정, `feat/user-nickname-format` 브랜치 — 아직 `dev` 미머지)** 닉네임 형식(`NicknamePolicy`) 검증을 `ProfileRegisterRequest`/`ProfileUpdateRequest`의 `@Pattern`으로 걸면 안 되는 이유가 있었습니다 — 카카오/구글 OAuth 가입자는 이 정책을 거치지 않고 만들어진 닉네임(소셜 제공자가 내려준 값 그대로, 공백·특수문자 포함 가능)을 가질 수 있는데, 프론트는 닉네임을 안 바꿔도 현재 값을 매 요청 그대로 재전송합니다. DTO에 무조건 `@Pattern`을 걸면 그런 사용자는 닉네임을 건드리지도 않았는데 프로필 저장 자체가 막힙니다. 그래서 `UserService.registerProfile()`/`updateMyProfile()`이 이미 갖고 있던 "본인 기존 닉네임과 실제로 다를 때만 중복 검사" 분기 안에 형식 검사(`validateNicknameFormat()`)도 같이 넣는 방식으로 해결했습니다 — `SignupRequest`(로컬 회원가입)는 항상 새로 정하는 값이라 이 문제가 없어 그대로 DTO `@Pattern`을 유지합니다.
+**(2026-08-11 설계 결정)** 닉네임 형식(`NicknamePolicy`) 검증을 `ProfileRegisterRequest`/`ProfileUpdateRequest`의 `@Pattern`으로 걸면 안 되는 이유가 있었습니다 — 카카오/구글 OAuth 가입자는 이 정책을 거치지 않고 만들어진 닉네임(소셜 제공자가 내려준 값 그대로, 공백·특수문자 포함 가능)을 가질 수 있는데, 프론트는 닉네임을 안 바꿔도 현재 값을 매 요청 그대로 재전송합니다. DTO에 무조건 `@Pattern`을 걸면 그런 사용자는 닉네임을 건드리지도 않았는데 프로필 저장 자체가 막힙니다. 그래서 `UserService.updateMyProfile()`이 이미 갖고 있던 "본인 기존 닉네임과 실제로 다를 때만" 분기에서 형식 검사(`validateNicknameFormat()`)를 먼저 호출한 뒤, 중복 검사와 동시성 안전 처리(REQUIRES_NEW 재확인)를 담당하는 `changeNickname()`을 그대로 호출하는 방식으로 처리합니다 — `SignupRequest`(로컬 회원가입)는 항상 새로 정하는 값이라 이 문제가 없어 그대로 DTO `@Pattern`을 유지합니다. (`registerProfile()`은 닉네임을 다루지 않으므로 대상이 아닙니다 — 위 "프로필 등록" 절 참고.)
 
 **(2026-08-03 변경)** `ProfileUpdateRequest`에서 `profileImageUrl` 필드가 제거되어, 이 API로는 더 이상 프로필 이미지를 바꿀 수 없습니다. 이미지 형식/크기 검증을 포함한 프로필 이미지 변경은 아래 "프로필 이미지 업로드/초기화" 절의 전용 엔드포인트로 이관됐습니다.
 
@@ -121,7 +121,7 @@
 - `UserProfileResponse`에 `hasPassword`(boolean) 필드 — 소셜 전용 계정인지 로컬 비밀번호가 있는지 프론트가 판단할 수 있게 해줌 (auth 쪽 기능과 연결됨)
 - 프로필 이미지 변경이 presign/confirm 2단계 API로 분리됨 — 요구사항엔 "이미지 업로드" 정도로만 명시돼 있고, 이 기술적 플로우(presigned URL 발급 → 클라이언트 직접 업로드 → 서버 확정) 자체는 구현 세부사항
 - `DELETE /users/me/profile-image` — 기본 이미지로 초기화하는 엔드포인트도 요구사항에 명시된 케이스는 아님
-- **(2026-08-11, `feat/user-nickname-format` 브랜치 — 아직 `dev` 미머지)** `GET /users/nickname-policy` — `GET /auth/password-policy`와 동일한 이유(정책값을 프론트가 하드코딩하지 않고 서버를 유일한 소스로 삼음)로 신설. 회원가입 화면(로그인 전)에서도 필요해 `nickname-check`와 동일하게 `permitAll`
+- **(2026-08-11)** `GET /users/nickname-policy` — `GET /auth/password-policy`와 동일한 이유(정책값을 프론트가 하드코딩하지 않고 서버를 유일한 소스로 삼음)로 신설. 회원가입 화면(로그인 전)에서도 필요해 `nickname-check`와 동일하게 `permitAll`
 
 ## 남은 이슈 / 확인 필요 총정리
 
@@ -133,7 +133,7 @@
 6. **(2026-08-11 해결됨)** "이미 탈퇴한 사용자" 실패 사유가 "존재하지 않는 사용자"와 구분 없이 같은 404로 나가던 문제 해결 — 도달 불가능했던 `User.withdraw()` 내부 가드는 제거하고, 대신 `UserService.getActiveUserOrThrow()`에서 탈퇴(`USER_WITHDRAWN`)/정지(`USER_SUSPENDED`)를 서로 다른 `ErrorCode`로 구분해서 던지도록 변경(상태 코드는 여전히 404로 동일, `code`/`message`만 구분)
 7. **(2026-07-31 해결됨, 문서 반영 누락 상태였음)** 프로필 등록 시 "이미 등록됨" 실패가 400으로 처리되던 문제 — 커밋 `9daefca`("User 프로필/닉네임 중복을 409 CONFLICT로 정리")에서 `USER_PROFILE_ALREADY_EXISTS`/`USER_NICKNAME_ALREADY_EXISTS`(둘 다 409)를 신설해 이미 해결되어 있었습니다. `docs/specs/auth-design.md`의 `AUTH_EMAIL_ALREADY_EXISTS`/`AUTH_NICKNAME_ALREADY_EXISTS`(둘 다 409)와 동일한 패턴으로 정리된 것으로, 코드는 맞았는데 이 문서(위 "프로필 등록"/"프로필 수정" 표)만 갱신되지 않고 400으로 잘못 남아있었습니다 — 위 표도 함께 수정했습니다. **(2026-08-12, 전수조사로 재검증됨)** `UserServiceTest`의 여러 테스트가 `assertEquals(HttpStatus.CONFLICT, exception.getStatus())`로 이를 명시적으로 검증하고 있음을 확인 — 아래 "전수조사 결과" 코드 품질 1번 참고
 8. **(2026-08-04, `deleteReplacedObject`로 완화됨)** confirm/reset 시 이전 S3 이미지 삭제는 여전히 best-effort지만, 즉시 삭제 전에 `status=pending`으로 다시 태깅해두는 안전망이 추가됨 — 즉시 삭제가 실패해도 버킷 Lifecycle 규칙(만료 기간 1일, AWS 콘솔에서 설정 확인함)이 최대 1일 내로 정리해줌. 태깅 자체와 즉시 삭제가 둘 다 실패하는 이중 실패 케이스만 여전히 영구 고아로 남을 수 있음 — 발생 확률이 낮아 별도 정리 배치까지는 아직 논의 안 됨
-9. **닉네임 욕설/금칙어 필터링 미구현 (2026-08-11 방향만 결정, 코드 없음)** — `NicknamePolicy`(그 자체도 `feat/user-nickname-format` 브랜치에만 있고 아직 `dev` 미머지 — 위 "프로필 수정" 표 참고. **(2026-08-12)** "프로필 등록"은 더 이상 닉네임을 받지 않아 대상에서 제외)는 문자 형식(한글/영문/숫자)만 막고 욕설은 못 거른다. 검토한 방향: ① 외부 검열 API/라이브러리는 이 프로젝트 규모엔 과함 → 제외 ② 어근 목록 + 정규화(공백·특수문자 제거, 자모 단독 표기 별도 등록) 방식으로 결정 ③ 목록은 오픈소스 한국어 비속어 리소스(예: `badwords-ko`, `korean-profanity-resources`)에서 가져오되 직접 작성하지 않음 ④ 저장은 DB 관리형 블록리스트 대신 정적 리소스 파일로 시작(수백 개 규모면 조회 성능상 DB가 필수는 아니고, 배포 없이 오탐을 바로 고쳐야 하는 운영 요구가 생기면 그때 DB로 전환) ⑤ 적용 지점은 형식 검증과 동일 — `checkNicknameAvailable`과 `UserService`의 "바뀔 때만 검사" 분기 둘 다. **아직 실제 구현은 시작 안 함**
+9. ~~닉네임 욕설/금칙어 필터링 미구현~~ **(2026-08-13 결정: 구현하지 않기로 확정)** 닉네임 검증은 형식(한글/영문/숫자)+길이(2~20자, `NicknamePolicy`) 검사까지만 하기로 하고, 욕설/금칙어 필터링은 범위에서 제외했다. (검토했던 방향은 어근 목록 + 정규화 방식의 자체 필터였으나 채택하지 않음 — `checkNicknameAvailable`/`UserService.updateMyProfile()` 모두 형식·중복 검사 이상은 하지 않는다)
 
 ## 전수조사 결과 (2026-08-12)
 
