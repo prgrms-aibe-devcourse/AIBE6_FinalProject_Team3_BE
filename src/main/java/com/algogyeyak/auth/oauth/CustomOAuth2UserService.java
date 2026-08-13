@@ -91,10 +91,15 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
     // 로컬 로그인(LocalAuthService.login)/refresh(RefreshTokenService.rotate)는 이미 탈퇴·정지 계정을
     // 거부하는데, 소셜 로그인만 이 검사가 빠져 있으면 정지된 계정도 새 토큰을 계속 발급받을 수 있다.
+    //
+    // 에러 코드는 일반 실패("oauth_login_failed")와 동일하게 둔다 - 로컬 로그인/토큰 필터는
+    // "탈퇴/정지된 계정" 사유를 노출하지 않고 전부 같은 실패로 응답하는데(AUTH_INVALID_CREDENTIALS 등,
+    // 계정 존재 여부 비노출 원칙), 소셜 로그인만 "account_blocked"로 구체적인 사유를 알려주면
+    // 그 계정이 실제로 존재하고 정지 상태라는 것이 새어나가 정책이 어긋난다.
     private void rejectIfBlocked(User user) {
         if (user.isWithdrawn() || user.isSuspended()) {
             throw new OAuth2AuthenticationException(
-                    new OAuth2Error("account_blocked", "로그인할 수 없는 계정입니다.", null));
+                    new OAuth2Error("oauth_login_failed", "로그인할 수 없는 계정입니다.", null));
         }
     }
 
