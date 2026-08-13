@@ -52,9 +52,8 @@ class UserServiceTest {
         return user;
     }
 
-    private ProfileRegisterRequest registerRequest(String nickname) {
+    private ProfileRegisterRequest registerRequest() {
         ProfileRegisterRequest request = new ProfileRegisterRequest();
-        ReflectionTestUtils.setField(request, "nickname", nickname);
         ReflectionTestUtils.setField(request, "interestRegion", "서울시 강남구");
         ReflectionTestUtils.setField(request, "transactionType", TransactionType.JEONSE);
         return request;
@@ -96,23 +95,9 @@ class UserServiceTest {
         when(userPreferenceRepository.existsByUserId(1L)).thenReturn(true);
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> userService.registerProfile(1L, registerRequest(null)));
+                () -> userService.registerProfile(1L, registerRequest()));
 
         assertEquals(ErrorCode.USER_PROFILE_ALREADY_EXISTS, exception.getErrorCode());
-        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
-    }
-
-    @Test
-    void registerProfileThrowsWhenNicknameAlreadyExists() {
-        User user = activeUser(1L);
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userPreferenceRepository.existsByUserId(1L)).thenReturn(false);
-        when(userRepository.existsByNicknameAndIdNot("중복닉네임", 1L)).thenReturn(true);
-
-        BusinessException exception = assertThrows(BusinessException.class,
-                () -> userService.registerProfile(1L, registerRequest("중복닉네임")));
-
-        assertEquals(ErrorCode.USER_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
         assertEquals(HttpStatus.CONFLICT, exception.getStatus());
     }
 

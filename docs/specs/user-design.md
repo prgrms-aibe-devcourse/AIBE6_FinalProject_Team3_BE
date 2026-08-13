@@ -20,16 +20,20 @@
 | 요구사항 | 실제 구현 |
 |---|---|
 | 생성형 AI 기반 운용 사전 고지 | ❌ **백엔드에 관련 로직/응답 필드가 전혀 없습니다.** 프론트엔드가 화면에서만 고지 문구를 보여주는 것으로 추정 — 확인 필요 |
-| 입력값 검증 | 부분 구현 — 닉네임은 한글/영문/숫자·2~20자(`NicknamePolicy`, 선택 입력, **(2026-08-11, `feat/user-nickname-format` 브랜치 — 아직 `dev` 미머지·미배포)** 형식 검증 추가 — 아래 "실패: 허용되지 않는 닉네임" 참고), 관심지역 필수(`@NotBlank`), 거래유형 필수(`@NotNull`), 자취/취업여부(currentStage)는 선택 |
+| 입력값 검증 | 부분 구현 — 관심지역 필수(`@NotBlank`), 거래유형 필수(`@NotNull`), 자취/취업여부(currentStage)는 선택. **(2026-08-12 변경)** 닉네임은 더 이상 이 API의 입력값이 아님 — 아래 참고 |
 | UserPreference 저장 | ✅ |
 | currentStage에 따른 홈 위젯 우선순위 결정 | ❌ **백엔드는 currentStage 값을 그대로 저장만 하고, 우선순위를 계산하거나 응답에 담는 로직이 없습니다.** 위젯 우선순위 자체가 프론트엔드 책임으로 보임 — 확인 필요 |
 | 성공: 온보딩 분기 반영된 홈으로 이동 | 백엔드는 이동 경로를 결정하지 않고 저장된 `UserProfileResponse`만 반환 — 라우팅은 프론트 담당으로 추정 |
 | 실패: 필수 입력값 누락 | ✅ 400 |
-| 실패: 중복된 닉네임 | ✅ **(2026-07-31)** 409 `USER_NICKNAME_ALREADY_EXISTS` (닉네임을 입력하고, 기존과 다를 때만 검사, 아래 "전수조사 결과" 코드 품질 1번에서 테스트로도 재검증함) |
-| 실패: 허용되지 않는 닉네임 | ⚠️ **부분 구현. (2026-08-11)** `NicknamePolicy`(`PasswordPolicy`와 동일 구조 — `^[가-힣a-zA-Z0-9]{2,20}$`, `GET /users/nickname-policy`로 프론트에 노출)를 신설해 특수문자·공백·이모지를 막도록 구현했습니다. **다만 이 구현은 아직 `feat/user-nickname-format` 브랜치에만 있고 `dev`에 머지되지 않았습니다 — 지금 `dev`/배포판 기준으로는 여전히 길이 제한만 있는 상태입니다.** 그리고 머지 여부와 무관하게 **욕설/금칙어 필터링은 아직 미구현**입니다 — 어근 목록 + 정규화 방식으로 정적 리소스 파일에 구현하기로 방향만 정했고(오픈소스 한국어 비속어 목록 참고, 외부 API/DB 관리형 블록리스트는 이 프로젝트 규모엔 과함으로 판단해 제외), 실제 코드는 아직 없습니다 — 남은 이슈 참고 |
-| 실패: 입력값 길이 초과 | ✅ 닉네임만 해당 (`@Size`) |
 | 실패: 인증되지 않은 사용자 | ✅ 401 (JWT 필터) |
 | *(요구사항에 없음)* | **이미 프로필이 등록된 경우** 실패 처리됨 — **(2026-07-31)** 409 `USER_PROFILE_ALREADY_EXISTS`("이미 프로필이 등록되어 있습니다."). 요구사항 실패 목록엔 없던 케이스 |
+
+**(2026-08-12 변경, 닉네임 처리 제거)** 이 API는 더 이상 `nickname`을 받지 않습니다 — `ProfileRegisterRequest.nickname` 필드와 `UserService.registerProfile()`의 닉네임 변경 분기(중복 검사 + 원자적 커밋)를 제거했습니다(백엔드 커밋 `7a5666c`). "실패: 중복된 닉네임"/"실패: 허용되지 않는 닉네임"/"닉네임 길이 초과"는 더 이상 이 API의 실패 케이스가 아니며, 닉네임 변경은 이제 `PATCH /users/me`(아래 "프로필 수정" 절)로만 가능합니다.
+
+원래부터 죽어있던 코드는 아니었습니다 — 히스토리를 보면:
+- **2026-07-21** User 도메인 최초 구현 시점부터 온보딩 화면에 닉네임 입력 UI가 있었고, 요청에도 `nickname`이 포함됐습니다(프론트/백엔드 둘 다 이 시점에 생성).
+- **2026-07-31** 프론트 커밋(`fa834ab`, "마이페이지, 홈 화면, 회원가입 화면 프론트 수정 작업")에서 온보딩 화면의 닉네임 입력 UI를 `mode === 'edit'` 조건부로 숨겨, 온보딩에서는 더 이상 노출되지 않게 됐습니다. 이때는 UI만 숨겼을 뿐 요청 body에서 필드 자체를 뺀 건 아니라, 백엔드 코드(닉네임 처리 분기)는 그대로 남아 죽은 코드가 됐습니다.
+- **2026-08-12** 프론트 커밋(`05b9426`, "프로필 등록 시 닉네임 관련 로직 제거")에서 요청 body에서 `nickname` 필드 자체를 제거했고, 같은 날 백엔드도 대응 제거(`7a5666c`)했습니다.
 
 ## 프로필 조회 (`GET /users/me`) — 요구사항 대비
 
@@ -129,7 +133,7 @@
 6. **(2026-08-11 해결됨)** "이미 탈퇴한 사용자" 실패 사유가 "존재하지 않는 사용자"와 구분 없이 같은 404로 나가던 문제 해결 — 도달 불가능했던 `User.withdraw()` 내부 가드는 제거하고, 대신 `UserService.getActiveUserOrThrow()`에서 탈퇴(`USER_WITHDRAWN`)/정지(`USER_SUSPENDED`)를 서로 다른 `ErrorCode`로 구분해서 던지도록 변경(상태 코드는 여전히 404로 동일, `code`/`message`만 구분)
 7. **(2026-07-31 해결됨, 문서 반영 누락 상태였음)** 프로필 등록 시 "이미 등록됨" 실패가 400으로 처리되던 문제 — 커밋 `9daefca`("User 프로필/닉네임 중복을 409 CONFLICT로 정리")에서 `USER_PROFILE_ALREADY_EXISTS`/`USER_NICKNAME_ALREADY_EXISTS`(둘 다 409)를 신설해 이미 해결되어 있었습니다. `docs/specs/auth-design.md`의 `AUTH_EMAIL_ALREADY_EXISTS`/`AUTH_NICKNAME_ALREADY_EXISTS`(둘 다 409)와 동일한 패턴으로 정리된 것으로, 코드는 맞았는데 이 문서(위 "프로필 등록"/"프로필 수정" 표)만 갱신되지 않고 400으로 잘못 남아있었습니다 — 위 표도 함께 수정했습니다. **(2026-08-12, 전수조사로 재검증됨)** `UserServiceTest`의 여러 테스트가 `assertEquals(HttpStatus.CONFLICT, exception.getStatus())`로 이를 명시적으로 검증하고 있음을 확인 — 아래 "전수조사 결과" 코드 품질 1번 참고
 8. **(2026-08-04, `deleteReplacedObject`로 완화됨)** confirm/reset 시 이전 S3 이미지 삭제는 여전히 best-effort지만, 즉시 삭제 전에 `status=pending`으로 다시 태깅해두는 안전망이 추가됨 — 즉시 삭제가 실패해도 버킷 Lifecycle 규칙(만료 기간 1일, AWS 콘솔에서 설정 확인함)이 최대 1일 내로 정리해줌. 태깅 자체와 즉시 삭제가 둘 다 실패하는 이중 실패 케이스만 여전히 영구 고아로 남을 수 있음 — 발생 확률이 낮아 별도 정리 배치까지는 아직 논의 안 됨
-9. **닉네임 욕설/금칙어 필터링 미구현 (2026-08-11 방향만 결정, 코드 없음)** — `NicknamePolicy`(그 자체도 `feat/user-nickname-format` 브랜치에만 있고 아직 `dev` 미머지 — 위 "프로필 등록"/"프로필 수정" 표 참고)는 문자 형식(한글/영문/숫자)만 막고 욕설은 못 거른다. 검토한 방향: ① 외부 검열 API/라이브러리는 이 프로젝트 규모엔 과함 → 제외 ② 어근 목록 + 정규화(공백·특수문자 제거, 자모 단독 표기 별도 등록) 방식으로 결정 ③ 목록은 오픈소스 한국어 비속어 리소스(예: `badwords-ko`, `korean-profanity-resources`)에서 가져오되 직접 작성하지 않음 ④ 저장은 DB 관리형 블록리스트 대신 정적 리소스 파일로 시작(수백 개 규모면 조회 성능상 DB가 필수는 아니고, 배포 없이 오탐을 바로 고쳐야 하는 운영 요구가 생기면 그때 DB로 전환) ⑤ 적용 지점은 형식 검증과 동일 — `checkNicknameAvailable`과 `UserService`의 "바뀔 때만 검사" 분기 둘 다. **아직 실제 구현은 시작 안 함**
+9. **닉네임 욕설/금칙어 필터링 미구현 (2026-08-11 방향만 결정, 코드 없음)** — `NicknamePolicy`(그 자체도 `feat/user-nickname-format` 브랜치에만 있고 아직 `dev` 미머지 — 위 "프로필 수정" 표 참고. **(2026-08-12)** "프로필 등록"은 더 이상 닉네임을 받지 않아 대상에서 제외)는 문자 형식(한글/영문/숫자)만 막고 욕설은 못 거른다. 검토한 방향: ① 외부 검열 API/라이브러리는 이 프로젝트 규모엔 과함 → 제외 ② 어근 목록 + 정규화(공백·특수문자 제거, 자모 단독 표기 별도 등록) 방식으로 결정 ③ 목록은 오픈소스 한국어 비속어 리소스(예: `badwords-ko`, `korean-profanity-resources`)에서 가져오되 직접 작성하지 않음 ④ 저장은 DB 관리형 블록리스트 대신 정적 리소스 파일로 시작(수백 개 규모면 조회 성능상 DB가 필수는 아니고, 배포 없이 오탐을 바로 고쳐야 하는 운영 요구가 생기면 그때 DB로 전환) ⑤ 적용 지점은 형식 검증과 동일 — `checkNicknameAvailable`과 `UserService`의 "바뀔 때만 검사" 분기 둘 다. **아직 실제 구현은 시작 안 함**
 
 ## 전수조사 결과 (2026-08-12)
 
@@ -145,6 +149,6 @@
 
 ### 코드 품질 (중복/구조/일관성)
 
-1. **문서-코드 불일치 정정**: 이 문서의 "프로필 등록"/"프로필 수정" 표와 "남은 이슈" 7번은 "실패: 중복된 닉네임"과 "이미 프로필이 등록된 경우"를 모두 **400**으로 서술하고 있었으나(이후 회원탈퇴 작업 중 위 표는 이미 409로 정정됨), 실제 `ErrorCode.USER_NICKNAME_ALREADY_EXISTS`/`USER_PROFILE_ALREADY_EXISTS`(`global/error/ErrorCode.java:52-53`)는 `HttpStatus.CONFLICT`(**409**)로 정의되어 있고, `UserServiceTest`(`registerProfileThrowsWhenProfileAlreadyExists`/`registerProfileThrowsWhenNicknameAlreadyExists`/`updateMyProfileThrowsWhenNicknameAlreadyExists`/`updateMyProfileRecoversWithNicknameConflictWhenConcurrentChangeWinsTheRace`, 각각 `assertEquals(HttpStatus.CONFLICT, exception.getStatus())`)도 이를 명시적으로 검증한다.
-2. `registerProfile()`(`service/UserService.java:80-85`)과 `updateMyProfile()`(`service/UserService.java:177-180`)이 "닉네임이 실제로 바뀌는지"를 판단하는 조건(`StringUtils.hasText(request.getNickname()) && !request.getNickname().equals(user.getNickname())`)을 각자 인라인으로 거의 동일하게 중복 구현하고 있다. 판단 이후의 처리(원자적 트랜잭션에 위임 vs `changeNickname()` 즉시 호출)는 서로 다르지만, 판단 조건 자체는 작은 private 헬퍼로 뽑아 재사용할 수 있는 반복이다.
-3. `getActiveUserOrThrow()`가 던지는 "존재하지 않거나 탈퇴한 사용자입니다." 메시지 문자열이 `UserService.java` 안에 3곳(`getActiveUserOrThrow`, `changeNickname`, `registerProfileAtomically`)에서 각각 리터럴로 반복돼 있다. 상수로 추출하면 이후 문구를 바꿀 때 일부만 놓치는 실수를 줄일 수 있다(기능적 문제는 아님).
+1. **문서-코드 불일치 정정**: 이 문서의 "프로필 등록"/"프로필 수정" 표와 "남은 이슈" 7번은 "실패: 중복된 닉네임"과 "이미 프로필이 등록된 경우"를 모두 **400**으로 서술하고 있었으나(이후 회원탈퇴 작업 중 위 표는 이미 409로 정정됨), 실제 `ErrorCode.USER_NICKNAME_ALREADY_EXISTS`/`USER_PROFILE_ALREADY_EXISTS`(`global/error/ErrorCode.java:52-53`)는 `HttpStatus.CONFLICT`(**409**)로 정의되어 있고, `UserServiceTest`(`registerProfileThrowsWhenProfileAlreadyExists`/`registerProfileThrowsWhenNicknameAlreadyExists`/`updateMyProfileThrowsWhenNicknameAlreadyExists`/`updateMyProfileRecoversWithNicknameConflictWhenConcurrentChangeWinsTheRace`, 각각 `assertEquals(HttpStatus.CONFLICT, exception.getStatus())`)도 이를 명시적으로 검증한다. **(2026-08-12 추가 변경)** `registerProfileThrowsWhenNicknameAlreadyExists`는 프로필 등록에서 닉네임 처리 자체가 제거되면서 함께 삭제됨 — 아래 2번 참고.
+2. ~~`registerProfile()`(`service/UserService.java:80-85`)과 `updateMyProfile()`(`service/UserService.java:177-180`)이 "닉네임이 실제로 바뀌는지"를 판단하는 조건(`StringUtils.hasText(request.getNickname()) && !request.getNickname().equals(user.getNickname())`)을 각자 인라인으로 거의 동일하게 중복 구현하고 있다.~~ **(2026-08-12 해결됨)** 프로필 등록 화면에는 애초에 닉네임 입력 UI가 없었고(2026-07-31 프론트에서 숨김 처리), 백엔드의 `registerProfile()` 닉네임 분기는 실제로 호출될 수 없는 죽은 코드였음이 확인되어 제거했다(`registerProfile()`은 더 이상 닉네임을 다루지 않음). 이 판단 조건은 이제 `updateMyProfile()`에만 남아 중복이 아니다.
+3. `getActiveUserOrThrow()`가 던지는 "존재하지 않거나 탈퇴한 사용자입니다." 메시지 문자열이 `UserService.java` 안에 2곳(`getActiveUserOrThrow`, `changeNickname`)에서 각각 리터럴로 반복돼 있다. **(2026-08-12)** 이전에는 `registerProfileAtomically`도 이 메시지를 갖고 있어 3곳이었으나, 닉네임 처리 제거와 함께 해당 메서드가 `savePreferenceOrThrowIfAlreadyRegistered()`로 단순화되며 2곳으로 줄었다. 상수로 추출하면 이후 문구를 바꿀 때 일부만 놓치는 실수를 줄일 수 있다(기능적 문제는 아님).
