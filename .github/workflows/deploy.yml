@@ -36,4 +36,8 @@ jobs:
           script: |
             cd ~/algogyeyak/backend
             git pull origin main
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+            # docker-compose.prod.yml이 algogyeyak-network를 external: true로 참조하므로,
+            # 이 네트워크가 없는 새 인스턴스(재해복구 등)에서도 최초 배포가 실패하지 않도록
+            # 없을 때만 생성한다(이미 있으면 아무 것도 하지 않음 - 기존 운영 환경엔 영향 없음).
+            docker network inspect algogyeyak-network >/dev/null 2>&1 || docker network create algogyeyak-network
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml up -d --build

@@ -65,7 +65,8 @@ public class ContractAnalysisOcrService {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_INVALID_INPUT);
         }
 
-        String format = CONTENT_TYPE_TO_CLOVA_FORMAT.get(image.getContentType());
+        String contentType = image.getContentType();
+        String format = contentType == null ? null : CONTENT_TYPE_TO_CLOVA_FORMAT.get(contentType);
         if (format == null) {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_UNSUPPORTED_FILE_TYPE);
         }

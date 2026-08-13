@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -117,6 +118,15 @@ public class GlobalExceptionHandler {
             HttpMediaTypeNotSupportedException exception
     ) {
         return buildErrorResponse(ErrorCode.UNSUPPORTED_MEDIA_TYPE, ErrorCode.UNSUPPORTED_MEDIA_TYPE.getMessage());
+    }
+
+    // 매핑된 컨트롤러가 없는 경로(예: 프론트가 아직 구현 안 된 API를 호출하거나 오타난 경로로
+    // 요청한 경우) 요청이면 Spring이 정적 리소스로도 못 찾았다는 뜻으로 이 예외를 던진다 - 이걸
+    // 아래 catch-all(Exception.class)이 잡으면 단순 404가 500 INTERNAL_SERVER_ERROR로 둔갑해
+    // 로그/모니터링에서 실제 서버 장애처럼 보인다.
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFoundException(NoResourceFoundException exception) {
+        return buildErrorResponse(ErrorCode.NOT_FOUND, ErrorCode.NOT_FOUND.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

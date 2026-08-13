@@ -1,5 +1,8 @@
 package com.algogyeyak.auth.oauth;
 
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
+
 import java.util.Map;
 
 public class GoogleOAuth2UserInfo extends OAuth2UserInfo {
@@ -10,7 +13,15 @@ public class GoogleOAuth2UserInfo extends OAuth2UserInfo {
 
     @Override
     public String getProviderId() {
-        return String.valueOf(attributes.get("sub"));
+        // String.valueOf(null)은 "null"이라는 실제 문자열을 반환한다 - sub가 없는(제공자 응답
+        // 오류/장애) 경우를 조용히 그 문자열로 바꿔치기하면, 같은 결함이 다른 사용자에게도
+        // 반복될 때 findByProviderAndProviderId(GOOGLE, "null")이 서로 다른 사용자를 같은
+        // 계정으로 착각해 매칭시킬 수 있다 - 반드시 실패시킨다.
+        Object sub = attributes.get("sub");
+        if (sub == null) {
+            throw new OAuth2AuthenticationException(new OAuth2Error("oauth_login_failed", "Google 인증 응답에 sub(고유 식별자)가 없습니다.", null));
+        }
+        return String.valueOf(sub);
     }
 
     @Override

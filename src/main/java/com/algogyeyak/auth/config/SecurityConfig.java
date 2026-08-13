@@ -12,6 +12,7 @@ import com.algogyeyak.global.response.ApiError;
 import com.algogyeyak.global.response.ApiResponse;
 import com.algogyeyak.user.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -26,6 +28,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
+import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -38,6 +43,11 @@ import java.util.stream.Collectors;
 
 @Configuration
 @EnableWebSecurity
+// /admin/** 컨트롤러(AdminUserController/AdminPropertyReportController/AdminChecklistTemplateController/
+// AdminStatsController)의 @PreAuthorize("hasRole('ADMIN')")를 활성화한다 - 지금까지는 아래
+// authorizeHttpRequests의 URL 패턴(hasRole("ADMIN")) 하나에만 의존했는데, 나중에 실수로 다른
+// prefix로 admin 컨트롤러를 추가하거나 매핑을 수정하면 이 URL 매처가 놓칠 수 있어 이중 방어로 추가.
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -55,6 +65,17 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
 
+    // CORS_ALLOWED_ORIGINS가 ""/공백/","처럼 값은 있지만 파싱 후 남는 origin이 없는 경우를 막는다 -
+    // fail-fast(placeholder 필수화)는 env 자체가 없는 경우만 잡아주고, 이런 값은 그대로 통과시켜
+    // CORS 설정이 빈 리스트로 조용히 뜬 채 모든 브라우저 인증 요청이 CORS 차단으로 실패하게 만든다.
+    @PostConstruct
+    void validateAllowedOrigins() {
+        if (parseAllowedOrigins().isEmpty()) {
+            throw new IllegalStateException(
+                    "app.cors.allowed-origins(CORS_ALLOWED_ORIGINS)에 유효한 origin이 하나도 없습니다: \"" + allowedOrigins + "\"");
+        }
+    }
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
@@ -71,7 +92,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/oauth2/**", "/login/**",
                                 "/swagger-ui/**", "/v3/api-docs/**",
-                                "/actuator/health", "/h2-console/**",
+                                "/h2-console/**",
                                 "/auth/logout", "/auth/refresh",
                                 "/auth/signup", "/auth/login", "/auth/dev-login",
                                 "/auth/password-policy"
@@ -82,11 +103,18 @@ public class SecurityConfig {
                         // 인증 정보 자체가 없어지는 건 아니다.
                         .requestMatchers("/users/nickname-check", "/users/nickname-policy").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
+                        // Actuator(헬스체크 + Prometheus) - health는 위 목록에도 있었던 중복 항목을 여기로 합침
+                        .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .anyRequest().authenticated()
                 )
                 // H2 콘솔은 내부적으로 프레임(iframe)을 사용하는데, 기본 X-Frame-Options: DENY가 이를 막는다.
-                // 로컬 개발 편의를 위한 설정이라 H2 콘솔 경로에 한해 sameOrigin으로 완화한다.
-                .headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()))
+                // frameOptions()로 전역 완화하면 실제로는 REST API 응답 전체가 sameOrigin으로 풀려버려
+                // (이 앱은 서버 렌더링 HTML이 없어 위험은 낮지만) 의도("H2 콘솔 경로에 한해")와 실제
+                // 동작이 어긋난다 - DelegatingRequestMatcherHeaderWriter로 /h2-console/** 요청에만
+                // SAMEORIGIN을 적용하고, 나머지 모든 응답은 기본값인 DENY를 그대로 유지한다.
+                .headers(headers -> headers.addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
+                        PathPatternRequestMatcher.pathPattern("/h2-console/**"),
+                        new XFrameOptionsHeaderWriter(XFrameOptionsHeaderWriter.XFrameOptionsMode.SAMEORIGIN))))
                 .oauth2Login(oauth2 -> oauth2
                         .authorizationEndpoint(endpoint -> endpoint
                                 .authorizationRequestRepository(cookieAuthorizationRequestRepository))

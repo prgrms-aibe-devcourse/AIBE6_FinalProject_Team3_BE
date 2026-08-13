@@ -11,6 +11,9 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -22,6 +25,8 @@ import java.io.IOException;
 import java.util.List;
 
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
     public static final String ACCESS_TOKEN_COOKIE_NAME = "access_token";
     public static final String REFRESH_TOKEN_COOKIE_NAME = "refresh_token";
@@ -91,13 +96,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // isRevoked()가 이미 매 요청 Redis 블랙리스트 조회를 하므로, 그 비용에 얹어 User를 DB에서
         // 다시 조회해 최신 상태/권한을 신뢰의 원천으로 삼는다 - AuthController.me()가 매 요청 User를
         // 다시 읽어오는 것과 같은 이유다.
-        User user = userRepository.findById(userId).orElse(null);
+        User user;
+        try {
+            user = userRepository.findById(userId).orElse(null);
+        } catch (DataAccessException e) {
+            // isRevoked()의 Redis 장애 처리(AccessTokenRevocationService)와 같은 이유로 DB 장애도
+            // fail-closed여야 한다 - 여기서 조용히 넘어가면 "권한을 확인할 수 없음"을 어느 쪽으로도
+            // 오인하지 않고 컨테이너 기본 500(ApiResponse 포맷이 아닌 원시 에러 페이지)으로 새어나가
+            // 버렸었다. isRevoked()가 이미 이 요청 속성 하나로 401/503을 구분해 응답하는 경로가
+            // 있으므로, 같은 성격(저장소 장애)의 AUTH_TOKEN_STORE_UNAVAILABLE을 그대로 재사용한다.
+            log.error("DB 장애로 인증 처리 중 사용자 조회 실패 — fail-closed로 503 처리합니다. userId={}", userId, e);
+            request.setAttribute(AUTH_FAILURE_REASON_ATTRIBUTE, ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE);
+            return;
+        }
         if (user == null || user.isWithdrawn() || user.isSuspended()) {
             request.setAttribute(AUTH_FAILURE_REASON_ATTRIBUTE, ErrorCode.AUTH_TOKEN_INVALID);
             return;
         }
 
-        JwtUserPrincipal principal = new JwtUserPrincipal(userId, user.getEmail(), user.getRole());
+        JwtUserPrincipal principal =
+                new JwtUserPrincipal(userId, user.getEmail(), user.getRole(), user.getNickname(), user.getProfileImageUrl());
 
         List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()));
         var authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);

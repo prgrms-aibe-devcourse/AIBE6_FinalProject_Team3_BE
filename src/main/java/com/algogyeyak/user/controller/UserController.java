@@ -1,8 +1,10 @@
 package com.algogyeyak.user.controller;
 
+import com.algogyeyak.auth.service.SessionLogoutService;
 import com.algogyeyak.user.dto.NicknameCheckResponse;
 import com.algogyeyak.user.dto.NicknamePolicy;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
+import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.s3.dto.PresignedUploadRequest;
 import com.algogyeyak.global.s3.dto.PresignedUploadResponse;
 import com.algogyeyak.user.dto.ProfileImageConfirmRequest;
@@ -11,8 +13,12 @@ import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
 import com.algogyeyak.user.service.UserService;
 import com.algogyeyak.global.response.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -22,7 +28,10 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class UserController {
 
+    private static final Logger log = LoggerFactory.getLogger(UserController.class);
+
     private final UserService userService;
+    private final SessionLogoutService sessionLogoutService;
 
     @GetMapping("/me")
     public ApiResponse<UserProfileResponse> getMyProfile(
@@ -89,8 +98,22 @@ public class UserController {
 
     @DeleteMapping("/me")
     public ApiResponse<Void> withdraw(
-            @AuthenticationPrincipal JwtUserPrincipal userDetails) {
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         userService.withdraw(userDetails.userId());
+
+        // 탈퇴(데이터 익명화/정리)는 이미 커밋됐다 - 이후 세션 무효화가 Redis 장애로 실패해도
+        // 탈퇴 자체를 되돌릴 수 없고, 그렇다고 503을 응답하면 클라이언트가 탈퇴 실패로 오인해
+        // 재시도했다가 이번엔 이미 탈퇴된 상태라 404(USER_WITHDRAWN)를 받는 혼란만 남는다. 쿠키가
+        // 안 지워져도 JwtAuthenticationFilter가 다음 요청부터 탈퇴 상태를 다시 확인해 차단하므로
+        // 보안 구멍은 아니다 - 로그만 남기고 탈퇴 자체는 성공으로 응답한다.
+        try {
+            sessionLogoutService.logout(request, response);
+        } catch (BusinessException e) {
+            log.warn("회원 탈퇴 후 세션 무효화 실패 - 탈퇴 자체는 성공 처리합니다. userId={}", userDetails.userId(), e);
+        }
+
         return ApiResponse.successWithoutData();
     }
 }

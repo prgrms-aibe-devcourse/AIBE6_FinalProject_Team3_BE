@@ -15,6 +15,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
@@ -61,6 +62,12 @@ public class Checklist {
     @Column(nullable = false, length = 20)
     private ChecklistStatus status;
 
+    // @OrderBy 없이는 JPA가 DB에 items 조회 순서를 보장하지 않는다 - ChecklistResponse의
+    // DISPLAY_ORDER_COMPARATOR는 안정 정렬(stable sort)이라, category/importance/displayOrder가
+    // 전부 같은 두 문항(관리자가 실수로 같은 displayOrder를 중복 지정한 경우)의 상대 순서를 이
+    // 컬렉션의 원래 fetch 순서로만 판가름한다 - @OrderBy가 없으면 그 순서가 요청마다 달라져
+    // 화면에서 두 문항이 뒤바뀌어 보일 수 있었다. id 기준으로 고정해 최소한 항상 같은 순서가 나오게 한다.
+    @OrderBy("id ASC")
     @OneToMany(mappedBy = "checklist", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ChecklistItem> items = new ArrayList<>();
 

@@ -18,4 +18,13 @@ public interface UserSocialAccountRepository extends JpaRepository<UserSocialAcc
             @Param("provider") AuthProvider provider, @Param("providerId") String providerId);
 
     boolean existsByUserId(Long userId);
+
+    // uk_social_user_provider(한 User가 같은 provider를 두 개 연동할 수 없다는 제약) 위반인지
+    // 판별하기 위한 조회 - linkNewSocialAccount()의 유니크 제약 위반 복구가 uk_social_provider_provider_id
+    // (같은 소셜 계정을 두 User가 동시에 연동)와 이 제약을 구분하는 데 쓴다.
+    boolean existsByUserIdAndProvider(Long userId, AuthProvider provider);
+
+    // 회원 탈퇴 시 OAuth 연동 정보 정리용 - 남겨두면 (provider, provider_id) unique 제약 때문에
+    // 같은 소셜 계정으로 재가입하려는 탈퇴자를 영구히 막게 된다.
+    void deleteAllByUserId(Long userId);
 }

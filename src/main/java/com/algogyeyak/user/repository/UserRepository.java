@@ -3,12 +3,14 @@ package com.algogyeyak.user.repository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -50,6 +52,22 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // 관리자 통계 대시보드: 신규 가입자 수 카드용(기간 내 가입).
     long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
+
+    // 마지막 남은 관리자 계정 보호(AdminUserService)용 - 실제로 로그인해 관리자 기능을 쓸 수 있는
+    // 계정만 세려고 role뿐 아니라 status도 ACTIVE로 제한한다(SUSPENDED/WITHDRAWN인 ADMIN은 이미
+    // 로그인 자체가 막혀 있어 그 수만큼 아무도 못 쓰는 셈이라 카운트에서 빼야 한다).
+    long countByRoleAndStatus(Role role, UserStatus status);
+
+    /**
+     * countByRoleAndStatus와 대상은 같지만, 마지막 활성 관리자 보호(AdminUserService.rejectIfLastActiveAdmin)를
+     * 원자적으로 만들기 위해 대상 행에 PESSIMISTIC_WRITE를 건다. 두 관리자가 동시에 서로를 강등/정지시키면,
+     * 먼저 락을 잡은 트랜잭션이 커밋될 때까지 다른 트랜잭션은 이 조회에서 대기한다 - 그 뒤에야 락이 풀리고
+     * 재개된 조회가 이미 반영된 최신 상태(강등된 관리자는 더 이상 조건에 안 걸림)를 보게 되어, 두 번째
+     * 트랜잭션이 정확히 "마지막 남은 관리자"를 강등하려는 시도임을 감지할 수 있다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.role = :role AND u.status = :status")
+    List<User> findAllByRoleAndStatusForUpdate(@Param("role") Role role, @Param("status") UserStatus status);
 
     // 관리자 통계 대시보드: 매물 등록자/미등록자 분포용 - 가입-등록 전환율을 보기 위해, 기간 내 가입한
     // 유저들의 id만 뽑아 PropertyRepository.countDistinctUserIdIn에 넘긴다.

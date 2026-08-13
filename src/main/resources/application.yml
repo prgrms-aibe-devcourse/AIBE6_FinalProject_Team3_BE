@@ -1,6 +1,12 @@
 spring:
   application:
     name: algogyeyak
+  servlet:
+    multipart:
+      # contract-analysis /inputs, /ocr가 자체적으로 10MB까지 허용하므로, Spring의 기본값(1MB)에
+      # 막혀 정상 크기의 계약서 사진조차 거부되지 않도록 그 상한과 맞춘다.
+      max-file-size: 10MB
+      max-request-size: 10MB
   # access token blacklist/refresh token 저장소(auth) + 캐싱 연결 준비용(그 외 도메인 - 실제
   # 캐시 대상/TTL 설계는 별도 작업). 로컬은 docker-compose의 redis 서비스(localhost:6379)를
   # 그대로 쓴다. Lettuce는 연결이 지연 생성이라 Redis가 안 떠 있어도 앱 기동 자체는 영향받지 않는다.
@@ -57,11 +63,13 @@ app:
     # 커스텀 서브도메인 구조를 이 값으로 흉내낼 수 없다. 실제 커스텀 서브도메인 배포 시에만
     # .example.com처럼 설정할 것 — README의 "운영 배포 시 쿠키 설정" 표 참고.
     domain: ${COOKIE_DOMAIN:}
-  # 개발 편의용 "관리자로 로그인" 버튼(POST /auth/dev-login)의 스위치. 기본값은 false이며,
-  # 운영(application-prod.yml)에서는 환경변수 없이 false로 고정해 실수로 켜지는 것을 막는다.
+  # 개발 편의용 "관리자로 로그인" 버튼(POST /auth/dev-login)의 스위치. 기본값은 false.
+  # secret은 이 스위치가 켜졌을 때 요청에 함께 실려와야 하는 공유 비밀 값 — 로컬은 팀 전체가
+  # 같은 기본값을 쓰도록 더미 값을 기본으로 둔다(운영은 application-prod.yml에서 기본값 없이 강제).
   dev-login:
     enabled: ${DEV_LOGIN_ENABLED:false}
     email: ${DEV_LOGIN_EMAIL:admin@algogyeyak.local}
+    secret: ${DEV_LOGIN_SECRET:local-dev-secret}
 
 kakao:
   rest-api-key: ${KAKAO_REST_API_KEY:dummy-key-for-local}
@@ -114,3 +122,16 @@ aws:
     region: ap-northeast-2
     access-key: ${AWS_ACCESS_KEY:dummy-access-key-for-local}
     secret-key: ${AWS_SECRET_KEY:dummy-secret-key-for-local}
+
+# Prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: algogyeyak-backend

@@ -98,7 +98,11 @@
 
 ## 요구사항에 없던 추가 구현
 
-- **`GET /checklists`(내 체크리스트 목록)** — 본인 매물 전체와 매물별 체크리스트 진행 상태(시작 전 포함)를 한 번에 보여주기 위해 추가됨. **(2026-07-30 갱신)** 응답에 `lastCheckedAt`(최종 점검일) 필드 추가 — 체크리스트가 있으면 `checklist.updatedAt`, 시작 전이면 `property.updatedAt`으로 대체. 목록 정렬 기준도 매물 등록일(`createdAt`) 최신순에서 `lastCheckedAt` 최신순으로 변경(동률이면 안정 정렬로 등록일 최신순 유지) — FE가 "최종 점검일" 표시를 요청하면서 함께 결정됨. **(2026-08-06 페이지네이션 추가, breaking change)** 매물 목록(`GET /properties`)과 동일한 컨벤션으로 `page`/`size` 쿼리 파라미터 + `PageResponse` 봉투 응답으로 전환 — 응답이 배열(`data: [...]`)에서 객체(`data: { content, page, size, totalElements, totalPages, hasNext }`)로 바뀜. 원래 "타겟 유저가 매물을 많이 등록할 일이 적어 당장 불필요"로 보류했던 항목이었으나, 다른 목록 API(`GET /properties`, 관리자 유저/신고 목록)들이 이미 전부 DB 레벨 페이지네이션을 쓰고 있어 일관성 차원에서 도입 결정됨. 정렬(`lastCheckedAt` 내림차순)은 DB 쿼리(`ChecklistRepository.findOverviewByUserId()` — Property LEFT JOIN Checklist, `COALESCE(checklist.updatedAt, property.updatedAt)` 기준)로 이동해 처리하며, 사용자가 정렬 기준을 고를 수 없어 클라이언트가 보낸 `sort` 파라미터는 무시함
+- **`GET /checklists`(내 체크리스트 목록)** — 본인 매물 전체와 매물별 체크리스트 진행 상태(시작 전 포함)를 한 번에 보여주기 위해 추가됨.
+
+  - **(2026-07-30)** 응답에 `lastCheckedAt`(최종 점검일) 필드 추가 — 체크리스트가 있으면 `checklist.updatedAt`, 시작 전이면 `property.updatedAt`으로 대체. 목록 정렬 기준도 매물 등록일(`createdAt`) 최신순에서 `lastCheckedAt` 최신순으로 변경(동률이면 안정 정렬로 등록일 최신순 유지) — FE가 "최종 점검일" 표시를 요청하면서 함께 결정됨.
+  - **(2026-08-06, breaking change)** 페이지네이션 추가 — 매물 목록(`GET /properties`)과 동일한 컨벤션으로 `page`/`size` 쿼리 파라미터 + `PageResponse` 봉투 응답으로 전환. 응답이 배열(`data: [...]`)에서 객체(`data: { content, page, size, totalElements, totalPages, hasNext }`)로 바뀜. 원래 "타겟 유저가 매물을 많이 등록할 일이 적어 당장 불필요"로 보류했던 항목이었으나, 다른 목록 API(`GET /properties`, 관리자 유저/신고 목록)들이 이미 전부 DB 레벨 페이지네이션을 쓰고 있어 일관성 차원에서 도입 결정됨. 정렬(`lastCheckedAt` 내림차순)은 DB 쿼리(`ChecklistRepository.findOverviewByUserId()` — Property LEFT JOIN Checklist, `COALESCE(checklist.updatedAt, property.updatedAt)` 기준)로 이동해 처리하며, 사용자가 정렬 기준을 고를 수 없어 클라이언트가 보낸 `sort` 파라미터는 무시함.
+  - **(2026-08-13)** 응답에 `title`(매물 제목) 필드 추가 — 주소만으로는 목록에서 매물을 구분하기 어렵다는 이유로, 이미 `Property` 엔티티에 있던 값을 그대로 노출함(리포지토리 쿼리가 `Property` 엔티티 전체를 select하고 있어 쿼리 변경 없이 반영됨).
 - **`userNote`(미흡 메모)** — CHECK 타입 항목에 "완료했지만 미흡함"을 메모와 함께 남기는 기능. `hasIssue() = issueFound || userNote != null`
 - **관리비 확인 항목** — 서류·행정 카테고리에 신규 추가("관리비에 전기세·수도세 등이 포함되어 있는지 확인했나요?"). 오피스텔 등에서 관리비가 실제 임대료보다 커질 수 있다는 실용적 이유로 추가(노션 요구사항 명세서 반영 완료)
 - **`helperText`(쉬운 설명)** **(2026-07-30 추가)** — `guideText`(짧은 실무 안내)와 별개로, 부동산 지식이 없는 사용자도 이해할 수 있게 초등학생 수준으로 풀어쓴 설명. `ChecklistItemTemplate`/`ChecklistItem`에 컬럼 추가, 템플릿→문항 스냅샷 복사 시 함께 복사됨. 서류·행정 REQUIRED 6개 문항(등기부등본/신탁등기/명의불일치/소유권취득일/확정일자/전입세대열람)에 우선 반영, FE가 이미 콘텐츠를 준비해둔 상태에서 백엔드 필드가 뒤따라 추가됨. **(2026-07-31 갱신)** 값 안에 마크다운 스타일 강조(`**강조할 문구**`)와 문단 구분(`\n\n`)이 포함돼 있음 — 순수 텍스트가 아니라 경량 마크업이 섞인 문자열이므로, FE는 그대로 `<p>`에 렌더링하면 안 되고 ① `**...**` 파싱 후 굵게 표시, ② `white-space: pre-line`(또는 동등한 처리)으로 `\n\n`을 문단 줄바꿈으로 반영해야 의도대로 보임(현재 `ChecklistClient.tsx`는 아직 미반영 상태)
@@ -131,3 +135,25 @@
 ## 남은 이슈 / 확인 필요
 
 1. **거래유형별 문항 분기는 여전히 없음** — 이번엔 매물유형 필터만 추가했고, 거래유형(전세/월세)에 따른 분기는 다루지 않음. 24개 문항을 다시 살펴봐도 전세/월세 중 하나에만 해당하는 항목은 없어 지금 당장 필요하진 않다고 판단 — 필요성이 확인되면 동일한 필터 메커니즘(`applicablePropertyTypes`와 유사한 방식)으로 확장 가능
+
+## 전수조사 결과 (2026-08-12)
+
+### 버그/정확성
+
+특별히 발견된 이슈 없음. 아래 항목들을 코드 기준으로 재검증했고 문제 없음을 확인:
+- `ChecklistItem.check()`/`markInsufficient()`/`answer()`가 각각 `itemType`을 검증해 CHECK/YES_NO/DATE/DOCUMENT_REQUEST 방식이 서로 섞여 호출될 수 없음(`ChecklistService.updateChecklistItem`에서 잘못된 조합을 보내면 전부 400).
+- `Checklist.refreshStatus()`/`computeResult()`는 `items`가 0개(모든 템플릿이 비활성화된 극단적 상황)여도 예외 없이 `NOT_STARTED`로 안전하게 계산됨(다만 `AdminChecklistTemplateService`가 활성 문항 0개를 이미 막고 있어 실제로 도달하기는 어려움).
+- `getChecklist`/`updateChecklistItem`/`getChecklistResult` 세 곳 모두 매물 소유권(`property.isOwnedBy`/`checklist.getUser().getId().equals(userId)`)과 매물 삭제 여부를 일관되게 재검증함.
+
+### 보안
+
+특별히 발견된 이슈 없음.
+- `GET /checklists` 목록(`ChecklistRepository.findOverviewByUserId`)이 `p.userId = :userId`와 `c.user.id = :userId` 조건을 모두 걸어 다른 유저의 매물/체크리스트가 섞여 나올 수 없음을 코드로 확인.
+- `updateChecklistItem`은 itemId를 해당 `checklist.getItems()`(이미 소유권 검증된 체크리스트) 컬렉션 내에서만 찾으므로, 다른 유저의 체크리스트에 속한 itemId를 넣어도 `CHECKLIST_ITEM_NOT_FOUND`로만 끝나고 크로스 체크리스트 접근이 되지 않음.
+- `/checklists/**`, `/properties/**/checklists` 모두 `SecurityConfig`의 `anyRequest().authenticated()`에 걸려 인증 없이 접근 가능한 구멍이 없음.
+
+### 코드 품질 (중복/구조/일관성)
+
+1. ~~`ChecklistItemResponse.from()`이 `ChecklistItem.hasIssue()`를 재사용하지 않고 같은 로직을 중복 구현~~ **(2026-08-13 코드 수정 완료)** — `ChecklistItemResponse.from()`이 `item.isIssueFound() || item.getUserNote() != null`을 직접 계산하던 걸 `item.hasIssue()` 호출로 교체함. 계산식이 원래 완전히 동일했어서(`ChecklistItem.hasIssue()`와 100% 같은 식) 동작 변화는 없는 순수 리팩터.
+2. ~~`ChecklistRepository.findAllByUserId(Long userId)`가 죽은 코드~~ **(2026-08-13 정정, 오탐)** — 전수조사 당시 `checklist` 패키지 범위로만 참조를 확인해 놓친 것으로 보인다. 실제로는 `UserService.withdraw()`(`UserService.java:234`)가 회원 탈퇴 시 본인 소유 체크리스트를 하드 삭제하기 위해 이 메서드로 목록을 조회한다 — 삭제하면 회원 탈퇴 기능이 깨지므로 코드 변경 불필요.
+3. ~~**관리자 템플릿 신규 생성 시 `version` 산정이 "활성" 기준이 아니라 "전체(비활성 포함)" 기준** — `AdminChecklistTemplateService.create()`(`AdminChecklistTemplateService.java:63-66`)는 `findAllByOrderByDisplayOrderAsc()`(활성+비활성 전체)에서 최대 버전을 구해 새 문항에 배정한다. 반면 `ChecklistItemTemplate` 클래스 주석은 "버전 하나 = 전체 매물 공통"이라는 불변식을 전제한다. 만약 과거에 더 높은 버전 번호를 가진 비활성 문항이 남아있는 상태에서 관리자가 새 문항을 추가하면, 새 문항은 현재 활성 배치보다 더 높은 번호를 받게 되고, `ChecklistService.createChecklist()`는 활성 목록의 첫 항목 버전만 체크리스트의 `templateVersion`으로 저장하므로 실제로는 서로 다른 버전 번호가 섞인 활성 문항 집합인데도 단일 버전 값만 기록되는 불일치가 생길 수 있다.~~ — ✅ **(2026-08-12 해결)** 버전 산정을 `findAllByOrderByDisplayOrderAsc()`(전체)에서 `findByActiveTrueOrderByDisplayOrderAsc()`(활성만)로 변경해 비활성 문항의 버전이 더 이상 영향을 주지 않도록 했고, 이 시나리오를 직접 재현하는 회귀 테스트(`AdminChecklistTemplateServiceTest.createIgnoresHigherVersionFromInactiveTemplates`)를 추가함.

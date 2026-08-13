@@ -1,5 +1,6 @@
 package com.algogyeyak.user.controller;
 
+import com.algogyeyak.admin.service.AdminActionLog;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -19,6 +20,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -29,11 +31,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 관리자 전용 유저 관리 API. /admin/** 는 SecurityConfig에서 ROLE_ADMIN으로만 접근 가능하도록 막혀있다.
+ * 관리자 전용 유저 관리 API. /admin/** 는 SecurityConfig의 URL 패턴(hasRole("ADMIN"))으로 우선
+ * 차단되고, 아래 @PreAuthorize는 그 매칭이 어떤 이유로든 빗나가는 경우를 위한 이중 방어다.
  */
 @RestController
 @RequestMapping("/admin/users")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
 public class AdminUserController {
 
     private final AdminUserService adminUserService;
@@ -62,7 +66,11 @@ public class AdminUserController {
             @Valid @RequestBody AdminUserRoleUpdateRequest request
     ) {
         rejectSelf(principal, userId);
-        return ResponseEntity.ok(ApiResponse.success(adminUserService.updateRole(userId, request.role())));
+        AdminUserDetailResponse result = adminUserService.updateRole(principal.userId(), userId, request.role());
+        // 권한 변경(특히 USER→ADMIN 승격)은 누가 언제 누구에게 했는지 추적 가능해야 한다 -
+        // AdminUserService가 AdminAuditLogger로 영구 기록을 남기고, 이 로그는 실시간 관측용으로 별도 유지한다.
+        AdminActionLog.record(principal.userId(), "UPDATE_ROLE", "targetUserId", userId, "newRole", request.role());
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 
     @PatchMapping("/{userId}/status")
@@ -72,7 +80,9 @@ public class AdminUserController {
             @Valid @RequestBody AdminUserStatusUpdateRequest request
     ) {
         rejectSelf(principal, userId);
-        return ResponseEntity.ok(ApiResponse.success(adminUserService.updateStatus(userId, request.status())));
+        AdminUserDetailResponse result = adminUserService.updateStatus(principal.userId(), userId, request.status());
+        AdminActionLog.record(principal.userId(), "UPDATE_STATUS", "targetUserId", userId, "newStatus", request.status());
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 
     // 관리자가 실수로 자기 자신의 권한을 강등하거나 자기 자신을 정지시켜 스스로를 잠그는 사고를 막는다.

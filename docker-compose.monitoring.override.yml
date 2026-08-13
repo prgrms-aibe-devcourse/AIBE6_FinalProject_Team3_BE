@@ -1,0 +1,15 @@
+# 로컬에서 모니터링 스택(Prometheus/Grafana)에 브라우저로 직접 접속해보려면, 이 파일이 정의하는
+# 포트 노출이 필요하다 - 다만 Docker Compose는 정확히 "docker-compose.override.yml"이라는 이름만
+# 자동으로 얹어주고, 이 파일(docker-compose.monitoring.override.yml)은 이름이 달라 자동 병합되지
+# 않는다(2026-08-12, 전수조사에서 발견 - 이 사실을 안내하는 문서/스크립트가 없었음). 아래처럼
+# -f를 두 번 명시해야 한다:
+#   docker compose -f docker-compose.monitoring.yml -f docker-compose.monitoring.override.yml up
+services:
+  grafana:
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+  prometheus:
+    ports:
+      - "9090:9090"

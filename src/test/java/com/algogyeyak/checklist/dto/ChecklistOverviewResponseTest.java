@@ -44,6 +44,7 @@ class ChecklistOverviewResponseTest {
         ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, checklist);
 
         assertThat(response.lastCheckedAt()).isEqualTo(checklistUpdatedAt);
+        assertThat(response.title()).isEqualTo("테스트 매물");
     }
 
     @Test

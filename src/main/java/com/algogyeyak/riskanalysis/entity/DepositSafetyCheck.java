@@ -42,6 +42,12 @@ public class DepositSafetyCheck {
     @Column(columnDefinition = "TEXT")
     private String explanation;
 
+    @Column(name = "sample_count")
+    private Integer sampleCount; // 기준가 산출에 쓰인 매매 실거래가 표본 수. status=CALCULATED일 때만 존재
+
+    @Column(name = "radius_meters")
+    private Integer radiusMeters; // 표본 탐색에 실제 사용된 반경(300 또는 600). status=CALCULATED일 때만 존재
+
     @Enumerated(EnumType.STRING)
     @Column(length = 255)
     private DepositSafetyCheckReason reason; // status=CALCULATED면 null
@@ -59,6 +65,7 @@ public class DepositSafetyCheck {
     @Builder
     private DepositSafetyCheck(Property property, BigDecimal jeonseRatio, BigDecimal seniorDeposit,
                                BigDecimal maxClaimAmount, LocalDate referenceDate, String explanation,
+                               Integer sampleCount, Integer radiusMeters,
                                DepositSafetyCheckReason reason, String policyVersion, DepositSafetyStatus status,
                                LocalDateTime calculatedAt) {
         this.property = property;
@@ -67,6 +74,8 @@ public class DepositSafetyCheck {
         this.maxClaimAmount = maxClaimAmount;
         this.referenceDate = referenceDate;
         this.explanation = explanation;
+        this.sampleCount = sampleCount;
+        this.radiusMeters = radiusMeters;
         this.reason = reason;
         this.policyVersion = policyVersion;
         this.status = status;
@@ -75,7 +84,8 @@ public class DepositSafetyCheck {
 
     public static DepositSafetyCheck calculated(Property property, BigDecimal jeonseRatio, BigDecimal seniorDeposit,
                                                  BigDecimal maxClaimAmount, LocalDate referenceDate,
-                                                 String explanation, String policyVersion) {
+                                                 String explanation, Integer sampleCount, Integer radiusMeters,
+                                                 String policyVersion) {
         return DepositSafetyCheck.builder()
                 .property(property)
                 .jeonseRatio(jeonseRatio)
@@ -83,6 +93,8 @@ public class DepositSafetyCheck {
                 .maxClaimAmount(maxClaimAmount)
                 .referenceDate(referenceDate)
                 .explanation(explanation)
+                .sampleCount(sampleCount)
+                .radiusMeters(radiusMeters)
                 .reason(null)
                 .policyVersion(policyVersion)
                 .status(DepositSafetyStatus.CALCULATED)
@@ -118,13 +130,15 @@ public class DepositSafetyCheck {
 
     /** 덮어쓰기 갱신 (재계산 시 사용) */
     public void overwrite(BigDecimal jeonseRatio, BigDecimal seniorDeposit, BigDecimal maxClaimAmount,
-                          LocalDate referenceDate, String explanation, DepositSafetyCheckReason reason,
-                          String policyVersion, DepositSafetyStatus status) {
+                          LocalDate referenceDate, String explanation, Integer sampleCount, Integer radiusMeters,
+                          DepositSafetyCheckReason reason, String policyVersion, DepositSafetyStatus status) {
         this.jeonseRatio = jeonseRatio;
         this.seniorDeposit = seniorDeposit;
         this.maxClaimAmount = maxClaimAmount;
         this.referenceDate = referenceDate;
         this.explanation = explanation;
+        this.sampleCount = sampleCount;
+        this.radiusMeters = radiusMeters;
         this.reason = reason;
         this.policyVersion = policyVersion;
         this.status = status;

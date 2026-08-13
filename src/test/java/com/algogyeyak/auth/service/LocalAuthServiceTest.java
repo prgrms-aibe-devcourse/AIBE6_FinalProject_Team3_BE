@@ -157,6 +157,29 @@ class LocalAuthServiceTest {
     }
 
     @Test
+    void loginRunsBcryptComparisonEvenWhenEmailNotFound() {
+        // 회귀 테스트(타이밍 사이드채널) - 계정이 없어도 실제 비밀번호 불일치 경로와 같은 비용의
+        // BCrypt 비교를 한 번 수행해야, 응답 시간만으로 "이 이메일이 존재하는지"를 알아낼 수 없다.
+        when(userRepository.findByEmail("unknown@example.com")).thenReturn(Optional.empty());
+
+        assertThrows(BusinessException.class, () -> localAuthService.login("unknown@example.com", "password1"));
+
+        verify(passwordEncoder).matches(eq("password1"), any());
+    }
+
+    @Test
+    void loginRunsBcryptComparisonEvenForSocialOnlyAccount() {
+        // 회귀 테스트(타이밍 사이드채널) - passwordHash가 없는 소셜 전용 계정도 더미 해시로
+        // BCrypt 비교를 한 번 수행해야 한다.
+        User socialUser = User.createOAuthUser("social2@example.com", "소셜유저2", null);
+        when(userRepository.findByEmail("social2@example.com")).thenReturn(Optional.of(socialUser));
+
+        assertThrows(BusinessException.class, () -> localAuthService.login("social2@example.com", "password1"));
+
+        verify(passwordEncoder).matches(eq("password1"), any());
+    }
+
+    @Test
     void loginThrowsWhenPasswordDoesNotMatch() {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
@@ -187,6 +210,23 @@ class LocalAuthServiceTest {
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
 
         assertThrows(BusinessException.class, () -> localAuthService.login("test@example.com", "password1"));
+    }
+
+    @Test
+    void loginThrowsForSuspendedAccountWithoutRevealingItExists() {
+        // (2026-08-12 추가) 정지된 계정도 존재하지 않는 이메일과 동일한 AUTH_INVALID_CREDENTIALS로
+        // 응답해야 한다 — 이번 세션에서 OAuth 로그인(CustomOAuth2UserService.rejectIfBlocked)의
+        // account_blocked 노출을 oauth_login_failed로 통일한 것과 같은 "계정 존재/정지 여부
+        // 비노출" 원칙을 로컬 로그인 경로에서도 회귀 테스트로 고정해둔다 - 지금까지 이 경로엔
+        // withdrawn 계정 테스트만 있었고 suspended 계정 테스트 자체가 없었다.
+        User user = User.createLocalUser("suspended@example.com", "encoded-hash", "정지유저");
+        user.suspend();
+        when(userRepository.findByEmail("suspended@example.com")).thenReturn(Optional.of(user));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.login("suspended@example.com", "password1"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
     }
 
     @Test
