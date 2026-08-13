@@ -114,7 +114,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        JwtUserPrincipal principal = new JwtUserPrincipal(userId, user.getEmail(), user.getRole());
+        JwtUserPrincipal principal =
+                new JwtUserPrincipal(userId, user.getEmail(), user.getRole(), user.getNickname(), user.getProfileImageUrl());
 
         List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()));
         var authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);

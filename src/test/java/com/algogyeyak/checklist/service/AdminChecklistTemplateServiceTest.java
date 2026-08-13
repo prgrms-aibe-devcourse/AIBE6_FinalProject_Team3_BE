@@ -42,6 +42,10 @@ class AdminChecklistTemplateServiceTest {
             new AdminChecklistTemplateService(checklistItemTemplateRepository, adminAuditLogger);
 
     private ChecklistItemTemplate template(Long id, int version, int displayOrder) {
+        return template(id, version, displayOrder, true);
+    }
+
+    private ChecklistItemTemplate template(Long id, int version, int displayOrder, boolean active) {
         ChecklistItemTemplate template = ChecklistItemTemplate.builder()
                 .version(version)
                 .category(ChecklistCategory.INDOOR)
@@ -49,7 +53,7 @@ class AdminChecklistTemplateServiceTest {
                 .importance(ChecklistImportance.GENERAL)
                 .itemType(ChecklistItemType.CHECK)
                 .displayOrder(displayOrder)
-                .active(true)
+                .active(active)
                 .build();
         ReflectionTestUtils.setField(template, "id", id);
         return template;
@@ -87,9 +91,9 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
-    @DisplayName("생성 시 기존 문항 중 가장 높은 버전을 그대로 물려받는다")
+    @DisplayName("생성 시 활성 문항 중 가장 높은 버전을 그대로 물려받는다")
     void createInheritsHighestExistingVersion() {
-        when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc())
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
                 .thenReturn(List.of(template(1L, 2, 1), template(2L, 3, 2)));
         when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -108,9 +112,32 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
+    @DisplayName("회귀 테스트 - 비활성 문항의 버전이 활성 문항보다 높아도 무시하고 활성 문항 기준으로 버전을 매긴다")
+    void createIgnoresHigherVersionFromInactiveTemplates() {
+        // 과거에 비활성화된 문항(version=5)이 현재 활성 문항(version=2)보다 버전이 높게 남아있는
+        // 상황 - 전체(findAllByOrderByDisplayOrderAsc) 기준으로 최대값을 구하면 새 문항이 5를
+        // 물려받아, 실제로 쓰이는 활성 문항 집합(version=2)과 어긋난 값을 갖게 된다.
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(template(1L, 2, 1, true)));
+        when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
+                ACTOR_ID,
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 30, null
+                )
+        );
+
+        assertThat(result.version()).isEqualTo(2);
+        verify(checklistItemTemplateRepository, never()).findAllByOrderByDisplayOrderAsc();
+    }
+
+    @Test
     @DisplayName("기존 문항이 하나도 없으면 버전 1로 생성한다")
     void createDefaultsToVersionOneWhenNoTemplatesExist() {
-        when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
         when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -150,7 +177,7 @@ class AdminChecklistTemplateServiceTest {
         // 회귀 테스트 - split(",")가 "OFFICETEL,"에서 만드는 빈 문자열 토큰을 거르지 않으면, 오타가
         // 아니라 단순 구분자 습관 차이일 뿐인데도 ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE로
         // 거부됐다.
-        when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
         when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 

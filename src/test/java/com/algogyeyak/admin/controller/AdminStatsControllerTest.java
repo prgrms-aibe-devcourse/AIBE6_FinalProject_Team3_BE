@@ -112,9 +112,9 @@ class AdminStatsControllerTest {
 
         mockMvc.perform(get("/admin/stats/dashboard").cookie(adminCookie()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.summary.totalUsers").value(10))
-                .andExpect(jsonPath("$.data.summary.totalProperties").value(5))
-                .andExpect(jsonPath("$.data.summary.pendingReports").value(2))
+                .andExpect(jsonPath("$.data.summary.newUsers").value(10))
+                .andExpect(jsonPath("$.data.summary.newProperties").value(5))
+                .andExpect(jsonPath("$.data.summary.newPendingReports").value(2))
                 .andExpect(jsonPath("$.data.trends.signups.length()").value(14))
                 .andExpect(jsonPath("$.data.distributions.byPropertyRegistration.length()").value(2))
                 .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[0].registered").value(true))
