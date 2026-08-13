@@ -213,6 +213,23 @@ class LocalAuthServiceTest {
     }
 
     @Test
+    void loginThrowsForSuspendedAccountWithoutRevealingItExists() {
+        // (2026-08-12 추가) 정지된 계정도 존재하지 않는 이메일과 동일한 AUTH_INVALID_CREDENTIALS로
+        // 응답해야 한다 — 이번 세션에서 OAuth 로그인(CustomOAuth2UserService.rejectIfBlocked)의
+        // account_blocked 노출을 oauth_login_failed로 통일한 것과 같은 "계정 존재/정지 여부
+        // 비노출" 원칙을 로컬 로그인 경로에서도 회귀 테스트로 고정해둔다 - 지금까지 이 경로엔
+        // withdrawn 계정 테스트만 있었고 suspended 계정 테스트 자체가 없었다.
+        User user = User.createLocalUser("suspended@example.com", "encoded-hash", "정지유저");
+        user.suspend();
+        when(userRepository.findByEmail("suspended@example.com")).thenReturn(Optional.of(user));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.login("suspended@example.com", "password1"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+    }
+
+    @Test
     void setPasswordSucceedsForOAuthOnlyAccountWithoutCurrentPassword() {
         User user = User.createOAuthUser("social@example.com", "소셜유저", null);
         ReflectionTestUtils.setField(user, "id", 1L);

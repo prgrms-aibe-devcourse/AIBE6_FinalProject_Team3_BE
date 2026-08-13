@@ -42,7 +42,7 @@
 .requestMatchers("/admin/**").hasRole("ADMIN")
 ```
 
-- 이 매처가 `/admin/**` 전체에 대한 **유일한 인가 지점**입니다. 위 3개 컨트롤러(`AdminUserController`/`AdminPropertyReportController`/`AdminChecklistTemplateController`) + `AdminStatsController` 전부 `@RequestMapping("/admin/...")`로 선언돼 있어 빠짐없이 이 매처에 걸립니다 — 개별 컨트롤러/서비스 메서드에 `@PreAuthorize` 등 메서드 레벨 어노테이션은 전혀 없습니다(URL 패턴 기반 단일 지점 방어).
+- ~~이 매처가 `/admin/**` 전체에 대한 **유일한 인가 지점**입니다. 위 3개 컨트롤러(`AdminUserController`/`AdminPropertyReportController`/`AdminChecklistTemplateController`) + `AdminStatsController` 전부 `@RequestMapping("/admin/...")`로 선언돼 있어 빠짐없이 이 매처에 걸립니다 — 개별 컨트롤러/서비스 메서드에 `@PreAuthorize` 등 메서드 레벨 어노테이션은 전혀 없습니다(URL 패턴 기반 단일 지점 방어).~~ — ✅ **(2026-08-12 해결)** `SecurityConfig`에 `@EnableMethodSecurity`를 추가하고, 4개 컨트롤러 전부에 클래스 레벨 `@PreAuthorize("hasRole('ADMIN')")`를 붙여 이중 방어로 바꿈. 이 URL 매처는 여전히 1차 방어선으로 유지된다.
 - `hasRole("ADMIN")`이 통과하려면 인증된 JWT의 role이 `ADMIN`이어야 하는데, `JwtAuthenticationFilter`가 매 요청 DB에서 `User`를 재조회해 role/status를 최신값으로 검증하므로(auth-design.md 참고) 관리자 권한을 뺏긴 유저의 기존 토큰이 만료 전이라도 즉시 `/admin/**` 접근이 막힙니다.
 - 인가 실패 시 응답 코드: `accessDeniedHandler`를 명시적으로 등록해뒀기 때문에(2026-07-31 리뷰에서 발견된 "MockMvc는 403, 실제 Tomcat은 401" 불일치 수정), 실제 배포에서도 인증됐지만 권한 부족인 요청은 403으로 응답합니다.
 
@@ -86,7 +86,7 @@
 
 | 항목 | 실제 |
 |---|---|
-| 관리자 권한 검사 | ✅ URL 패턴(`SecurityConfig`) 단일 지점, 매 요청 DB로 role/status 최신값 재확인 |
+| 관리자 권한 검사 | ✅ URL 패턴(`SecurityConfig`) + **(2026-08-12 추가)** 컨트롤러별 `@PreAuthorize` 이중 지점, 매 요청 DB로 role/status 최신값 재확인 |
 | 자기 자신 대상 액션 차단 | ✅ 권한 변경(`AdminUserController.rejectSelf`)/정지(동일) — 관리자가 스스로 잠기는 사고 방지 |
 | 마지막 활성 관리자 보호 | ✅ 강등/정지 둘 다 차단. **(2026-08-10)** 조회-후-검사 방식의 TOCTOU를 `findAllByRoleAndStatusForUpdate`(`PESSIMISTIC_WRITE`)로 원자화, 두 관리자가 동시에 서로를 강등하는 시나리오를 실제 통합 테스트(`AdminUserServiceConcurrentDemotionIntegrationTest`)로 검증 |
 | 신고 검토 셀프리뷰 방지 | ✅ 신고자 본인이 검토자인 경우 `ADMIN_PROPERTY_REPORT_SELF_REVIEW`(409) |
@@ -118,9 +118,9 @@
 
 ### 보안
 
-1. **인가가 URL 패턴 단일 지점에 전적으로 의존한다.** `SecurityConfig.java:99`의 `.requestMatchers("/admin/**").hasRole("ADMIN")` 한 줄이 `AdminStatsController`/`AdminUserController`/`AdminPropertyReportController`/`AdminChecklistTemplateController` 4개 컨트롤러의 유일한 인가 검사다 — 4개 컨트롤러 어디에도 `@PreAuthorize`/`@Secured` 같은 메서드 레벨 어노테이션이 없다(전체 grep으로 확인). 지금은 4개 컨트롤러 전부 `@RequestMapping("/admin/...")`로 선언돼 있어 이 매처를 빠짐없이 타지만, 이중 방어가 전혀 없어 앞으로 누군가 admin 전용 컨트롤러를 다른 prefix로 만들거나 이 매처보다 앞선 `permitAll` 규칙을 잘못 추가하면 감지할 안전망이 없다. 실제로 뚫린 사례는 찾지 못했으나(4개 컨트롤러 전부 정상 매칭 확인), 방어가 한 겹뿐이라는 구조적 특성은 기록해둘 만하다.
+1. ~~**인가가 URL 패턴 단일 지점에 전적으로 의존한다.** `SecurityConfig.java:99`의 `.requestMatchers("/admin/**").hasRole("ADMIN")` 한 줄이 `AdminStatsController`/`AdminUserController`/`AdminPropertyReportController`/`AdminChecklistTemplateController` 4개 컨트롤러의 유일한 인가 검사다 — 4개 컨트롤러 어디에도 `@PreAuthorize`/`@Secured` 같은 메서드 레벨 어노테이션이 없다(전체 grep으로 확인). 지금은 4개 컨트롤러 전부 `@RequestMapping("/admin/...")`로 선언돼 있어 이 매처를 빠짐없이 타지만, 이중 방어가 전혀 없어 앞으로 누군가 admin 전용 컨트롤러를 다른 prefix로 만들거나 이 매처보다 앞선 `permitAll` 규칙을 잘못 추가하면 감지할 안전망이 없다.~~ — ✅ **(2026-08-12 해결)** `@EnableMethodSecurity` + 4개 컨트롤러 전부에 `@PreAuthorize("hasRole('ADMIN')")` 추가로 이중 방어 확보. 다른 prefix로 admin 컨트롤러를 잘못 만들거나 URL 매처가 빗나가도, 클래스 레벨 `@PreAuthorize`가 별도로 걸려있어 이제 감지된다.
 
 ### 코드 품질 (중복/구조/일관성)
 
-1. **`AdminStatsSummaryResponse`(`admin/dto/AdminStatsSummaryResponse.java:3-7`)의 필드명이 실제 의미와 어긋난다.** `totalUsers`/`totalProperties`/`pendingReports`라는 이름은 "전체 누적"이나 "현재 대기중인 전체 건수"를 암시하지만, `AdminStatsService.summary()`(`admin/service/AdminStatsService.java:69-76`)의 실제 값은 **선택한 기간(`startDate`~`endDate`) 내에 발생한** 신규 가입자/신규 활성 매물/신규 접수 대기 신고 수다. 이 불일치는 2026-08-03 통계 재설계 당시 이미 한 번 문제가 됐던 것으로 보인다 — 프론트(`AdminDashboardClient.tsx:156-166`)는 라벨을 "신규 가입자"/"신규 활성 매물"/"신규 대기 신고"로 정확히 바꿔 화면상으로는 오해가 없지만, **API 계약(필드명) 자체는 그때도 지금도 바뀌지 않았다.** Swagger 문서나 이 API를 직접 호출하는 다른 소비자는 필드명만 보고 "전체 총 회원수"로 오해할 수 있다 — `periodUsers`/`periodNewProperties`/`periodPendingReports`처럼 기간 스코프를 필드명에 반영하는 것을 권장.
-2. `AdminUserController`/`AdminPropertyReportController`/`AdminChecklistTemplateController` 3곳 모두, 실제 변경 메서드마다 `log.info("관리자 액션: actorId={} action={} ... ", ...)` 형태의 텍스트 로그를 각자 조금씩 다른 포맷 문자열로 직접 작성한다(예: `AdminUserController.java:70-71`, `AdminPropertyReportController.java:66-67`, `AdminChecklistTemplateController.java:51/63/70`). `AdminAuditLogger`가 이미 DB 기록용 공용 진입점을 제공하는 것과 대비되게, 이 실시간 텍스트 로그 쪽은 공용 헬퍼 없이 6곳에 사실상 같은 문자열 패턴이 중복돼 있다 — 포맷을 바꾸려면 6곳을 전부 찾아 고쳐야 한다. `AdminAuditLogger.log()` 호출과 짝을 지어 텍스트 로그까지 함께 남기는 공용 메서드로 합치면 중복이 줄어든다.
+1. ~~**`AdminStatsSummaryResponse`(`admin/dto/AdminStatsSummaryResponse.java:3-7`)의 필드명이 실제 의미와 어긋난다.** `totalUsers`/`totalProperties`/`pendingReports`라는 이름은 "전체 누적"이나 "현재 대기중인 전체 건수"를 암시하지만, `AdminStatsService.summary()`(`admin/service/AdminStatsService.java:69-76`)의 실제 값은 **선택한 기간(`startDate`~`endDate`) 내에 발생한** 신규 가입자/신규 활성 매물/신규 접수 대기 신고 수다. 이 불일치는 2026-08-03 통계 재설계 당시 이미 한 번 문제가 됐던 것으로 보인다 — 프론트(`AdminDashboardClient.tsx:156-166`)는 라벨을 "신규 가입자"/"신규 활성 매물"/"신규 대기 신고"로 정확히 바꿔 화면상으로는 오해가 없지만, **API 계약(필드명) 자체는 그때도 지금도 바뀌지 않았다.** Swagger 문서나 이 API를 직접 호출하는 다른 소비자는 필드명만 보고 "전체 총 회원수"로 오해할 수 있다 — `periodUsers`/`periodNewProperties`/`periodPendingReports`처럼 기간 스코프를 필드명에 반영하는 것을 권장.~~ — ✅ **(2026-08-12 해결)** `totalUsers`/`totalProperties`/`pendingReports` → `newUsers`/`newProperties`/`newPendingReports`로 필드명 변경(`AdminStatsSummaryResponse`, `AdminStatsControllerTest`, frontend `AdminStatsSummaryDto`/`AdminDashboardClient.tsx`/`adminRepository.ts` mock까지 함께 반영). breaking change라 API 계약이 바뀌었음에 유의.
+2. ~~`AdminUserController`/`AdminPropertyReportController`/`AdminChecklistTemplateController` 3곳 모두, 실제 변경 메서드마다 `log.info("관리자 액션: actorId={} action={} ... ", ...)` 형태의 텍스트 로그를 각자 조금씩 다른 포맷 문자열로 직접 작성한다 — 6곳에 사실상 같은 문자열 패턴이 중복돼 있다.~~ — ✅ **(2026-08-12 해결)** 공용 유틸 `com.algogyeyak.admin.service.AdminActionLog.record(...)`를 추가해 포맷 문자열을 한 곳으로 모으고, 6개 호출부 전부 이걸 쓰도록 교체(3개 컨트롤러의 `@Slf4j`도 더 이상 안 써서 함께 제거). 필드명(`targetUserId`/`reportId`/`templateId` 등)은 호출부가 그대로 지정해, 기존에 이 로그를 검색하던 Grafana 대시보드/알림이 있어도 실제 로그 출력 텍스트는 이전과 동일하게 유지된다.

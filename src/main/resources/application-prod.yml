@@ -66,3 +66,26 @@ app:
   dev-login:
     enabled: ${DEV_LOGIN_ENABLED:false}
     secret: ${DEV_LOGIN_SECRET:}
+
+# 아래 외부 연동 시크릿들도 JWT_SECRET 등과 같은 이유로 기본값을 없앤다(2026-08-12) - application.yml의
+# dummy-*-for-local 기본값이 운영에도 그대로 살아있으면, 배포 시 해당 환경변수를 깜빡해도 앱은
+# "정상 기동"한 뒤 S3/카카오/Clova/Gemini/국토부 API 호출만 조용히 실패(또는 인증 오류)한다 -
+# 특히 AWS 자격증명은 위 S3PresignService의 presign 서명 신뢰 경계와도 맞닿아 있어, 배포 담당자가
+# 바로 알아챌 수 있도록 기동 자체를 막는 쪽이 안전하다.
+kakao:
+  rest-api-key: ${KAKAO_REST_API_KEY}
+
+clova:
+  ocr:
+    secret-key: ${CLOVA_OCR_SECRET_KEY}
+
+gemini:
+  api-key: ${GEMINI_API_KEY}
+
+molit:
+  service-key: ${MOLIT_SERVICE_KEY}
+
+aws:
+  s3:
+    access-key: ${AWS_ACCESS_KEY}
+    secret-key: ${AWS_SECRET_KEY}

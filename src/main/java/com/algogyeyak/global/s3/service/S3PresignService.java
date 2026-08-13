@@ -82,12 +82,26 @@ public class S3PresignService {
         }
     }
 
+    // confirmUpload/generateDownloadUrl는 호출자가 준 key를 그대로 믿는데, 호출부(도메인 컨트롤러)가
+    // "이 key가 실제로 이 사용자/이 용도의 것인지" 검증을 깜빡하면(예: 소유권 체크가 없는 컨트롤러)
+    // 다른 purpose의 key를 그대로 넘겨 confirm/조회시킬 수 있다 - 특히 CONTRACT(비공개)를 PROFILE/
+    // PROPERTY(공개) purpose로 넘기면 원래 비공개였던 객체가 서명 없는 고정 URL로 노출된다. 이건
+    // per-user 소유권 검증(S3KeyGenerator.isProfileImageOwnedBy 등, 호출부가 사용자 id를 알아야만
+    // 가능)과 달리 이 서비스 레벨에서 key만 보고도 판단할 수 있으므로, 모든 호출부에 공통으로
+    // 적용되도록 여기서 강제한다(개별 도메인 서비스가 빠뜨려도 이 최소 방어선은 항상 걸린다).
+    private void validatePurposePrefix(String key, S3ImagePurpose purpose) {
+        if (key == null || !key.startsWith(purpose.prefix())) {
+            throw new BusinessException(ErrorCode.FILE_KEY_ACCESS_DENIED);
+        }
+    }
+
     // presigned URL로 실제 업로드가 끝났는지 확인한다. 호출한 도메인 서비스는 이 메서드가 예외 없이
     // 반환된 뒤에만 key를 엔티티에 저장해야 한다 - 그래야 "presigned URL만 발급받고 실제로는 업로드
     // 안 한" 죽은 키가 DB에 남는 걸 막을 수 있다. Content-Length는 presign 시점에 이미 서명으로
     // 강제했지만 그건 "그 URL 한 건"에 대한 보장이라, 여기서 실제로 올라간 객체를 한 번 더 확인해
     // 방어적으로 검증하고 어긋나면 즉시 지운다.
     public void confirmUpload(String key, S3ImagePurpose purpose) {
+        validatePurposePrefix(key, purpose);
         HeadObjectResponse response = headObjectOrThrow(key);
 
         boolean contentTypeInvalid = response.contentType() == null
@@ -132,6 +146,7 @@ public class S3PresignService {
     // 한다 - 호출부(도메인 서비스)는 public 대상의 경우 이 리턴값을 그대로 DB에 영구 저장해도 되고,
     // private 대상은 매번 새로 호출해서 받은 값만 그 순간의 응답에만 써야 한다(저장하면 10분 뒤 만료됨).
     public String generateDownloadUrl(String key, S3ImagePurpose purpose) {
+        validatePurposePrefix(key, purpose);
         if (purpose.isPublic()) {
             return s3Client.utilities().getUrl(GetUrlRequest.builder().bucket(bucket).key(key).build()).toString();
         }

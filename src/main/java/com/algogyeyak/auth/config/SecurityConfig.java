@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -42,6 +43,11 @@ import java.util.stream.Collectors;
 
 @Configuration
 @EnableWebSecurity
+// /admin/** 컨트롤러(AdminUserController/AdminPropertyReportController/AdminChecklistTemplateController/
+// AdminStatsController)의 @PreAuthorize("hasRole('ADMIN')")를 활성화한다 - 지금까지는 아래
+// authorizeHttpRequests의 URL 패턴(hasRole("ADMIN")) 하나에만 의존했는데, 나중에 실수로 다른
+// prefix로 admin 컨트롤러를 추가하거나 매핑을 수정하면 이 URL 매처가 놓칠 수 있어 이중 방어로 추가.
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -86,7 +92,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/oauth2/**", "/login/**",
                                 "/swagger-ui/**", "/v3/api-docs/**",
-                                "/actuator/health", "/h2-console/**",
+                                "/h2-console/**",
                                 "/auth/logout", "/auth/refresh",
                                 "/auth/signup", "/auth/login", "/auth/dev-login",
                                 "/auth/password-policy"
@@ -97,7 +103,7 @@ public class SecurityConfig {
                         // 없어지는 건 아니다.
                         .requestMatchers("/users/nickname-check").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
-                        // Prometheus
+                        // Actuator(헬스체크 + Prometheus) - health는 위 목록에도 있었던 중복 항목을 여기로 합침
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .anyRequest().authenticated()
                 )

@@ -433,9 +433,16 @@ class CustomOAuth2UserServiceTest {
         when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123"))
                 .thenReturn(Optional.of(socialAccount));
 
-        assertThrows(OAuth2AuthenticationException.class,
+        OAuth2AuthenticationException exception = assertThrows(OAuth2AuthenticationException.class,
                 () -> service.processOAuth2User(
                         "kakao", kakaoOAuth2User(123L, "테스트유저", "http://img", "test@kakao.com")));
+
+        // (2026-08-12) 계정 존재 여부 비노출 원칙을 로컬 로그인/토큰 검증과 맞추기 위해, 정지/탈퇴
+        // 계정임을 구체적으로 알려주던 "account_blocked"를 다른 OAuth 실패와 구분 안 되는
+        // "oauth_login_failed"로 통일했다 - 이 assertion이 없으면 나중에 누군가 실수로
+        // "account_blocked"를 되살려도(핸들러는 어떤 코드든 그대로 pass-through하므로) 테스트가
+        // 잡아주지 못한다.
+        assertEquals("oauth_login_failed", exception.getError().getErrorCode());
     }
 
     @Test
