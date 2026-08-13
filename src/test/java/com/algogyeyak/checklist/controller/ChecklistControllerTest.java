@@ -257,11 +257,11 @@ class ChecklistControllerTest {
     void listMyChecklistsReturnsOverviewForAuthenticatedUser() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         ChecklistOverviewResponse started = new ChecklistOverviewResponse(
-                10L, 100L, "서울특별시 강남구 테헤란로 123", null, "OFFICETEL", "JEONSE", ChecklistStatus.IN_PROGRESS,
+                10L, 100L, "강남 오피스텔", "서울특별시 강남구 테헤란로 123", null, "OFFICETEL", "JEONSE", ChecklistStatus.IN_PROGRESS,
                 java.time.LocalDateTime.of(2026, 7, 30, 10, 0)
         );
         ChecklistOverviewResponse notStarted = new ChecklistOverviewResponse(
-                20L, null, "서울특별시 마포구 월드컵로 1", null, "MULTI_FAMILY", "MONTHLY_RENT", ChecklistStatus.NOT_STARTED,
+                20L, null, "마포 다세대", "서울특별시 마포구 월드컵로 1", null, "MULTI_FAMILY", "MONTHLY_RENT", ChecklistStatus.NOT_STARTED,
                 java.time.LocalDateTime.of(2026, 6, 1, 12, 0)
         );
         when(checklistService.listMyChecklists(1L, org.springframework.data.domain.PageRequest.of(0, 20)))
@@ -274,6 +274,7 @@ class ChecklistControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.content[0].propertyId").value(10))
                 .andExpect(jsonPath("$.data.content[0].checklistId").value(100))
+                .andExpect(jsonPath("$.data.content[0].title").value("강남 오피스텔"))
                 .andExpect(jsonPath("$.data.content[0].status").value("IN_PROGRESS"))
                 .andExpect(jsonPath("$.data.content[1].propertyId").value(20))
                 .andExpect(jsonPath("$.data.content[1].checklistId").doesNotExist())

@@ -28,7 +28,7 @@ public record ChecklistItemResponse(
                 item.getImportance(),
                 item.getItemType(),
                 item.isChecked(),
-                item.isIssueFound() || item.getUserNote() != null,
+                item.hasIssue(),
                 item.getValue(),
                 item.getUserNote()
         );
