@@ -13,6 +13,7 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.dto.NicknameCheckResponse;
+import com.algogyeyak.user.dto.NicknamePolicy;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
@@ -32,6 +33,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 @Service
 @Transactional(readOnly = true)
@@ -183,6 +185,7 @@ public class UserService {
 
         if (StringUtils.hasText(request.getNickname())
                 && !request.getNickname().equals(user.getNickname())) {
+            validateNicknameFormat(request.getNickname());
             changeNickname(user, userId, request.getNickname());
         }
 
@@ -244,6 +247,18 @@ public class UserService {
             throw new BusinessException(ErrorCode.USER_SUSPENDED);
         }
         return user;
+    }
+
+    // 닉네임 형식은 "실제로 값이 바뀔 때"만 검사한다(registerProfile/updateMyProfile 호출부 참고) -
+    // ProfileRegisterRequest/ProfileUpdateRequest에 @Pattern을 걸어 항상 검사하면, OAuth 가입
+    // 사용자처럼 이 정책을 거치지 않고 만들어진 기존 닉네임(카카오/구글이 내려준 값 그대로, 공백·
+    // 특수문자 포함 가능)을 프론트가 매 요청 그대로 다시 실어 보낼 때마다(닉네임을 안 바꿔도) 검증에
+    // 걸려 프로필 등록/수정 자체가 막히는 문제가 있었다 - 닉네임 중복 검사(validateNicknameNotDuplicated)와
+    // 같은 이유로 같은 조건에서만 동작해야 한다.
+    private void validateNicknameFormat(String nickname) {
+        if (!Pattern.matches(NicknamePolicy.PATTERN, nickname)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, NicknamePolicy.MESSAGE);
+        }
     }
 
     private void validateNicknameNotDuplicated(Long userId, String nickname) {
