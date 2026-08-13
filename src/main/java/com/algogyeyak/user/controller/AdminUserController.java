@@ -1,11 +1,13 @@
 package com.algogyeyak.user.controller;
 
+import com.algogyeyak.admin.dto.AdminBulkActionResponse;
 import com.algogyeyak.admin.service.AdminActionLog;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.ApiResponse;
 import com.algogyeyak.global.response.PageResponse;
+import com.algogyeyak.user.dto.AdminUserBulkStatusUpdateRequest;
 import com.algogyeyak.user.dto.AdminUserDetailResponse;
 import com.algogyeyak.user.dto.AdminUserListItemResponse;
 import com.algogyeyak.user.dto.AdminUserRoleUpdateRequest;
@@ -82,6 +84,18 @@ public class AdminUserController {
         rejectSelf(principal, userId);
         AdminUserDetailResponse result = adminUserService.updateStatus(principal.userId(), userId, request.status());
         AdminActionLog.record(principal.userId(), "UPDATE_STATUS", "targetUserId", userId, "newStatus", request.status());
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @PatchMapping("/bulk-status")
+    public ResponseEntity<ApiResponse<AdminBulkActionResponse>> bulkUpdateStatus(
+            @AuthenticationPrincipal JwtUserPrincipal principal,
+            @Valid @RequestBody AdminUserBulkStatusUpdateRequest request
+    ) {
+        AdminBulkActionResponse result =
+                adminUserService.bulkUpdateStatus(principal.userId(), request.userIds(), request.status());
+        AdminActionLog.record(principal.userId(), "BULK_UPDATE_STATUS", "targetUserIds", request.userIds(),
+                "newStatus", request.status());
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 

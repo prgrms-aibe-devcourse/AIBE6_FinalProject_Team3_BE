@@ -1,9 +1,11 @@
 package com.algogyeyak.property.controller;
 
+import com.algogyeyak.admin.dto.AdminBulkActionResponse;
 import com.algogyeyak.admin.service.AdminActionLog;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.response.ApiResponse;
 import com.algogyeyak.global.response.PageResponse;
+import com.algogyeyak.property.dto.AdminPropertyReportBulkReviewRequest;
 import com.algogyeyak.property.dto.AdminPropertyReportDetailResponse;
 import com.algogyeyak.property.dto.AdminPropertyReportListItemResponse;
 import com.algogyeyak.property.dto.AdminPropertyReportReviewRequest;
@@ -67,5 +69,17 @@ public class AdminPropertyReportController {
         // AdminAuditLogger로 영구 기록을 남기고, 이 로그는 실시간 관측용으로 별도 유지한다.
         AdminActionLog.record(principal.userId(), "REVIEW_PROPERTY_REPORT", "reportId", reportId, "newStatus", request.status());
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PatchMapping("/bulk-review")
+    public ResponseEntity<ApiResponse<AdminBulkActionResponse>> bulkReview(
+            @AuthenticationPrincipal JwtUserPrincipal principal,
+            @Valid @RequestBody AdminPropertyReportBulkReviewRequest request
+    ) {
+        AdminBulkActionResponse result = adminPropertyReportService.bulkReview(
+                principal.userId(), request.reportIds(), request.status(), request.memo());
+        AdminActionLog.record(principal.userId(), "BULK_REVIEW_PROPERTY_REPORT", "reportIds", request.reportIds(),
+                "newStatus", request.status());
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 }
