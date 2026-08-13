@@ -70,7 +70,8 @@ public class DepositSafetyCheckService {
     public DepositSafetyCheckResponse get(Long userId, Long propertyId) {
         Property property = findOwnedProperty(userId, propertyId);
         DepositSafetyCheck check = depositSafetyCheckRepository.findByPropertyId(propertyId).orElse(null);
-        return DepositSafetyCheckResponse.from(propertyId, check, isRecentOwnershipChangeWarning(propertyId, check));
+        return DepositSafetyCheckResponse.from(propertyId, check, isRecentOwnershipChangeWarning(propertyId, check),
+                policyConfig.getJeonseRatioCautionFrom(), policyConfig.getJeonseRatioWarnFrom(), policyConfig.getJeonseRatioWarnTo());
     }
 
     @Transactional
@@ -90,7 +91,8 @@ public class DepositSafetyCheckService {
                 seniorDeposit != null ? BigDecimal.valueOf(seniorDeposit) : null,
                 maxClaimAmount != null ? BigDecimal.valueOf(maxClaimAmount) : null);
 
-        return DepositSafetyCheckResponse.from(propertyId, check, isRecentOwnershipChangeWarning(propertyId, check));
+        return DepositSafetyCheckResponse.from(propertyId, check, isRecentOwnershipChangeWarning(propertyId, check),
+                policyConfig.getJeonseRatioCautionFrom(), policyConfig.getJeonseRatioWarnFrom(), policyConfig.getJeonseRatioWarnTo());
     }
 
     /**
@@ -158,7 +160,8 @@ public class DepositSafetyCheckService {
         }
 
         BigDecimal ratio = calculateRatioPercent(numerator, salePrice.get().referencePrice());
-        return upsertCalculated(property, ratio, seniorDeposit, maxClaimAmount, salePrice.get().referenceDate(), buildExplanation(ratio));
+        return upsertCalculated(property, ratio, seniorDeposit, maxClaimAmount, salePrice.get().referenceDate(), buildExplanation(ratio),
+                salePrice.get().sampleCount(), salePrice.get().radiusMeters());
     }
 
     private BigDecimal calculateRatioPercent(BigDecimal numerator, BigDecimal salePrice) {
@@ -197,7 +200,7 @@ public class DepositSafetyCheckService {
     private DepositSafetyCheck upsertUnavailable(Property property, BigDecimal seniorDeposit, BigDecimal maxClaimAmount, DepositSafetyCheckReason reason) {
         Optional<DepositSafetyCheck> existing = depositSafetyCheckRepository.findByPropertyId(property.getId());
         if (existing.isPresent()) {
-            existing.get().overwrite(null, seniorDeposit, maxClaimAmount, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
+            existing.get().overwrite(null, seniorDeposit, maxClaimAmount, null, null, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
             return existing.get();
         }
 
@@ -214,7 +217,7 @@ public class DepositSafetyCheckService {
             DepositSafetyCheck winner = requiresNewTransactionTemplate.execute(status ->
                     depositSafetyCheckRepository.findByPropertyId(property.getId())
                             .map(found -> {
-                                found.overwrite(null, seniorDeposit, maxClaimAmount, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
+                                found.overwrite(null, seniorDeposit, maxClaimAmount, null, null, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
                                 depositSafetyCheckRepository.saveAndFlush(found);
                                 return found;
                             })
@@ -228,14 +231,14 @@ public class DepositSafetyCheckService {
     }
 
     private DepositSafetyCheck upsertCalculated(Property property, BigDecimal ratio, BigDecimal seniorDeposit, BigDecimal maxClaimAmount,
-                                                 LocalDate referenceDate, String explanation) {
+                                                 LocalDate referenceDate, String explanation, Integer sampleCount, Integer radiusMeters) {
         Optional<DepositSafetyCheck> existing = depositSafetyCheckRepository.findByPropertyId(property.getId());
         if (existing.isPresent()) {
-            existing.get().overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
+            existing.get().overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, sampleCount, radiusMeters, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
             return existing.get();
         }
 
-        DepositSafetyCheck newCheck = DepositSafetyCheck.calculated(property, ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, policyConfig.getVersion());
+        DepositSafetyCheck newCheck = DepositSafetyCheck.calculated(property, ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, sampleCount, radiusMeters, policyConfig.getVersion());
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status -> depositSafetyCheckRepository.saveAndFlush(newCheck));
             return newCheck;
@@ -244,7 +247,7 @@ public class DepositSafetyCheckService {
             DepositSafetyCheck winner = requiresNewTransactionTemplate.execute(status ->
                     depositSafetyCheckRepository.findByPropertyId(property.getId())
                             .map(found -> {
-                                found.overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
+                                found.overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, sampleCount, radiusMeters, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
                                 depositSafetyCheckRepository.saveAndFlush(found);
                                 return found;
                             })
