@@ -35,9 +35,9 @@ class DepositSafetyCheckResponseTest {
     void fromCalculatedIncludesRatioAndExplanation() {
         DepositSafetyCheck check = DepositSafetyCheck.calculated(
                 property(10L), BigDecimal.valueOf(82), null, null,
-                LocalDate.of(2026, 7, 31), "이 집 전세가율은 82%예요.", "v1.0");
+                LocalDate.of(2026, 7, 31), "이 집 전세가율은 82%예요.", 5, 300, "v1.0");
 
-        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, false);
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, false, 80, 100, 150);
 
         assertThat(response.propertyId()).isEqualTo(10L);
         assertThat(response.status()).isEqualTo(DepositSafetyStatus.CALCULATED);
@@ -45,9 +45,14 @@ class DepositSafetyCheckResponseTest {
         assertThat(response.seniorDepositApplied()).isFalse();
         assertThat(response.explanation()).isEqualTo("이 집 전세가율은 82%예요.");
         assertThat(response.referenceDate()).isEqualTo(LocalDate.of(2026, 7, 31));
+        assertThat(response.sampleCount()).isEqualTo(5);
+        assertThat(response.radiusMeters()).isEqualTo(300);
         assertThat(response.reason()).isNull();
         assertThat(response.disclaimer()).isEqualTo(DepositSafetyCheckResponse.DISCLAIMER);
         assertThat(response.recentOwnershipChangeWarning()).isFalse();
+        assertThat(response.cautionFrom()).isEqualTo(80);
+        assertThat(response.warnFrom()).isEqualTo(100);
+        assertThat(response.warnTo()).isEqualTo(150);
     }
 
     @Test
@@ -55,9 +60,9 @@ class DepositSafetyCheckResponseTest {
     void fromIncludesRecentOwnershipChangeWarningWhenTrue() {
         DepositSafetyCheck check = DepositSafetyCheck.calculated(
                 property(10L), BigDecimal.valueOf(120), null, null,
-                LocalDate.of(2026, 7, 31), "이 집 전세가율은 120%예요.", "v1.0");
+                LocalDate.of(2026, 7, 31), "이 집 전세가율은 120%예요.", 5, 300, "v1.0");
 
-        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, true);
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, true, 80, 100, 150);
 
         assertThat(response.recentOwnershipChangeWarning()).isTrue();
     }
@@ -67,9 +72,9 @@ class DepositSafetyCheckResponseTest {
     void fromCalculatedWithSeniorDepositApplied() {
         DepositSafetyCheck check = DepositSafetyCheck.calculated(
                 property(10L), BigDecimal.valueOf(95), BigDecimal.valueOf(50_000_000L), BigDecimal.valueOf(10_000_000L),
-                LocalDate.of(2026, 7, 31), "이 집 전세가율은 95%예요.", "v1.0");
+                LocalDate.of(2026, 7, 31), "이 집 전세가율은 95%예요.", 5, 300, "v1.0");
 
-        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, false);
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, false, 80, 100, 150);
 
         assertThat(response.seniorDepositApplied()).isTrue();
         assertThat(response.seniorDeposit()).isEqualTo(50_000_000L);
@@ -82,7 +87,7 @@ class DepositSafetyCheckResponseTest {
         DepositSafetyCheck check = DepositSafetyCheck.unavailable(
                 property(10L), null, null, DepositSafetyCheckReason.ESTIMATED_PRICE_MISSING, "v1.0");
 
-        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, false);
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, check, false, 80, 100, 150);
 
         assertThat(response.status()).isEqualTo(DepositSafetyStatus.UNAVAILABLE);
         assertThat(response.reason()).isEqualTo(DepositSafetyCheckReason.ESTIMATED_PRICE_MISSING);
@@ -95,10 +100,13 @@ class DepositSafetyCheckResponseTest {
     @Test
     @DisplayName("체크 결과가 아직 없으면(null) 미계산 상태로 담는다")
     void fromNullChecksIsNotCalculatedYet() {
-        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, null, false);
+        DepositSafetyCheckResponse response = DepositSafetyCheckResponse.from(10L, null, false, 80, 100, 150);
 
         assertThat(response.propertyId()).isEqualTo(10L);
         assertThat(response.status()).isNull();
         assertThat(response.jeonseRatio()).isNull();
+        assertThat(response.cautionFrom()).isEqualTo(80);
+        assertThat(response.warnFrom()).isEqualTo(100);
+        assertThat(response.warnTo()).isEqualTo(150);
     }
 }

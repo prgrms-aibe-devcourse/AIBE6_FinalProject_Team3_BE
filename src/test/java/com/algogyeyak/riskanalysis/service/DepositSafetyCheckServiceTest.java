@@ -119,7 +119,7 @@ class DepositSafetyCheckServiceTest {
         Property property = property(10L, TransactionType.JEONSE, 234_000_000L); // 234M / 300M = 78.0%
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
         when(marketSaleDataClient.getSalePrice(10L)).thenReturn(
-                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31))));
+                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31), 5, 300)));
 
         service.checkAndSave(property);
 
@@ -152,7 +152,7 @@ class DepositSafetyCheckServiceTest {
         Property property = property(10L, TransactionType.JEONSE, deposit);
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
         when(marketSaleDataClient.getSalePrice(10L)).thenReturn(
-                Optional.of(new MarketSalePrice(BigDecimal.valueOf(referencePrice), LocalDate.of(2026, 7, 31))));
+                Optional.of(new MarketSalePrice(BigDecimal.valueOf(referencePrice), LocalDate.of(2026, 7, 31), 5, 300)));
 
         service.checkAndSave(property);
 
@@ -169,11 +169,11 @@ class DepositSafetyCheckServiceTest {
         DepositSafetyCheck existing = mock(DepositSafetyCheck.class);
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(existing));
         when(marketSaleDataClient.getSalePrice(10L)).thenReturn(
-                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31))));
+                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31), 5, 300)));
 
         service.checkAndSave(property);
 
-        verify(existing).overwrite(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(existing).overwrite(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(depositSafetyCheckRepository, org.mockito.Mockito.never()).saveAndFlush(any());
     }
 
@@ -197,7 +197,7 @@ class DepositSafetyCheckServiceTest {
 
         service.checkAndSave(property);
 
-        verify(winner).overwrite(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(winner).overwrite(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(depositSafetyCheckRepository, times(2)).saveAndFlush(any());
     }
 
@@ -211,7 +211,7 @@ class DepositSafetyCheckServiceTest {
         Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
         DepositSafetyCheck check = DepositSafetyCheck.calculated(
-                property, BigDecimal.valueOf(82), null, null, LocalDate.of(2026, 7, 31), "설명", "v1.0");
+                property, BigDecimal.valueOf(82), null, null, LocalDate.of(2026, 7, 31), "설명", 5, 300, "v1.0");
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
 
         DepositSafetyCheckResponse response = service.get(1L, 10L);
@@ -229,7 +229,7 @@ class DepositSafetyCheckServiceTest {
         Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
         DepositSafetyCheck check = DepositSafetyCheck.calculated(
-                property, BigDecimal.valueOf(120), null, null, LocalDate.of(2026, 7, 31), "설명", "v1.0");
+                property, BigDecimal.valueOf(120), null, null, LocalDate.of(2026, 7, 31), "설명", 5, 300, "v1.0");
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
 
         com.algogyeyak.checklist.entity.ChecklistItem ownershipItem = mock(com.algogyeyak.checklist.entity.ChecklistItem.class);
@@ -251,7 +251,7 @@ class DepositSafetyCheckServiceTest {
         Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
         DepositSafetyCheck check = DepositSafetyCheck.calculated(
-                property, BigDecimal.valueOf(120), null, null, LocalDate.of(2026, 7, 31), "설명", "v1.0");
+                property, BigDecimal.valueOf(120), null, null, LocalDate.of(2026, 7, 31), "설명", 5, 300, "v1.0");
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
 
         com.algogyeyak.checklist.entity.ChecklistItem ownershipItem = mock(com.algogyeyak.checklist.entity.ChecklistItem.class);
@@ -333,7 +333,7 @@ class DepositSafetyCheckServiceTest {
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
         when(depositSafetyCheckRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(marketSaleDataClient.getSalePrice(10L)).thenReturn(
-                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31))));
+                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31), 5, 300)));
 
         DepositSafetyCheckResponse response = service.recalculate(1L, 10L, 50_000_000L, 10_000_000L);
 
@@ -352,7 +352,7 @@ class DepositSafetyCheckServiceTest {
         when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.empty());
         when(depositSafetyCheckRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(marketSaleDataClient.getSalePrice(10L)).thenReturn(
-                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31))));
+                Optional.of(new MarketSalePrice(BigDecimal.valueOf(300_000_000L), LocalDate.of(2026, 7, 31), 5, 300)));
 
         DepositSafetyCheckResponse response = service.recalculate(1L, 10L, 50_000_000L, null);
 
