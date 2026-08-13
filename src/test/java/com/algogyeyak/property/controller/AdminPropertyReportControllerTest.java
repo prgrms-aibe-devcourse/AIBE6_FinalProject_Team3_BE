@@ -361,6 +361,114 @@ class AdminPropertyReportControllerTest {
     }
 
     @Test
+    void 일괄_검토처리에_성공한다() throws Exception {
+        PropertyReport report = buildReport();
+        when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(report));
+
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[%d],"status":"RESOLVED","memo":"일괄 확인"}
+                                """.formatted(REPORT_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.succeededIds[0]").value(REPORT_ID))
+                .andExpect(jsonPath("$.data.failures").isEmpty());
+    }
+
+    // 본인이 등록한 신고가 목록에 섞여 있어도, 그 항목만 실패 목록에 담기고 나머지는 정상 처리돼야 한다.
+    @Test
+    void 일괄_검토처리에서_본인_신고는_실패목록에만_담기고_나머지는_처리된다() throws Exception {
+        PropertyReport othersReport = buildReport();
+        PropertyReport ownReport = PropertyReport.builder()
+                .propertyId(PROPERTY_ID)
+                .reporterId(ADMIN_ID)
+                .reason(PropertyReportReason.PRICE_MISMATCH)
+                .detail(null)
+                .build();
+        ReflectionTestUtils.setField(ownReport, "id", 999L);
+        when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(othersReport));
+        when(propertyReportRepository.findById(999L)).thenReturn(Optional.of(ownReport));
+
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[%d,999],"status":"RESOLVED"}
+                                """.formatted(REPORT_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.succeededIds[0]").value(REPORT_ID))
+                .andExpect(jsonPath("$.data.succeededIds.length()").value(1))
+                .andExpect(jsonPath("$.data.failures[0].id").value(999))
+                .andExpect(jsonPath("$.data.failures[0].errorCode").value("ADMIN_PROPERTY_REPORT_SELF_REVIEW"));
+    }
+
+    @Test
+    void 일괄_검토처리는_reportIds가_비어있으면_400이다() throws Exception {
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[],"status":"RESOLVED"}
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    // 회귀 테스트 - 원소 null 검증(@NotNull List 원소)이 없으면 이 요청이 그대로 서비스까지
+    // 들어가 findById(null)에서 IllegalArgumentException으로 500이 됐다.
+    @Test
+    void 일괄_검토처리는_reportIds에_null이_섞이면_400이다() throws Exception {
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[null],"status":"RESOLVED"}
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    // 회귀 테스트 - 중복 제거 전에는 첫 시도에서 RESOLVED로 확정된 신고가 두 번째 시도에서
+    // "이미 검토 완료"(ADMIN_INVALID_STATUS_TRANSITION)로 걸려 같은 id가 성공/실패 양쪽에
+    // 나타날 수 있었다.
+    @Test
+    void 일괄_검토처리에서_중복된_id는_한_번만_처리된다() throws Exception {
+        PropertyReport report = buildReport();
+        when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(report));
+
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[%d,%d],"status":"RESOLVED"}
+                                """.formatted(REPORT_ID, REPORT_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.succeededIds.length()").value(1))
+                .andExpect(jsonPath("$.data.failures").isEmpty());
+    }
+
+    @Test
+    void 일괄_검토처리는_토큰_없이_호출하면_401이다() throws Exception {
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[%d],"status":"RESOLVED"}
+                                """.formatted(REPORT_ID)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 일괄_검토처리는_비관리자면_403이다() throws Exception {
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .cookie(userCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[%d],"status":"RESOLVED"}
+                                """.formatted(REPORT_ID)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
     void 존재하지_않는_신고_상세조회는_404이다() throws Exception {
         when(propertyReportRepository.findById(999L)).thenReturn(Optional.empty());
 

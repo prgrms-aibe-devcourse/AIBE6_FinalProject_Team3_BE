@@ -34,6 +34,7 @@ import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.event.PropertyUpdatedEvent;
+import com.algogyeyak.property.repository.PropertyImageRepository;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
@@ -76,6 +77,9 @@ class PropertyServiceTest {
     private PropertyReportRepository propertyReportRepository;
 
     @Mock
+    private PropertyImageRepository propertyImageRepository;
+
+    @Mock
     private PropertyRiskRepository propertyRiskRepository;
 
     @Mock
@@ -96,8 +100,8 @@ class PropertyServiceTest {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
                 checklistRepository, checklistItemRepository, propertyReportRepository,
-                propertyRiskRepository, propertyRiskCheckRepository, depositSafetyCheckRepository,
-                eventPublisher
+                propertyImageRepository, propertyRiskRepository, propertyRiskCheckRepository,
+                depositSafetyCheckRepository, eventPublisher
         );
     }
 
@@ -593,6 +597,50 @@ class PropertyServiceTest {
         assertThat(result.content()).hasSize(2);
         assertThat(result.content().get(0).jeonseRatio()).isEqualTo(85);
         assertThat(result.content().get(1).jeonseRatio()).isNull();
+    }
+
+    @Test
+    void 매물_목록조회_응답에_대표_이미지가_가장_먼저_업로드된_이미지로_채워진다() {
+        Property withImages = Property.builder()
+                .userId(USER_ID).title("이미지 있는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(30_000_000L).area(23.5).build();
+        ReflectionTestUtils.setField(withImages, "id", 1L);
+
+        Property withoutImages = Property.builder()
+                .userId(USER_ID).title("이미지 없는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(20_000_000L).area(18.0).build();
+        ReflectionTestUtils.setField(withoutImages, "id", 2L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(withImages, withoutImages), pageable, 2));
+
+        // id 오름차순(=업로드 순서)으로 정렬된 상태로 Repository가 내려준다고 가정하고, 매물당
+        // 가장 먼저(가장 작은 id) 업로드된 이미지만 대표 이미지로 채택되는지 확인한다.
+        com.algogyeyak.property.entity.PropertyImage firstImage =
+                com.algogyeyak.property.entity.PropertyImage.builder()
+                        .imageUrl("https://cdn.algogyeyak.com/img/first.jpg").build();
+        ReflectionTestUtils.setField(firstImage, "id", 10L);
+        withImages.addImage(firstImage);
+
+        com.algogyeyak.property.entity.PropertyImage secondImage =
+                com.algogyeyak.property.entity.PropertyImage.builder()
+                        .imageUrl("https://cdn.algogyeyak.com/img/second.jpg").build();
+        ReflectionTestUtils.setField(secondImage, "id", 11L);
+        withImages.addImage(secondImage);
+
+        when(propertyImageRepository.findByProperty_IdInOrderByProperty_IdAscIdAsc(List.of(1L, 2L)))
+                .thenReturn(List.of(firstImage, secondImage));
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content().get(0).representativeImageUrl())
+                .isEqualTo("https://cdn.algogyeyak.com/img/first.jpg");
+        assertThat(result.content().get(1).representativeImageUrl()).isNull();
     }
 
     @Test

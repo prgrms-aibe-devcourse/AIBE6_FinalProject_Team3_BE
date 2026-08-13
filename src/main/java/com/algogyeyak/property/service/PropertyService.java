@@ -25,6 +25,7 @@ import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.event.PropertyUpdatedEvent;
+import com.algogyeyak.property.repository.PropertyImageRepository;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.entity.PropertyRisk;
@@ -54,6 +55,7 @@ public class PropertyService {
     private final ChecklistRepository checklistRepository;
     private final ChecklistItemRepository checklistItemRepository;
     private final PropertyReportRepository propertyReportRepository;
+    private final PropertyImageRepository propertyImageRepository;
     private final PropertyRiskRepository propertyRiskRepository;
     private final PropertyRiskCheckRepository propertyRiskCheckRepository;
     private final DepositSafetyCheckRepository depositSafetyCheckRepository;
@@ -176,6 +178,21 @@ public class PropertyService {
                         check -> check.getJeonseRatio().intValue()
                 ));
 
+        // 대표 이미지는 다른 필드들과 달리 "유저 전체 매물" 스코프가 아니라 "현재 페이지 매물"
+        // 스코프로만 배치 조회한다 - 이미지는 매물당 여러 장(최대 10장)이라 유저 전체로 긁으면
+        // 페이지네이션 의미가 없어질 만큼 무거워질 수 있다.
+        List<Long> pagePropertyIds = properties.getContent().stream().map(Property::getId).toList();
+        Map<Long, String> representativeImageUrlByPropertyId = propertyImageRepository
+                .findByProperty_IdInOrderByProperty_IdAscIdAsc(pagePropertyIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        image -> image.getProperty().getId(),
+                        PropertyImage::getImageUrl,
+                        // 이미 property_id -> id 오름차순으로 정렬돼 있으므로, 매물당 처음 만나는
+                        // (=가장 먼저 업로드된) 값만 남기고 이후 값은 버린다.
+                        (first, second) -> first
+                ));
+
         return PageResponse.from(
                 properties,
                 property -> {
@@ -195,7 +212,8 @@ public class PropertyService {
                             marketComparisonService.compare(property),
                             checkSignalCount,
                             signalSummary,
-                            jeonseRatioByPropertyId.get(propertyId)
+                            jeonseRatioByPropertyId.get(propertyId),
+                            representativeImageUrlByPropertyId.get(propertyId)
                     );
                 }
         );
