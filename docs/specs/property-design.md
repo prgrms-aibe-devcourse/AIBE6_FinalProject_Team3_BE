@@ -161,7 +161,9 @@
 
 ## 전수조사 결과 (2026-08-12)
 
-재확인 결과: 기존 "남은 이슈" 중 1(제목/`title`)·10·11(이미지 검증/추가 불가)번은 이미 코드상 해소되어 있었다 — `Property.title`(엔티티) + `PropertyRegisterRequest`/`PropertyUpdateRequest.title` 필드가 존재하고, `PropertyImageUploadController`(`/properties/images/upload-url`, `/properties/images/confirm`) + `S3PresignService`/`S3ImagePurpose.PROPERTY`(확장자·컨텐츠타입·10MB 크기 제한)로 실제 S3 업로드 플로우가 구축되어 있으며, 등록/수정 모두 `images` 필드로 첨부·교체가 가능하다. 이 문서의 "요구사항에 없던 추가 구현"/"남은 이슈" 섹션이 이 변경 이전 시점 기준으로 남아 있어 실제 코드와 크게 벗어나 있다 — 다음 업데이트 때 해당 항목들을 정리 필요. 아래는 이 재확인 과정에서 새로 발견한 이슈다.
+재확인 결과: 기존 "남은 이슈" 중 10·11(이미지 검증/추가 불가)번은 이미 코드상 해소되어 있었다 — `PropertyImageUploadController`(`/properties/images/upload-url`, `/properties/images/confirm`) + `S3PresignService`/`S3ImagePurpose.PROPERTY`(확장자·컨텐츠타입·10MB 크기 제한)로 실제 S3 업로드 플로우가 구축되어 있으며, 등록/수정 모두 `images` 필드로 첨부·교체가 가능하다. 이 문서의 "요구사항에 없던 추가 구현"/"남은 이슈" 섹션이 이 변경 이전 시점 기준으로 남아 있어 실제 코드와 크게 벗어나 있다 — 다음 업데이트 때 해당 항목들을 정리 필요. 아래는 이 재확인 과정에서 새로 발견한 이슈다.
+
+**(2026-08-13 정정)** 위 문단이 원래 "1(제목/`title`)번도 해소됨"이라고 적고 있었으나, "남은 이슈" 목록의 실제 1번은 매매(SALE)/`askingPrice` 부재 항목이라 제목과는 무관하다 — 목록이 개정되며 항목 번호가 밀렸는데 이 문단이 따라가지 못한 허상 참조였다. 실제로 `Property.title`/`PropertyRegisterRequest.title` 필드 자체는 이미 존재하지만(코드로 확인), 이걸 지적하던 원래 "남은 이슈" 항목이 이미 목록에서 빠져 있어 정정할 대상이 없다 — 참조만 제거.
 
 ### 버그/정확성
 
