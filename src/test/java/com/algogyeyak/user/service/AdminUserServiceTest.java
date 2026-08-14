@@ -5,6 +5,7 @@ import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.user.dto.AdminUserDetailResponse;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,6 +31,11 @@ import static org.mockito.Mockito.when;
  * 올바르게 사용하는지 검증한다. 실제 락이 두 트랜잭션을 직렬화하는지는 DB 엔진의 락 구현에 달려 있어
  * Mockito로는 확인할 수 없다 - 여기서는 그 조회 결과(size)에 따라 서비스가 옳게 분기하는지만 본다.
  * AdminAuditLogger는 mock으로 대체해, 거부된 변경에는 감사 로그가 남지 않는지도 함께 확인한다.
+ *
+ * updateRole()/updateStatus()는 이제 User.changeRole()/suspend()/activate()로 엔티티를 직접
+ * 바꾸지 않고 UserRepository.updateRoleIfNotWithdrawn()/updateStatusIfNotWithdrawn() 조건부
+ * UPDATE의 영향받은 row 수로 판단하므로(AdminUserService 참고), 성공 케이스는 그 메서드가 1을
+ * 반환하도록 스텁해야 하고, 결과 검증은 엔티티 필드가 아니라 반환된 AdminUserDetailResponse로 한다.
  */
 class AdminUserServiceTest {
 
@@ -62,7 +69,7 @@ class AdminUserServiceTest {
                 () -> adminUserService.updateRole(ACTOR_ID, 1L, Role.USER));
 
         assertEquals(ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT, exception.getErrorCode());
-        assertEquals(Role.ADMIN, admin.getRole(), "거부됐다면 실제 강등이 적용되면 안 된다");
+        verify(userRepository, never()).updateRoleIfNotWithdrawn(any(), any(), any());
         verify(adminAuditLogger, never()).log(any(), any(), any(), any());
     }
 
@@ -73,12 +80,30 @@ class AdminUserServiceTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(admin));
         when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
                 .thenReturn(List.of(admin, otherAdmin));
+        when(userRepository.updateRoleIfNotWithdrawn(1L, Role.USER, UserStatus.WITHDRAWN)).thenReturn(1);
 
-        adminUserService.updateRole(ACTOR_ID, 1L, Role.USER);
+        AdminUserDetailResponse response = adminUserService.updateRole(ACTOR_ID, 1L, Role.USER);
 
-        assertEquals(Role.USER, admin.getRole());
+        assertEquals(Role.USER, response.role());
         verify(adminAuditLogger).log(ACTOR_ID, AdminAuditAction.UPDATE_ROLE, 1L,
                 Map.of("beforeRole", Role.ADMIN, "afterRole", Role.USER));
+    }
+
+    // AdminUserService.updateRole()가 조건부 UPDATE(updateRoleIfNotWithdrawn)의 영향받은 row 수로
+    // 탈퇴 여부를 판단하는 경로 자체를 검증한다 - findUser()가 대상을 읽은 뒤(활성 상태였음),
+    // 실제 UPDATE 시점에는 동시에 탈퇴가 먼저 커밋되어 0건이 반영된 상황을 흉내낸다. 이 경우
+    // WITHDRAWN 상태의 계정이 role만 조용히 바뀌는 대신 명확한 에러로 거부돼야 한다.
+    @Test
+    void updateRoleThrowsWhenTargetWasConcurrentlyWithdrawn() {
+        User user = normalUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.updateRoleIfNotWithdrawn(1L, Role.ADMIN, UserStatus.WITHDRAWN)).thenReturn(0);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> adminUserService.updateRole(ACTOR_ID, 1L, Role.ADMIN));
+
+        assertEquals(ErrorCode.ADMIN_INVALID_ROLE_TRANSITION, exception.getErrorCode());
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
     }
 
     @Test
@@ -92,7 +117,7 @@ class AdminUserServiceTest {
                 () -> adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED));
 
         assertEquals(ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT, exception.getErrorCode());
-        assertEquals(UserStatus.ACTIVE, admin.getStatus());
+        verify(userRepository, never()).updateStatusIfNotWithdrawn(any(), any(), any());
         verify(adminAuditLogger, never()).log(any(), any(), any(), any());
     }
 
@@ -103,12 +128,29 @@ class AdminUserServiceTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(admin));
         when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
                 .thenReturn(List.of(admin, otherAdmin));
+        when(userRepository.updateStatusIfNotWithdrawn(1L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
 
-        adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED);
+        AdminUserDetailResponse response = adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED);
 
-        assertEquals(UserStatus.SUSPENDED, admin.getStatus());
+        assertEquals(UserStatus.SUSPENDED, response.status());
         verify(adminAuditLogger).log(ACTOR_ID, AdminAuditAction.UPDATE_STATUS, 1L,
                 Map.of("beforeStatus", UserStatus.ACTIVE, "afterStatus", UserStatus.SUSPENDED));
+    }
+
+    // AdminUserService.updateStatus()가 조건부 UPDATE(updateStatusIfNotWithdrawn)의 영향받은
+    // row 수로 탈퇴 여부를 판단하는 경로 자체를 검증한다 - updateRoleThrowsWhenTargetWasConcurrentlyWithdrawn과
+    // 동일한 레이스를 정지 쪽에서 재현한다.
+    @Test
+    void updateStatusThrowsWhenTargetWasConcurrentlyWithdrawn() {
+        User user = normalUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.updateStatusIfNotWithdrawn(1L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(0);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED));
+
+        assertEquals(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, exception.getErrorCode());
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
     }
 
     // 강등/정지 대상이 이미 ADMIN+ACTIVE가 아니면(예: 일반 유저 정지) 마지막 관리자와 무관하므로
@@ -117,10 +159,11 @@ class AdminUserServiceTest {
     void updateStatusSkipsLockQueryForNonAdminTarget() {
         User user = normalUser(1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.updateStatusIfNotWithdrawn(1L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
 
-        adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED);
+        AdminUserDetailResponse response = adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED);
 
-        assertEquals(UserStatus.SUSPENDED, user.getStatus());
+        assertEquals(UserStatus.SUSPENDED, response.status());
         verify(userRepository, never()).findAllByRoleAndStatusForUpdate(any(), any());
     }
 
@@ -130,11 +173,12 @@ class AdminUserServiceTest {
     void bulkUpdateStatus는_일부_실패해도_나머지는_그대로_처리된다() {
         User target = normalUser(1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(userRepository.updateStatusIfNotWithdrawn(1L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
 
         AdminBulkActionResponse result =
                 adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, ACTOR_ID), UserStatus.SUSPENDED);
 
-        assertEquals(UserStatus.SUSPENDED, target.getStatus());
+        verify(userRepository).updateStatusIfNotWithdrawn(1L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN);
         assertEquals(List.of(1L), result.succeededIds());
         assertEquals(1, result.failures().size());
         assertEquals(ACTOR_ID, result.failures().get(0).id());
@@ -148,6 +192,7 @@ class AdminUserServiceTest {
     void bulkUpdateStatus는_중복된_id를_한_번만_처리한다() {
         User target = normalUser(1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(userRepository.updateStatusIfNotWithdrawn(1L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
 
         AdminBulkActionResponse result =
                 adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, 1L), UserStatus.SUSPENDED);
@@ -166,12 +211,13 @@ class AdminUserServiceTest {
         when(userRepository.findById(2L)).thenReturn(Optional.of(normalTarget));
         when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
                 .thenReturn(List.of(lastAdmin));
+        when(userRepository.updateStatusIfNotWithdrawn(2L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
 
         AdminBulkActionResponse result =
                 adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, 2L), UserStatus.SUSPENDED);
 
-        assertEquals(UserStatus.ACTIVE, lastAdmin.getStatus(), "실패한 항목은 실제로 적용되면 안 된다");
-        assertEquals(UserStatus.SUSPENDED, normalTarget.getStatus());
+        verify(userRepository, never()).updateStatusIfNotWithdrawn(eq(1L), any(), any());
+        verify(userRepository).updateStatusIfNotWithdrawn(2L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN);
         assertEquals(List.of(2L), result.succeededIds());
         assertEquals(1, result.failures().size());
         assertEquals(1L, result.failures().get(0).id());
