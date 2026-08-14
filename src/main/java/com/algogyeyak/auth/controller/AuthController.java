@@ -1,7 +1,11 @@
 package com.algogyeyak.auth.controller;
 
+import com.algogyeyak.auth.dto.EmailVerificationConfirmRequest;
+import com.algogyeyak.auth.dto.EmailVerificationRequest;
 import com.algogyeyak.auth.dto.LoginRequest;
 import com.algogyeyak.auth.dto.PasswordPolicy;
+import com.algogyeyak.auth.dto.PasswordResetConfirmRequest;
+import com.algogyeyak.auth.dto.PasswordResetRequest;
 import com.algogyeyak.auth.dto.PasswordUpdateRequest;
 import com.algogyeyak.auth.dto.SignupRequest;
 import com.algogyeyak.auth.util.EmailNormalizer;
@@ -9,7 +13,9 @@ import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.auth.oauth.CookieUtils;
+import com.algogyeyak.auth.service.EmailVerificationService;
 import com.algogyeyak.auth.service.LocalAuthService;
+import com.algogyeyak.auth.service.PasswordResetService;
 import com.algogyeyak.auth.service.SessionLogoutService;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.global.error.ErrorCode;
@@ -56,6 +62,8 @@ public class AuthController {
     private final RefreshTokenService refreshTokenService;
     private final LocalAuthService localAuthService;
     private final SessionLogoutService sessionLogoutService;
+    private final EmailVerificationService emailVerificationService;
+    private final PasswordResetService passwordResetService;
 
     @Value("${app.dev-login.enabled}")
     private boolean devLoginEnabled;
@@ -85,13 +93,17 @@ public class AuthController {
             JwtProvider jwtProvider,
             RefreshTokenService refreshTokenService,
             LocalAuthService localAuthService,
-            SessionLogoutService sessionLogoutService) {
+            SessionLogoutService sessionLogoutService,
+            EmailVerificationService emailVerificationService,
+            PasswordResetService passwordResetService) {
         this.cookieUtils = cookieUtils;
         this.userRepository = userRepository;
         this.jwtProvider = jwtProvider;
         this.refreshTokenService = refreshTokenService;
         this.localAuthService = localAuthService;
         this.sessionLogoutService = sessionLogoutService;
+        this.emailVerificationService = emailVerificationService;
+        this.passwordResetService = passwordResetService;
     }
 
     public record MeResponse(
@@ -120,12 +132,61 @@ public class AuthController {
                 new PasswordPolicyResponse(PasswordPolicy.HTML_INPUT_PATTERN, PasswordPolicy.MESSAGE)));
     }
 
+    // 계정이 아직 없는 상태(회원가입 폼에서 이메일만 입력한 시점)에서 호출한다 - 이미 가입된 이메일이면
+    // 인증번호를 보내지 않고 바로 실패시켜, 사용자가 로그인 화면으로 가야 함을 즉시 알 수 있게 한다.
+    @Operation(summary = "이메일 인증번호 발송(회원가입)", description = "회원가입 전 이메일 소유권 확인용 6자리 인증번호를 발송한다. 이미 가입된 이메일이면 발송하지 않고 실패로 응답한다. 재발송은 60초 쿨다운이 있다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "발송 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 가입된 이메일 (AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재발송 쿨다운(60초) 이내 재요청 (AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "메일 발송 실패 (EMAIL_SEND_FAILED)")
+    @PostMapping("/email-verification/request")
+    public ResponseEntity<ApiResponse<Void>> requestEmailVerification(
+            @Valid @RequestBody EmailVerificationRequest request) {
+        emailVerificationService.requestCode(request.getEmail());
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    // 확인에 성공하면 이 이메일에 대해 30분간 유효한 인증 완료 기록만 남긴다 - 계정은 아직 만들지
+    // 않는다(실제 계정 생성은 이어지는 /auth/signup 호출에서 이 기록을 확인한다).
+    @Operation(summary = "이메일 인증번호 확인(회원가입)", description = "발송된 6자리 인증번호를 확인한다. 성공 시 이 이메일로 30분 이내에 /auth/signup을 완료할 수 있다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "인증 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "인증번호가 올바르지 않거나 만료됨/시도 횟수 초과 (AUTH_EMAIL_VERIFICATION_CODE_INVALID)")
+    @PostMapping("/email-verification/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmEmailVerification(
+            @Valid @RequestBody EmailVerificationConfirmRequest request) {
+        emailVerificationService.confirmCode(request.getEmail(), request.getCode());
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    // 이메일 존재 여부를 노출하지 않기 위해 계정이 없거나 소셜 전용 계정이어도 항상 200으로 응답한다
+    // (PasswordResetService.requestReset 참고 - 그 경우 내부적으로 아무 것도 하지 않고 조용히 리턴한다).
+    // 계정이 존재하는 경우의 토큰 발급(Redis)/메일 발송 실패도 같은 이유로 로그만 남기고 200으로
+    // 응답한다 - 그러지 않으면 그 실패들이 "이 계정은 실제로 존재한다"는 신호가 되어버린다.
+    @Operation(summary = "비밀번호 재설정 요청", description = "이메일을 받아 (로컬 비밀번호가 있는) 계정이면 재설정 링크를 발송한다. 계정 존재 여부를 노출하지 않기 위해 토큰 발급/메일 발송이 내부적으로 실패해도 항상 동일한 성공 응답을 반환한다. 60초 쿨다운이 있다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "요청 접수(계정 존재 여부 및 실제 발송 성공 여부는 노출하지 않음)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재요청 쿨다운(60초) 이내 재요청 (AUTH_PASSWORD_RESET_TOO_MANY_REQUESTS)")
+    @PostMapping("/password-reset/request")
+    public ResponseEntity<ApiResponse<Void>> requestPasswordReset(@Valid @RequestBody PasswordResetRequest request) {
+        passwordResetService.requestReset(request.getEmail());
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    @Operation(summary = "비밀번호 재설정 실행", description = "이메일로 받은 토큰과 새 비밀번호로 비밀번호를 변경한다. 성공 시 기존 refresh token(세션)을 모두 무효화한다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "재설정 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "새 비밀번호 형식이 올바르지 않거나(영문+숫자 포함 8~72자), 토큰이 유효하지 않거나 만료됨 (AUTH_PASSWORD_RESET_TOKEN_INVALID)")
+    @PostMapping("/password-reset/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmPasswordReset(@Valid @RequestBody PasswordResetConfirmRequest request) {
+        passwordResetService.confirmReset(request.getToken(), request.getNewPassword());
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
     // 소셜 로그인(OAuth2AuthenticationSuccessHandler)과 달리 리다이렉트가 아니라 REST 응답이므로,
     // 가입 직후 바로 온보딩(프로필 등록) 화면으로 넘어갈 수 있도록 여기서도 access/refresh 쿠키를
     // 즉시 발급해 자동 로그인 상태로 만든다.
-    @Operation(summary = "회원가입", description = "이메일/비밀번호로 가입한다. 성공 시 access/refresh 토큰을 쿠키로 즉시 발급해 자동 로그인 상태로 만든다.")
+    @Operation(summary = "회원가입", description = "이메일/비밀번호로 가입한다. /auth/email-verification/confirm으로 이메일 인증을 먼저 마쳐야 한다. 성공 시 access/refresh 토큰을 쿠키로 즉시 발급해 자동 로그인 상태로 만든다.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "회원가입 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 형식이 올바르지 않음 (이메일/비밀번호/닉네임 형식 위반)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "이메일 인증을 완료하지 않음 (AUTH_EMAIL_NOT_VERIFIED)")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 가입된 이메일 또는 사용 중인 닉네임 (AUTH_EMAIL_ALREADY_EXISTS / AUTH_NICKNAME_ALREADY_EXISTS)")
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<MeResponse>> signup(
