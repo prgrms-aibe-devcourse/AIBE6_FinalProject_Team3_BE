@@ -107,4 +107,37 @@ class ChecklistItemTemplateTest {
 
         assertThat(template.getOptions()).isEqualTo("가스보일러,기름보일러,전기보일러,지역난방");
     }
+
+    @Test
+    @DisplayName("resyncFromSeed()는 update()와 달리 version도 함께 바꾸고 active는 건드리지 않는다")
+    void resyncFromSeedChangesVersionButNotActive() {
+        ChecklistItemTemplate template = baseBuilder().active(false).build();
+
+        template.resyncFromSeed(
+                ChecklistCategory.DOCUMENTS,
+                "등기부등본을 확인했나요?",
+                "안내 문구",
+                "쉬운 설명",
+                ChecklistImportance.REQUIRED,
+                ChecklistItemType.YES_NO,
+                null,
+                ChecklistItemCode.TRUST_REGISTRATION,
+                5,
+                "OFFICETEL",
+                3
+        );
+
+        assertThat(template.getVersion()).isEqualTo(3);
+        assertThat(template.getCategory()).isEqualTo(ChecklistCategory.DOCUMENTS);
+        assertThat(template.getContent()).isEqualTo("등기부등본을 확인했나요?");
+        assertThat(template.getGuideText()).isEqualTo("안내 문구");
+        assertThat(template.getHelperText()).isEqualTo("쉬운 설명");
+        assertThat(template.getImportance()).isEqualTo(ChecklistImportance.REQUIRED);
+        assertThat(template.getItemType()).isEqualTo(ChecklistItemType.YES_NO);
+        assertThat(template.getCode()).isEqualTo(ChecklistItemCode.TRUST_REGISTRATION);
+        assertThat(template.getDisplayOrder()).isEqualTo(5);
+        assertThat(template.getApplicablePropertyTypes()).isEqualTo("OFFICETEL");
+        // active는 관리자가 수동으로 비활성화했을 수 있으니 시더 재동기화가 되돌리면 안 된다.
+        assertThat(template.isActive()).isFalse();
+    }
 }
