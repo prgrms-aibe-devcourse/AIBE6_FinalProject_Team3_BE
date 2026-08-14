@@ -142,6 +142,18 @@ class FakeListingSignalServiceTest {
     }
 
     @Test
+    @DisplayName("보증금 안전성 체크가 예외를 던져도 이미 판정된 신호 개수는 그대로 반환하고 예외를 전파하지 않는다")
+    void checkAndSaveAbsorbsDepositSafetyCheckFailure() {
+        Property property = property(10L, 1L);
+        org.mockito.Mockito.doThrow(new RuntimeException("지오코딩 클라이언트 실패"))
+                .when(depositSafetyCheckService).checkAndSave(property);
+
+        int signalCount = service.checkAndSave(property);
+
+        assertThat(signalCount).isEqualTo(0);
+    }
+
+    @Test
     @DisplayName("PropertyRiskCheck 동시 insert로 유니크 제약을 위반하면 재조회해서 덮어쓰는 방식으로 복구한다")
     void upsertCheckRecoversFromConcurrentInsertRace() {
         Property property = property(10L, 1L);

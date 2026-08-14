@@ -148,7 +148,16 @@ public class FakeListingSignalService {
                 .filter(detector -> checkAndSaveSignal(property, comparison, detector))
                 .count();
 
-        depositSafetyCheckService.checkAndSave(property);
+        // 신호 4종 중 신규 insert된 결과는 이미 REQUIRES_NEW로 별도 커밋됐으므로, 이 호출이 예외를
+        // 던져 바깥 트랜잭션이 롤백돼도 그 결과는 그대로 남는다 - 여기서 예외를 그대로 전파하면
+        // "기존 행이라 dirty-check만 해둔" 결과만 롤백되고 신규 insert 결과는 남아, 신호별로 반영
+        // 여부가 갈리는 불일치 상태가 생긴다. RiskRecalculationService와 같은 원칙(재계산 실패가
+        // 다른 처리에 영향을 주면 안 됨)으로 예외를 흡수하고 로그만 남긴다.
+        try {
+            depositSafetyCheckService.checkAndSave(property);
+        } catch (RuntimeException e) {
+            log.error("보증금 안전성 체크 실패 - propertyId={}", property.getId(), e);
+        }
         return foundSignalCount;
     }
 
