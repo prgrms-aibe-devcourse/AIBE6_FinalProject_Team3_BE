@@ -2,13 +2,17 @@ package com.algogyeyak.checklist.service;
 
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
+import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageCreateRequest;
+import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateUpdateRequest;
 import com.algogyeyak.checklist.entity.ChecklistCategory;
 import com.algogyeyak.checklist.entity.ChecklistImportance;
 import com.algogyeyak.checklist.entity.ChecklistItemCode;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
+import com.algogyeyak.checklist.entity.ChecklistItemTemplateImage;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
+import com.algogyeyak.checklist.repository.ChecklistItemTemplateImageRepository;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -37,9 +41,10 @@ class AdminChecklistTemplateServiceTest {
     private static final Long ACTOR_ID = 100L;
 
     private final ChecklistItemTemplateRepository checklistItemTemplateRepository = mock(ChecklistItemTemplateRepository.class);
+    private final ChecklistItemTemplateImageRepository checklistItemTemplateImageRepository = mock(ChecklistItemTemplateImageRepository.class);
     private final AdminAuditLogger adminAuditLogger = mock(AdminAuditLogger.class);
-    private final AdminChecklistTemplateService adminChecklistTemplateService =
-            new AdminChecklistTemplateService(checklistItemTemplateRepository, adminAuditLogger);
+    private final AdminChecklistTemplateService adminChecklistTemplateService = new AdminChecklistTemplateService(
+            checklistItemTemplateRepository, checklistItemTemplateImageRepository, adminAuditLogger);
 
     private ChecklistItemTemplate template(Long id, int version, int displayOrder) {
         return template(id, version, displayOrder, true);
@@ -275,7 +280,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, true
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, null, true
                 )
         );
 
@@ -511,6 +516,119 @@ class AdminChecklistTemplateServiceTest {
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
 
         verify(checklistItemTemplateRepository, never()).delete(any(ChecklistItemTemplate.class));
+        verifyNoAuditLog();
+    }
+
+    private ChecklistItemTemplateImage image(Long id, ChecklistItemTemplate template, String imageUrl, int displayOrder) {
+        ChecklistItemTemplateImage image = ChecklistItemTemplateImage.builder()
+                .template(template)
+                .imageUrl(imageUrl)
+                .displayOrder(displayOrder)
+                .build();
+        ReflectionTestUtils.setField(image, "id", id);
+        return image;
+    }
+
+    @Test
+    @DisplayName("문항의 이미지 목록을 표시순서대로 반환한다")
+    void listImagesReturnsImagesInDisplayOrder() {
+        ChecklistItemTemplate template = template(1L, 3, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        when(checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(1L))
+                .thenReturn(List.of(
+                        image(10L, template, "https://example.com/1.jpg", 1),
+                        image(11L, template, "https://example.com/2.jpg", 2)
+                ));
+
+        List<AdminChecklistItemTemplateImageResponse> result = adminChecklistTemplateService.listImages(1L);
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).imageUrl()).isEqualTo("https://example.com/1.jpg");
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 문항의 이미지 목록을 조회하면 ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND 예외가 발생한다")
+    void listImagesThrowsWhenTemplateNotFound() {
+        when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.listImages(999L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("이미지를 추가하면 기존 이미지 중 가장 큰 표시순서 다음 값으로 저장된다")
+    void addImageAssignsNextDisplayOrder() {
+        ChecklistItemTemplate template = template(1L, 3, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        when(checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(1L))
+                .thenReturn(List.of(image(10L, template, "https://example.com/1.jpg", 1)));
+        when(checklistItemTemplateImageRepository.save(any(ChecklistItemTemplateImage.class)))
+                .thenAnswer(invocation -> {
+                    ChecklistItemTemplateImage arg = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(arg, "id", 20L);
+                    return arg;
+                });
+
+        AdminChecklistItemTemplateImageResponse result = adminChecklistTemplateService.addImage(
+                ACTOR_ID, 1L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/2.jpg"));
+
+        assertThat(result.imageUrl()).isEqualTo("https://example.com/2.jpg");
+        assertThat(result.displayOrder()).isEqualTo(2);
+        verify(adminAuditLogger).log(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 문항에 이미지를 추가하면 ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND 예외가 발생하고 저장되지 않는다")
+    void addImageThrowsWhenTemplateNotFound() {
+        when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.addImage(
+                ACTOR_ID, 999L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/1.jpg")))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+        verify(checklistItemTemplateImageRepository, never()).save(any());
+        verifyNoAuditLog();
+    }
+
+    @Test
+    @DisplayName("이미지를 삭제한다")
+    void deleteImageRemovesImage() {
+        ChecklistItemTemplate template = template(1L, 3, 1);
+        ChecklistItemTemplateImage image = image(10L, template, "https://example.com/1.jpg", 1);
+        when(checklistItemTemplateImageRepository.findById(10L)).thenReturn(Optional.of(image));
+
+        adminChecklistTemplateService.deleteImage(ACTOR_ID, 1L, 10L);
+
+        verify(checklistItemTemplateImageRepository).delete(image);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 이미지를 삭제하면 ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND 예외가 발생한다")
+    void deleteImageThrowsWhenImageNotFound() {
+        when(checklistItemTemplateImageRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.deleteImage(ACTOR_ID, 1L, 999L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND));
+        verifyNoAuditLog();
+    }
+
+    @Test
+    @DisplayName("다른 문항 소유의 이미지를 삭제하려 하면 ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND 예외가 발생한다")
+    void deleteImageThrowsWhenImageBelongsToDifferentTemplate() {
+        ChecklistItemTemplate otherTemplate = template(2L, 3, 1);
+        ChecklistItemTemplateImage image = image(10L, otherTemplate, "https://example.com/1.jpg", 1);
+        when(checklistItemTemplateImageRepository.findById(10L)).thenReturn(Optional.of(image));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.deleteImage(ACTOR_ID, 1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND));
+        verify(checklistItemTemplateImageRepository, never()).delete(any());
         verifyNoAuditLog();
     }
 }
