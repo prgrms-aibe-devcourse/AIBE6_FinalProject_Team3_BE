@@ -26,13 +26,15 @@ class LocalAuthServiceTest {
 
     private final UserRepository userRepository = mock(UserRepository.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
-    private final LocalAuthService localAuthService =
-            new LocalAuthService(userRepository, passwordEncoder, mock(PlatformTransactionManager.class));
+    private final EmailVerificationService emailVerificationService = mock(EmailVerificationService.class);
+    private final LocalAuthService localAuthService = new LocalAuthService(
+            userRepository, passwordEncoder, emailVerificationService, mock(PlatformTransactionManager.class));
 
     @Test
     void signupCreatesLocalUserWithEncodedPassword() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
         when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         when(passwordEncoder.encode("password1")).thenReturn("encoded-hash");
         when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -42,12 +44,14 @@ class LocalAuthServiceTest {
         assertEquals("테스트유저", user.getNickname());
         assertEquals("encoded-hash", user.getPasswordHash());
         verify(userRepository).saveAndFlush(any(User.class));
+        verify(emailVerificationService).consumeVerified("test@example.com");
     }
 
     @Test
     void signupNormalizesEmailToLowercaseAndTrimmed() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
         when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         User user = localAuthService.signup("  Test@Example.COM  ", "password1", "테스트유저");
@@ -80,11 +84,40 @@ class LocalAuthServiceTest {
     }
 
     @Test
+    void signupThrowsWhenEmailNotVerified() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(false);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        assertEquals(ErrorCode.AUTH_EMAIL_NOT_VERIFIED, exception.getErrorCode());
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void signupKeepsVerifiedTicketWhenAccountCreationFailsSoUserCanRetry() {
+        // 인증까지는 성공했는데(예: 이메일 인증 완료 후) 닉네임 중복 등으로 계정 생성이 실패하면,
+        // 사용자가 이메일 인증부터 다시 하지 않고 나머지 폼만 고쳐 재시도할 수 있어야 한다 - 티켓을
+        // 소비하면 안 된다.
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(true);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
+
+        assertThrows(BusinessException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        verify(emailVerificationService, never()).consumeVerified(any());
+    }
+
+    @Test
     void signupRecoversAsEmailDuplicateWhenConcurrentSignupHitsUniqueConstraint() {
         when(userRepository.existsByEmail("test@example.com"))
                 .thenReturn(false) // 최초 체크 시점
                 .thenReturn(true); // INSERT 실패 후 재확인
         when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class)))
                 .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
 
@@ -100,6 +133,7 @@ class LocalAuthServiceTest {
         when(userRepository.existsByNickname("테스트유저"))
                 .thenReturn(false) // 최초 체크 시점
                 .thenReturn(true); // INSERT 실패 후 재확인
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class)))
                 .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
 
@@ -115,6 +149,7 @@ class LocalAuthServiceTest {
         // 원래 예외를 그대로 던져야 한다 (예: 다른 유니크 제약이 추가되거나, 일시적 DB 문제).
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
         when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         DataIntegrityViolationException original = new DataIntegrityViolationException("unknown constraint violation");
         when(userRepository.saveAndFlush(any(User.class))).thenThrow(original);
 
