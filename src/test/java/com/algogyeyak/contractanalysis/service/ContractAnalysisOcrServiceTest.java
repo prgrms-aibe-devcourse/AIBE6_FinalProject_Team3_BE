@@ -91,6 +91,27 @@ class ContractAnalysisOcrServiceTest {
     }
 
     @Test
+    void recognizeSetsShortTextWarningWhenExtractedTextIsShort() {
+        // 0자(EMPTY_RESULT)는 아니지만 계약서 내용이라기엔 너무 짧은 경우 - 거부하지 않고 힌트만 내려준다.
+        when(clovaOcrClient.recognize(any(), anyString()))
+                .thenReturn(responseWithConfidences(0.99, 0.98));
+
+        ContractAnalysisOcrResponse response = service.recognize(jpegImage());
+
+        assertEquals(true, response.shortTextWarning());
+    }
+
+    @Test
+    void recognizeDoesNotSetShortTextWarningWhenExtractedTextIsLongEnough() {
+        when(clovaOcrClient.recognize(any(), anyString()))
+                .thenReturn(responseWithConfidences(0.99, 0.99, 0.99, 0.99, 0.99, 0.99, 0.99));
+
+        ContractAnalysisOcrResponse response = service.recognize(jpegImage());
+
+        assertEquals(false, response.shortTextWarning());
+    }
+
+    @Test
     void recognizeThrowsEmptyResultWhenNoFieldsRecognized() {
         when(clovaOcrClient.recognize(any(), anyString()))
                 .thenReturn(new ClovaOcrResponse(List.of(new ClovaOcrResponse.Image("SUCCESS", List.of()))));
