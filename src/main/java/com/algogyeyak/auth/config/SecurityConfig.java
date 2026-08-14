@@ -95,7 +95,10 @@ public class SecurityConfig {
                                 "/h2-console/**",
                                 "/auth/logout", "/auth/refresh",
                                 "/auth/signup", "/auth/login", "/auth/dev-login",
-                                "/auth/password-policy"
+                                "/auth/password-policy",
+                                // 회원가입(로그인 전) 이메일 인증 + 비밀번호 찾기(로그아웃 상태) - 전부
+                                // 인증 없이 호출돼야 한다.
+                                "/auth/email-verification/**", "/auth/password-reset/**"
                         ).permitAll()
                         // 회원가입 화면(로그인 전)에서도 닉네임 중복 확인/정책 조회를 호출하므로 인증을
                         // 요구하지 않는다. 로그인된 사용자가 호출하면(프로필 수정 화면) UserController가

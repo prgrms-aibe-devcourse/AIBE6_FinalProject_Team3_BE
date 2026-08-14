@@ -211,6 +211,24 @@ public class RefreshTokenService {
         }
     }
 
+    /**
+     * 비밀번호 재설정 성공 시(PasswordResetService) 탈취됐을 수 있는 기존 세션을 강제로 끊어내기
+     * 위해 사용한다. revoke(rawToken)과 달리 raw token 없이 userId만으로 지운다 - by-user가
+     * 가리키는 현재 세션의 by-hash까지 함께 지워야 refresh_token 쿠키가 남아 있어도 /auth/refresh가
+     * 더 이상 성공하지 못한다.
+     */
+    public void revokeAllForUser(Long userId) {
+        String userIdString = String.valueOf(userId);
+        try {
+            String currentHash = redisTemplate.opsForValue().get(byUserKey(userIdString));
+            if (currentHash != null) {
+                redisTemplate.delete(List.of(byUserKey(userIdString), byHashKey(currentHash)));
+            }
+        } catch (DataAccessException e) {
+            throw redisUnavailable(e);
+        }
+    }
+
     private void deleteOrphanedSession(String userId, String newHash) {
         try {
             redisTemplate.delete(List.of(byUserKey(userId), byHashKey(newHash)));

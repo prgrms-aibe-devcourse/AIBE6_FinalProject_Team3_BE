@@ -236,4 +236,38 @@ class RefreshTokenServiceTest {
                 () -> refreshTokenService.revoke("some-token"));
         assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
     }
+
+    @Test
+    void revokeAllForUserDeletesBothKeysWhenSessionExists() {
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("auth:refresh-token:by-user:1")).thenReturn("current-hash");
+
+        refreshTokenService.revokeAllForUser(1L);
+
+        verify(redisTemplate).delete(java.util.List.of(
+                "auth:refresh-token:by-user:1", "auth:refresh-token:by-hash:current-hash"));
+    }
+
+    @Test
+    void revokeAllForUserIsNoOpWhenNoActiveSession() {
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("auth:refresh-token:by-user:1")).thenReturn(null);
+
+        refreshTokenService.revokeAllForUser(1L);
+
+        verify(redisTemplate, never()).delete(anyList());
+    }
+
+    @Test
+    void revokeAllForUserThrowsServiceUnavailableWhenRedisFails() {
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("auth:refresh-token:by-user:1")).thenThrow(new QueryTimeoutException("redis down"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> refreshTokenService.revokeAllForUser(1L));
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
+    }
 }
