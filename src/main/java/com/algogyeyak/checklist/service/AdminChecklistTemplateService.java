@@ -73,6 +73,7 @@ public class AdminChecklistTemplateService {
                 .helperText(request.helperText())
                 .importance(request.importance())
                 .itemType(request.itemType())
+                .options(request.options())
                 .code(request.code())
                 .displayOrder(request.displayOrder())
                 .active(true)
@@ -119,6 +120,7 @@ public class AdminChecklistTemplateService {
                 request.helperText(),
                 request.importance(),
                 request.itemType(),
+                request.options(),
                 request.code(),
                 request.displayOrder(),
                 request.applicablePropertyTypes(),

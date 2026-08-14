@@ -292,4 +292,39 @@ class ChecklistItemTest {
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
+
+    private ChecklistItem multipleChoiceItem() {
+        return ChecklistItem.builder()
+                .category(ChecklistCategory.INDOOR)
+                .content("보일러 종류가 무엇인가요?")
+                .importance(ChecklistImportance.GENERAL)
+                .itemType(ChecklistItemType.MULTIPLE_CHOICE)
+                .options("가스보일러,기름보일러,전기보일러,지역난방")
+                .displayOrder(1)
+                .build();
+    }
+
+    @Test
+    @DisplayName("MULTIPLE_CHOICE 문항에 선택지 중 하나로 답하면 값이 저장되고 확인 상태가 된다")
+    void answerMultipleChoiceSavesValueAndMarksChecked() {
+        ChecklistItem item = multipleChoiceItem();
+
+        item.answer("가스보일러");
+
+        assertThat(item.isChecked()).isTrue();
+        assertThat(item.getValue()).isEqualTo("가스보일러");
+        assertThat(item.isIssueFound()).isFalse();
+    }
+
+    @Test
+    @DisplayName("MULTIPLE_CHOICE 문항에 선택지에 없는 값을 답하면 BAD_REQUEST 예외가 발생한다")
+    void answerMultipleChoiceRejectsValueNotInOptions() {
+        ChecklistItem item = multipleChoiceItem();
+
+        assertThatThrownBy(() -> item.answer("태양광"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception ->
+                        assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
+                );
+    }
 }

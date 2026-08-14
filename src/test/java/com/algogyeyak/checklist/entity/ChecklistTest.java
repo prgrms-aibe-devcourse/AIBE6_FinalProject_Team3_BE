@@ -74,6 +74,7 @@ class ChecklistTest {
         assertThat(firstItem.getContent()).isEqualTo("누수 확인");
         assertThat(firstItem.isChecked()).isFalse();
         assertThat(firstItem.isIssueFound()).isFalse();
+        assertThat(firstItem.getTemplate()).isEqualTo(templates.get(0));
     }
 
     @Test
