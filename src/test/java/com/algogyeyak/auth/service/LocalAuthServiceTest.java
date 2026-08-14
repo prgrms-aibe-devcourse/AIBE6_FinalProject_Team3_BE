@@ -14,6 +14,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -334,6 +335,10 @@ class LocalAuthServiceTest {
         localAuthService.setPassword(1L, "oldPassword1", "newPassword1");
 
         assertEquals("new-encoded-hash", user.getPasswordHash());
+        // 회귀 테스트 - 본인이 자발적으로 비밀번호를 바꾼 경우도 JwtAuthenticationFilter가 기존
+        // access token을 무효화할 수 있도록 passwordChangedAt이 찍혀야 한다(비밀번호 재설정
+        // 경로만 찍고 이 경로를 빠뜨리면, 탈취된 이전 access token이 계속 유효하게 남는다).
+        assertNotNull(user.getPasswordChangedAt());
     }
 
     @Test

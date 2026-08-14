@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -118,7 +119,10 @@ class PasswordResetServiceTest {
     }
 
     @Test
-    void requestResetWrapsMailFailureAsBusinessException() {
+    void requestResetSwallowsMailFailureToAvoidRevealingAccountExists() {
+        // 계정이 존재하는 분기(여기)에서만 발생할 수 있는 실패를 그대로 노출하면(502 등),
+        // 존재하지 않는 이메일/소셜 전용 계정(둘 다 항상 200)과 응답이 갈려 계정 존재 여부가
+        // 새어나간다 - 메일 발송 실패도 로그만 남기고 예외 없이 정상 종료해야 한다.
         User user = localUser(1L);
         when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
@@ -126,9 +130,21 @@ class PasswordResetServiceTest {
         doThrow(new MailSendException("smtp down")).when(emailService)
                 .sendPasswordResetLink(anyString(), anyString());
 
-        BusinessException exception = assertThrows(BusinessException.class, () -> service.requestReset("test@example.com"));
+        service.requestReset("test@example.com");
+    }
 
-        assertEquals(ErrorCode.EMAIL_SEND_FAILED, exception.getErrorCode());
+    @Test
+    void requestResetSwallowsRedisIssueFailureToAvoidRevealingAccountExists() {
+        // 위와 동일한 이유 - 토큰 발급(Redis) 자체가 실패해도 503을 노출하지 않는다.
+        User user = localUser(1L);
+        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        doThrow(new QueryTimeoutException("redis down"))
+                .when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
+
+        service.requestReset("test@example.com");
+
+        verify(emailService, never()).sendPasswordResetLink(anyString(), anyString());
     }
 
     @Test
@@ -151,6 +167,7 @@ class PasswordResetServiceTest {
         service.confirmReset("some-token", "newPassword1");
 
         assertEquals("new-encoded-hash", user.getPasswordHash());
+        assertNotNull(user.getPasswordChangedAt());
         verify(refreshTokenService).revokeAllForUser(1L);
     }
 

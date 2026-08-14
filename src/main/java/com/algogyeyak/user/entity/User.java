@@ -63,6 +63,14 @@ public class User {
     @Column(name = "withdrawn_at")
     private LocalDateTime withdrawnAt;
 
+    // updatePasswordHash() 호출마다(setPassword()의 자기 변경, 비밀번호 재설정 confirm 둘 다) 갱신된다.
+    // JwtAuthenticationFilter가 access token의 발급 시각(iat)이 이 값보다 이전이면 그 토큰을 무효로
+    // 처리하는 데 쓴다 - 그래야 비밀번호가 바뀐 뒤 탈취됐거나 열려 있던 기존 access token이 만료
+    // 전까지(최대 30분) 계속 유효한 문제를 막을 수 있다. null이면(가입 이후 비밀번호를 바꾼 적 없음)
+    // 이 검사 자체를 건너뛴다.
+    @Column(name = "password_changed_at")
+    private LocalDateTime passwordChangedAt;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Role role;
@@ -114,9 +122,14 @@ public class User {
 
     // 소셜 전용으로 가입한 계정이 처음 비밀번호를 설정하거나 기존 비밀번호를 변경할 때 사용한다.
     // 현재 비밀번호 검증(이미 설정되어 있는 경우)은 호출 전에 서비스 레이어(LocalAuthService)에서
-    // 끝내고 온다는 전제다.
+    // 끝내고 온다는 전제다. LocalAuthService.setPassword()(로그인된 본인의 자발적 변경)와
+    // PasswordResetService.confirmReset()(비밀번호 찾기) 양쪽에서 호출되므로, 이 메서드 하나에서
+    // passwordChangedAt을 갱신해야 두 경로 모두 기존 access token을 일관되게 무효화할 수 있다 -
+    // setPassword() 쪽만 빠뜨리면 정상적으로 자기 비밀번호를 바꾼 경우엔 탈취된 이전 access
+    // token이 계속 유효한 채로 남는 비대칭이 생긴다.
     public void updatePasswordHash(String passwordHash) {
         this.passwordHash = passwordHash;
+        this.passwordChangedAt = LocalDateTime.now();
     }
 
     // 개발용 admin 시드 계정(AdminAccountSeeder)에서만 사용한다. 일반 가입 경로(createOAuthUser/

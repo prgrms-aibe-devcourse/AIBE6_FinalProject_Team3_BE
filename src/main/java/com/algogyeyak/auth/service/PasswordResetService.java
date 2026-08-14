@@ -131,6 +131,14 @@ public class PasswordResetService {
         }
         User user = eligibleUser.get();
 
+        // 여기서부터는 이미 "이 이메일에 재설정 가능한 계정이 있다"는 사실이 확정된 뒤다 - 위
+        // 쿨다운 확인과 달리 이 지점 이후의 실패를 클라이언트에 그대로 노출하면(예: Redis 장애 시
+        // 503, 메일 발송 실패 시 502) 존재하지 않는 이메일/소셜 전용 계정(둘 다 이 지점에 도달하지
+        // 않고 조용히 200으로 리턴됨)과 응답이 갈려 계정 존재 여부가 새어나간다. 그래서 이 아래
+        // 두 실패는 로그만 남기고 위 이메일이 없는 경우와 동일하게 조용히 리턴한다 - 사용자는
+        // 재설정 메일이 오지 않으면 다시 요청하는 수밖에 없지만, 계정 존재 여부 비노출이 더 우선
+        // 순위 높은 보안 요구사항이라는 판단이다(2026-07-24-password-reset-design.md, "이메일
+        // 존재 여부를 응답 차이로 노출하지 않기").
         String rawToken = generateRawToken();
         String tokenHash = hash(rawToken);
         String userId = String.valueOf(user.getId());
@@ -138,15 +146,15 @@ public class PasswordResetService {
             redisTemplate.execute(ISSUE_SCRIPT, List.of(byUserKey(userId)),
                     tokenHash, String.valueOf(tokenValiditySeconds), userId);
         } catch (DataAccessException e) {
-            throw redisUnavailable(e);
+            log.error("Redis 장애로 비밀번호 재설정 토큰 발급 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다", e);
+            return;
         }
 
         String resetLink = frontendBaseUrl + "/reset-password?token=" + rawToken;
         try {
             emailService.sendPasswordResetLink(normalizedEmail, resetLink);
         } catch (MailException e) {
-            log.error("비밀번호 재설정 메일 발송 실패 email={}", normalizedEmail, e);
-            throw new BusinessException(ErrorCode.EMAIL_SEND_FAILED);
+            log.error("비밀번호 재설정 메일 발송 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
         }
     }
 

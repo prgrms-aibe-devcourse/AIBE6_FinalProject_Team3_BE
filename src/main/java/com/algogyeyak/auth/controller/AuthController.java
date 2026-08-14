@@ -160,10 +160,11 @@ public class AuthController {
 
     // 이메일 존재 여부를 노출하지 않기 위해 계정이 없거나 소셜 전용 계정이어도 항상 200으로 응답한다
     // (PasswordResetService.requestReset 참고 - 그 경우 내부적으로 아무 것도 하지 않고 조용히 리턴한다).
-    @Operation(summary = "비밀번호 재설정 요청", description = "이메일을 받아 (로컬 비밀번호가 있는) 계정이면 재설정 링크를 발송한다. 계정 존재 여부를 노출하지 않기 위해 항상 동일한 성공 응답을 반환한다. 60초 쿨다운이 있다.")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "요청 접수(실제 발송 여부는 노출하지 않음)")
+    // 계정이 존재하는 경우의 토큰 발급(Redis)/메일 발송 실패도 같은 이유로 로그만 남기고 200으로
+    // 응답한다 - 그러지 않으면 그 실패들이 "이 계정은 실제로 존재한다"는 신호가 되어버린다.
+    @Operation(summary = "비밀번호 재설정 요청", description = "이메일을 받아 (로컬 비밀번호가 있는) 계정이면 재설정 링크를 발송한다. 계정 존재 여부를 노출하지 않기 위해 토큰 발급/메일 발송이 내부적으로 실패해도 항상 동일한 성공 응답을 반환한다. 60초 쿨다운이 있다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "요청 접수(계정 존재 여부 및 실제 발송 성공 여부는 노출하지 않음)")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재요청 쿨다운(60초) 이내 재요청 (AUTH_PASSWORD_RESET_TOO_MANY_REQUESTS)")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "메일 발송 실패 (EMAIL_SEND_FAILED)")
     @PostMapping("/password-reset/request")
     public ResponseEntity<ApiResponse<Void>> requestPasswordReset(@Valid @RequestBody PasswordResetRequest request) {
         passwordResetService.requestReset(request.getEmail());
