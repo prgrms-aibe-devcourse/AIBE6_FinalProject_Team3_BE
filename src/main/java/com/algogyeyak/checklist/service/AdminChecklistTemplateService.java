@@ -63,10 +63,7 @@ public class AdminChecklistTemplateService {
         // 비활성 문항 중에 활성 문항보다 높은 버전이 남아있을 수 있어(과거에 비활성화된 문항),
         // 전체가 아니라 "현재 활성 문항 집합" 기준으로만 최대 버전을 구한다 - 그래야 새 문항이
         // 지금 실제로 쓰이는 버전과 같은 값을 받는다.
-        int version = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc().stream()
-                .mapToInt(ChecklistItemTemplate::getVersion)
-                .max()
-                .orElse(1);
+        int version = currentActiveMaxVersion();
 
         ChecklistItemTemplate template = ChecklistItemTemplate.builder()
                 .version(version)
@@ -107,6 +104,14 @@ public class AdminChecklistTemplateService {
 
         String previousContent = template.getContent();
         boolean previousActive = template.isActive();
+        // 비활성 상태였던 문항이 다시 active=true가 되는 경우만 재정렬 대상이다 - update()는 비활성
+        // 동안 version을 안 건드리므로(그 자체는 의도된 동작, create()의 javadoc 참고), 과거에 다른
+        // 버전으로 비활성화됐던 문항을 그대로 재활성화하면 활성 집합의 버전이 뒤섞여
+        // ChecklistService.createChecklist()가 그 이후 임의의 버전을 새 유저 체크리스트에 찍게 된다.
+        // 재활성화 직전(이 문항 자신은 아직 비활성 상태)의 활성 집합 기준으로 버전을 다시 맞춘다.
+        boolean reactivating = !previousActive && request.active();
+        Integer versionOnReactivation = reactivating ? currentActiveMaxVersion() : null;
+
         template.update(
                 request.category(),
                 request.content(),
@@ -119,10 +124,20 @@ public class AdminChecklistTemplateService {
                 request.applicablePropertyTypes(),
                 request.active()
         );
+        if (versionOnReactivation != null) {
+            template.realignVersionOnReactivation(versionOnReactivation);
+        }
         adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_CHECKLIST_TEMPLATE, templateId, Map.of(
                 "beforeContent", previousContent, "afterContent", template.getContent(),
                 "beforeActive", previousActive, "afterActive", template.isActive()));
         return AdminChecklistItemTemplateResponse.from(template);
+    }
+
+    private int currentActiveMaxVersion() {
+        return checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc().stream()
+                .mapToInt(ChecklistItemTemplate::getVersion)
+                .max()
+                .orElse(1);
     }
 
     /**
