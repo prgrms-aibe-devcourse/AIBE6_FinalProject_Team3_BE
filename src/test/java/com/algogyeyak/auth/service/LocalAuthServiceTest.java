@@ -339,6 +339,11 @@ class LocalAuthServiceTest {
         // access token을 무효화할 수 있도록 passwordChangedAt이 찍혀야 한다(비밀번호 재설정
         // 경로만 찍고 이 경로를 빠뜨리면, 탈취된 이전 access token이 계속 유효하게 남는다).
         assertNotNull(user.getPasswordChangedAt());
+        // 회귀 테스트 - JWT의 iat(NumericDate)는 초 단위 정수라 나노초가 항상 0인데,
+        // passwordChangedAt에 나노초까지 있는 값을 그대로 저장하면 같은 초 안에서 발급된 정상
+        // 토큰이 "변경 이전"으로 잘못 비교돼 거부될 수 있다(JwtAuthenticationFilter 참고) -
+        // 저장 시점에 초 단위로 truncate되어야 한다.
+        assertEquals(0, user.getPasswordChangedAt().getNano());
     }
 
     @Test

@@ -16,6 +16,7 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 
 // @DynamicUpdate: 기본값(정적 UPDATE, 매핑된 모든 컬럼을 포함)이면 한 트랜잭션이 필드 하나만
 // 바꿔도 그 시점 스냅샷의 나머지 모든 컬럼 값을 그대로 다시 써넣는다 - 동시에 다른 트랜잭션이
@@ -109,7 +110,13 @@ public class User {
     // token이 계속 유효한 채로 남는 비대칭이 생긴다.
     public void updatePasswordHash(String passwordHash) {
         this.passwordHash = passwordHash;
-        this.passwordChangedAt = LocalDateTime.now();
+        // JWT의 iat(NumericDate)는 스펙상 초 단위 정수라 JwtAuthenticationFilter가 비교할 때 보는
+        // issuedAt은 항상 나노초가 0이다 - 여기서 나노초까지 있는 LocalDateTime.now()를 그대로 쓰면,
+        // 예를 들어 비밀번호 변경이 12:00:00.800에 일어나고 바로 그 초(12:00:00.xxx)에 로그인해
+        // 새로 발급된 토큰의 iat가 12:00:00(나노초 0)으로 비교되어, 실제로는 변경 "이후"에 발급된
+        // 정상 토큰인데도 이전으로 오판돼 거부(401)되는 경우가 생긴다. 초 단위로 truncate해 양쪽의
+        // 정밀도를 맞춘다.
+        this.passwordChangedAt = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
     }
 
     // 개발용 admin 시드 계정(AdminAccountSeeder)에서만 사용한다. 일반 가입 경로(createOAuthUser/
