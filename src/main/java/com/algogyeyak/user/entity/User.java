@@ -48,14 +48,6 @@ public class User {
     @Column(name = "profile_image_url")
     private String profileImageUrl;
 
-    // 로컬 가입: EmailVerificationService로 이메일 소유권을 확인한 뒤에만 signup()이 호출되므로 항상
-    // true로 생성된다(LocalAuthService.signup 참고). 소셜 가입: 검증된 이메일(provider가 이미 소유권을
-    // 확인해준 경우)만 email 필드 자체에 채워지므로(CustomOAuth2UserService.createUser 참고) 마찬가지로
-    // 항상 true. 즉 현재 가입 경로 중 false로 시작하는 경우는 없지만, 그 사실 자체가 이 필드로 나중에
-    // 재확인 정책(예: 특정 기능 접근 제한)이 추가될 때를 대비한 방어적 기본값이다.
-    @Column(name = "email_verified", nullable = false)
-    private boolean emailVerified;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private UserStatus status;
@@ -92,24 +84,12 @@ public class User {
         this.role = role;
     }
 
-    // email이 채워져 있다면 CustomOAuth2UserService가 이미 provider의 이메일 검증(isEmailVerified())을
-    // 거친 뒤에만 넘겨준 값이므로(검증 안 된 이메일은 null로 넘어옴) emailVerified=true로 시작한다.
     public static User createOAuthUser(String email, String nickname, String profileImageUrl) {
-        User user = new User(email, null, nickname, profileImageUrl, Role.USER);
-        user.emailVerified = true;
-        return user;
+        return new User(email, null, nickname, profileImageUrl, Role.USER);
     }
 
-    // emailVerified는 기본값(false)으로 생성한다 - LocalAuthService.signup()이 EmailVerificationService로
-    // 이메일 소유권 확인을 마친 뒤 markEmailVerified()를 호출해 true로 바꿔준다. AdminAccountSeeder처럼
-    // 이메일 인증 절차 없이 이 메서드를 호출하는 경우(dev-login 관리자 계정)는 markEmailVerified()를
-    // 부르지 않아 false로 남지만, 그 계정은 dev-login으로만 로그인해 이메일 인증 여부와 무관하다.
     public static User createLocalUser(String email, String passwordHash, String nickname) {
         return new User(email, passwordHash, nickname, null, Role.USER);
-    }
-
-    public void markEmailVerified() {
-        this.emailVerified = true;
     }
 
     public void updateNickname(@Size(min = 2, max = 20, message = "닉네임은 2~20자여야 합니다.") String nickname) {

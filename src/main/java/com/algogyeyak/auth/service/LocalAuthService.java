@@ -63,7 +63,6 @@ public class LocalAuthService {
         }
 
         User newUser = User.createLocalUser(normalizedEmail, passwordEncoder.encode(rawPassword), nickname);
-        newUser.markEmailVerified();
 
         try {
             // CustomOAuth2UserService.createUser / RefreshTokenService.insertNewRow와 동일한 이유로
