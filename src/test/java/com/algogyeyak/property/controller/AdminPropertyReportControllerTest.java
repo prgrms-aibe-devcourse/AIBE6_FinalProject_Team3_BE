@@ -399,8 +399,7 @@ class AdminPropertyReportControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.succeededIds[0]").value(REPORT_ID))
                 .andExpect(jsonPath("$.data.succeededIds.length()").value(1))
-                .andExpect(jsonPath("$.data.failures[0].id").value(999))
-                .andExpect(jsonPath("$.data.failures[0].errorCode").value("ADMIN_PROPERTY_REPORT_SELF_REVIEW"));
+                .andExpect(jsonPath("$.data.failures[0].id").value(999));
     }
 
     @Test

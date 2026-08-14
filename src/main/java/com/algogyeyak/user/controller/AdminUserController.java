@@ -56,11 +56,6 @@ public class AdminUserController {
         return ResponseEntity.ok(ApiResponse.success(adminUserService.list(pageable, condition)));
     }
 
-    @GetMapping("/{userId}")
-    public ResponseEntity<ApiResponse<AdminUserDetailResponse>> detail(@PathVariable Long userId) {
-        return ResponseEntity.ok(ApiResponse.success(adminUserService.getDetail(userId)));
-    }
-
     @PatchMapping("/{userId}/role")
     public ResponseEntity<ApiResponse<AdminUserDetailResponse>> updateRole(
             @AuthenticationPrincipal JwtUserPrincipal principal,

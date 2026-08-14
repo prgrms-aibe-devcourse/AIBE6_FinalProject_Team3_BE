@@ -44,11 +44,6 @@ public class AdminUserService {
         return PageResponse.from(page, AdminUserListItemResponse::from);
     }
 
-    @Transactional(readOnly = true)
-    public AdminUserDetailResponse getDetail(Long userId) {
-        return AdminUserDetailResponse.from(findUser(userId));
-    }
-
     /**
      * role 변경은 User.changeRole()로 엔티티 필드를 바꾸고 커밋 시점 dirty-checking에 맡기는 대신,
      * UserRepository.updateRoleIfNotWithdrawn()으로 조건부 UPDATE를 직접 실행한다 - 그래야 "이
@@ -127,7 +122,7 @@ public class AdminUserService {
                 updateStatus(actorId, userId, status);
                 succeededIds.add(userId);
             } catch (BusinessException e) {
-                failures.add(new AdminBulkActionResponse.Failure(userId, e.getErrorCode().name(), e.getMessage()));
+                failures.add(new AdminBulkActionResponse.Failure(userId, e.getMessage()));
             }
         }
         return new AdminBulkActionResponse(succeededIds, failures);
