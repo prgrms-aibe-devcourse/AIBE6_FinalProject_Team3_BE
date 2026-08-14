@@ -66,6 +66,10 @@ public class ChecklistItemTemplate {
     @Column(name = "item_type", nullable = false, length = 20)
     private ChecklistItemType itemType;
 
+    // MULTIPLE_CHOICE 타입 문항의 선택지를 콤마로 구분해 담는다(예: "가스보일러,기름보일러,전기보일러,지역난방").
+    // ChecklistItem.options와 동일한 형식 - 체크리스트 생성 시 그대로 스냅샷 복사된다.
+    private String options;
+
     @Column(name = "display_order", nullable = false)
     private int displayOrder;
 
@@ -93,6 +97,7 @@ public class ChecklistItemTemplate {
             String helperText,
             ChecklistImportance importance,
             ChecklistItemType itemType,
+            String options,
             int displayOrder,
             boolean active,
             String applicablePropertyTypes
@@ -105,6 +110,7 @@ public class ChecklistItemTemplate {
         this.helperText = helperText;
         this.importance = importance;
         this.itemType = itemType;
+        this.options = options;
         this.displayOrder = displayOrder;
         this.active = active;
         this.applicablePropertyTypes = applicablePropertyTypes;
@@ -132,6 +138,7 @@ public class ChecklistItemTemplate {
             String helperText,
             ChecklistImportance importance,
             ChecklistItemType itemType,
+            String options,
             ChecklistItemCode code,
             int displayOrder,
             String applicablePropertyTypes,
@@ -143,6 +150,7 @@ public class ChecklistItemTemplate {
         this.helperText = helperText;
         this.importance = importance;
         this.itemType = itemType;
+        this.options = options;
         this.code = code;
         this.displayOrder = displayOrder;
         this.applicablePropertyTypes = applicablePropertyTypes;

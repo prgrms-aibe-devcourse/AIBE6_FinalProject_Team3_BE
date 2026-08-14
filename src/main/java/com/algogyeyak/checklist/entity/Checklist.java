@@ -107,6 +107,7 @@ public class Checklist {
                     .helperText(template.getHelperText())
                     .importance(template.getImportance())
                     .itemType(template.getItemType())
+                    .options(template.getOptions())
                     .code(template.getCode())
                     .displayOrder(template.getDisplayOrder())
                     .build());

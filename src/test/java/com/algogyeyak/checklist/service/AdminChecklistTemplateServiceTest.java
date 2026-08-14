@@ -102,7 +102,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 30, null
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 30, null
                 )
         );
 
@@ -126,7 +126,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 30, null
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 30, null
                 )
         );
 
@@ -145,7 +145,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, null
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, null
                 )
         );
 
@@ -162,7 +162,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,TYPO"
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, "OFFICETEL,TYPO"
                 )
         ))
                 .isInstanceOf(BusinessException.class)
@@ -185,7 +185,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,"
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, "OFFICETEL,"
                 )
         );
 
@@ -203,13 +203,32 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, " , "
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, " , "
                 )
         ))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
         verifyNoAuditLog();
+    }
+
+    @Test
+    @DisplayName("MULTIPLE_CHOICE 문항을 options와 함께 생성할 수 있다")
+    void createSavesMultipleChoiceOptions() {
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
+                ACTOR_ID,
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.INDOOR, "보일러 종류가 무엇인가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.MULTIPLE_CHOICE,
+                        "가스보일러,기름보일러,전기보일러,지역난방", null, 1, null
+                )
+        );
+
+        assertThat(result.options()).isEqualTo("가스보일러,기름보일러,전기보일러,지역난방");
     }
 
     @Test
@@ -227,7 +246,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", "안내", null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, null, false
                 )
         );
 
@@ -250,7 +269,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, "TYPO", true
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, "TYPO", true
                 )
         ))
                 .isInstanceOf(BusinessException.class)
@@ -269,7 +288,7 @@ class AdminChecklistTemplateServiceTest {
                 999L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.AREA, "내용", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, null, true
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, null, true
                 )
         ))
                 .isInstanceOf(BusinessException.class)
@@ -285,7 +304,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null,
                         ChecklistItemCode.TRUST_REGISTRATION, 1, null
                 )
         ))
@@ -305,7 +324,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (중복)", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, null,
                         ChecklistItemCode.TRUST_REGISTRATION, 2, null
                 )
         ))
@@ -328,7 +347,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (문구 수정)", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, null,
                         ChecklistItemCode.TRUST_REGISTRATION, 1, null, true
                 )
         );
@@ -350,7 +369,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, null,
                         ChecklistItemCode.TRUST_REGISTRATION, 1, null, true
                 )
         ))
@@ -424,7 +443,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, null, false
                 )
         ))
                 .isInstanceOf(BusinessException.class)
@@ -447,7 +466,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, null, false
                 )
         );
 

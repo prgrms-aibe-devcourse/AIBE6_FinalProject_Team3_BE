@@ -66,6 +66,7 @@ class ChecklistItemTemplateTest {
                 "쉬운 설명",
                 ChecklistImportance.REQUIRED,
                 ChecklistItemType.YES_NO,
+                null,
                 ChecklistItemCode.TRUST_REGISTRATION,
                 5,
                 "OFFICETEL",
@@ -83,5 +84,27 @@ class ChecklistItemTemplateTest {
         assertThat(template.getDisplayOrder()).isEqualTo(5);
         assertThat(template.getApplicablePropertyTypes()).isEqualTo("OFFICETEL");
         assertThat(template.isActive()).isFalse();
+    }
+
+    @Test
+    @DisplayName("update()는 options도 함께 바꾼다")
+    void updateChangesOptions() {
+        ChecklistItemTemplate template = baseBuilder().build();
+
+        template.update(
+                ChecklistCategory.INDOOR,
+                "보일러 종류가 무엇인가요?",
+                null,
+                null,
+                ChecklistImportance.GENERAL,
+                ChecklistItemType.MULTIPLE_CHOICE,
+                "가스보일러,기름보일러,전기보일러,지역난방",
+                null,
+                1,
+                null,
+                true
+        );
+
+        assertThat(template.getOptions()).isEqualTo("가스보일러,기름보일러,전기보일러,지역난방");
     }
 }
