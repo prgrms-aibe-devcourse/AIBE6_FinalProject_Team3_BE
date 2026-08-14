@@ -34,6 +34,16 @@ public enum S3ImagePurpose {
             Set.of("image/jpeg", "image/png"),
             10 * 1024 * 1024,
             false
+    ),
+    // 체크리스트 문항 예시 이미지(누수/콘센트/차단기 등). 지금은 관리자 업로드 화면 없이 콘솔에서
+    // 직접 올린 파일을 시더가 key로만 참조하지만(ChecklistTemplateSeeder), presign 업로드 API를
+    // 나중에 열어도 같은 purpose를 그대로 재사용할 수 있도록 PROFILE과 동일한 정책으로 맞춘다.
+    CHECKLIST_TEMPLATE(
+            "checklist-template-images/",
+            Set.of("jpg", "jpeg", "png"),
+            Set.of("image/jpeg", "image/png"),
+            5 * 1024 * 1024,
+            true
     );
 
     // key 네임스페이스 prefix도 이 enum에 모은다(2026-08-12) - S3PresignService가 confirm/download

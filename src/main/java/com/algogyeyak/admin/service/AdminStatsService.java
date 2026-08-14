@@ -8,7 +8,6 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.entity.PropertyReportReason;
 import com.algogyeyak.property.entity.PropertyReportStatus;
-import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.user.repository.UserRepository;
@@ -66,12 +65,15 @@ public class AdminStatsService {
 
     // 요약 카드 3개 전부 "선택한 기간 동안 발생한" 건수다(예: 총 회원수 → 기간 내 신규 가입자 수) -
     // 상단 요약이 아래 추이 차트와 다른 기준(전체 누적)을 쓰면 같은 화면에서 숫자가 서로 안 맞아 보인다.
+    // newProperties는 특히 trends().propertyRegistrations와 같은 기준(status 무관, 등록 "발생" 자체)을
+    // 써야 한다 - 예전엔 여기만 ACTIVE로 필터링해서, 기간 내 등록 후 삭제된 매물이 있으면 추이
+    // 차트의 합계보다 이 카드가 더 작게 나와 같은 화면에서 숫자가 어긋났다.
     private AdminStatsSummaryResponse summary(LocalDate start, LocalDate end) {
         LocalDateTime rangeStart = start.atStartOfDay();
         LocalDateTime rangeEnd = end.plusDays(1).atStartOfDay();
         return new AdminStatsSummaryResponse(
                 userRepository.countByCreatedAtBetween(rangeStart, rangeEnd),
-                propertyRepository.countByStatusAndCreatedAtBetween(PropertyStatus.ACTIVE, rangeStart, rangeEnd),
+                propertyRepository.countByCreatedAtBetween(rangeStart, rangeEnd),
                 propertyReportRepository.countByStatusAndCreatedAtBetween(PropertyReportStatus.RECEIVED, rangeStart, rangeEnd));
     }
 

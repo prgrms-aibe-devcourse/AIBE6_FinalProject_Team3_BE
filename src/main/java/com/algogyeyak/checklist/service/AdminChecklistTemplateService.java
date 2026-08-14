@@ -3,11 +3,15 @@ package com.algogyeyak.checklist.service;
 import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
+import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageCreateRequest;
+import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateUpdateRequest;
 import com.algogyeyak.checklist.entity.ChecklistItemCode;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
+import com.algogyeyak.checklist.entity.ChecklistItemTemplateImage;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
+import com.algogyeyak.checklist.repository.ChecklistItemTemplateImageRepository;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -42,6 +46,7 @@ public class AdminChecklistTemplateService {
     );
 
     private final ChecklistItemTemplateRepository checklistItemTemplateRepository;
+    private final ChecklistItemTemplateImageRepository checklistItemTemplateImageRepository;
     private final AdminAuditLogger adminAuditLogger;
 
     public List<AdminChecklistItemTemplateResponse> list() {
@@ -63,10 +68,7 @@ public class AdminChecklistTemplateService {
         // 비활성 문항 중에 활성 문항보다 높은 버전이 남아있을 수 있어(과거에 비활성화된 문항),
         // 전체가 아니라 "현재 활성 문항 집합" 기준으로만 최대 버전을 구한다 - 그래야 새 문항이
         // 지금 실제로 쓰이는 버전과 같은 값을 받는다.
-        int version = checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc().stream()
-                .mapToInt(ChecklistItemTemplate::getVersion)
-                .max()
-                .orElse(1);
+        int version = currentActiveMaxVersion();
 
         ChecklistItemTemplate template = ChecklistItemTemplate.builder()
                 .version(version)
@@ -76,6 +78,7 @@ public class AdminChecklistTemplateService {
                 .helperText(request.helperText())
                 .importance(request.importance())
                 .itemType(request.itemType())
+                .options(request.options())
                 .code(request.code())
                 .displayOrder(request.displayOrder())
                 .active(true)
@@ -107,6 +110,14 @@ public class AdminChecklistTemplateService {
 
         String previousContent = template.getContent();
         boolean previousActive = template.isActive();
+        // 비활성 상태였던 문항이 다시 active=true가 되는 경우만 재정렬 대상이다 - update()는 비활성
+        // 동안 version을 안 건드리므로(그 자체는 의도된 동작, create()의 javadoc 참고), 과거에 다른
+        // 버전으로 비활성화됐던 문항을 그대로 재활성화하면 활성 집합의 버전이 뒤섞여
+        // ChecklistService.createChecklist()가 그 이후 임의의 버전을 새 유저 체크리스트에 찍게 된다.
+        // 재활성화 직전(이 문항 자신은 아직 비활성 상태)의 활성 집합 기준으로 버전을 다시 맞춘다.
+        boolean reactivating = !previousActive && request.active();
+        Integer versionOnReactivation = reactivating ? currentActiveMaxVersion() : null;
+
         template.update(
                 request.category(),
                 request.content(),
@@ -114,15 +125,26 @@ public class AdminChecklistTemplateService {
                 request.helperText(),
                 request.importance(),
                 request.itemType(),
+                request.options(),
                 request.code(),
                 request.displayOrder(),
                 request.applicablePropertyTypes(),
                 request.active()
         );
+        if (versionOnReactivation != null) {
+            template.realignVersionOnReactivation(versionOnReactivation);
+        }
         adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_CHECKLIST_TEMPLATE, templateId, Map.of(
                 "beforeContent", previousContent, "afterContent", template.getContent(),
                 "beforeActive", previousActive, "afterActive", template.isActive()));
         return AdminChecklistItemTemplateResponse.from(template);
+    }
+
+    private int currentActiveMaxVersion() {
+        return checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc().stream()
+                .mapToInt(ChecklistItemTemplate::getVersion)
+                .max()
+                .orElse(1);
     }
 
     /**
@@ -237,5 +259,57 @@ public class AdminChecklistTemplateService {
     private ChecklistItemTemplate findTemplate(Long templateId) {
         return checklistItemTemplateRepository.findById(templateId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+    }
+
+    // (2026-08-14) 예시 이미지 관리 - 관리자 화면에서 URL만 입력받는다(실제 파일 업로드는 S3 콘솔에서
+    // 직접 하는 것을 전제로 함, PropertyImageUploadController 같은 presign/confirm 업로드 흐름은
+    // 아직 없음). ChecklistItemTemplateImage는 스냅샷 복사되지 않고 항상 템플릿을 실시간 참조하므로
+    // (ChecklistItemTemplateImage 클래스 주석 참고), 여기서의 추가/삭제가 이미 생성된 유저
+    // 체크리스트에도 곧바로 반영된다 - 문항 텍스트/타입 수정과는 다른 특성이다.
+    public List<AdminChecklistItemTemplateImageResponse> listImages(Long templateId) {
+        findTemplate(templateId);
+        return checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(templateId).stream()
+                .map(AdminChecklistItemTemplateImageResponse::from)
+                .toList();
+    }
+
+    @Transactional
+    public AdminChecklistItemTemplateImageResponse addImage(
+            Long actorId, Long templateId, AdminChecklistItemTemplateImageCreateRequest request) {
+        ChecklistItemTemplate template = findTemplate(templateId);
+        // 신규 이미지는 항상 맨 뒤에 추가된다 - 관리자가 이미지 순서를 바꾸고 싶으면 삭제 후 재추가.
+        int nextDisplayOrder = checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(templateId).stream()
+                .mapToInt(ChecklistItemTemplateImage::getDisplayOrder)
+                .max()
+                .orElse(0) + 1;
+
+        ChecklistItemTemplateImage saved = checklistItemTemplateImageRepository.save(ChecklistItemTemplateImage.builder()
+                .template(template)
+                .imageUrl(request.imageUrl())
+                .displayOrder(nextDisplayOrder)
+                .build());
+        adminAuditLogger.log(actorId, AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE, saved.getId(),
+                Map.of("templateId", templateId, "imageUrl", saved.getImageUrl()));
+        return AdminChecklistItemTemplateImageResponse.from(saved);
+    }
+
+    @Transactional
+    public void deleteImage(Long actorId, Long templateId, Long imageId) {
+        ChecklistItemTemplateImage image = findImageOwnedByTemplate(templateId, imageId);
+        checklistItemTemplateImageRepository.delete(image);
+        adminAuditLogger.log(actorId, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE, imageId,
+                Map.of("templateId", templateId));
+    }
+
+    // templateId를 경로에서 받지만 실제 소속 확인은 image.getTemplate()로 하므로, 다른 문항 소유의
+    // imageId를 넣으면(예: URL의 templateId만 바꿔치기) "존재하지 않음"과 동일하게 처리해 다른
+    // 문항의 이미지 존재 여부/소속을 확인하는 용도로 악용되지 않게 한다.
+    private ChecklistItemTemplateImage findImageOwnedByTemplate(Long templateId, Long imageId) {
+        ChecklistItemTemplateImage image = checklistItemTemplateImageRepository.findById(imageId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND));
+        if (!image.getTemplate().getId().equals(templateId)) {
+            throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND);
+        }
+        return image;
     }
 }

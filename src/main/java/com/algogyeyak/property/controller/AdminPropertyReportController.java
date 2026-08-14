@@ -78,8 +78,14 @@ public class AdminPropertyReportController {
     ) {
         AdminBulkActionResponse result = adminPropertyReportService.bulkReview(
                 principal.userId(), request.reportIds(), request.status(), request.memo());
-        AdminActionLog.record(principal.userId(), "BULK_REVIEW_PROPERTY_REPORT", "reportIds", request.reportIds(),
-                "newStatus", request.status());
+        // 일괄 처리는 항목별로 성공/실패가 갈릴 수 있어(AdminBulkActionResponse javadoc 참고),
+        // 요청받은 id 전체가 아니라 실제로 성공한 id만 기록한다 - 안 그러면 배치가 전부 실패해도
+        // (예: 이미 처리됐거나 본인이 신고한 건만 골라 보낸 경우) 이 관측용 로그에는 "처리함"으로
+        // 남아 실제 변경이 없었는데도 있었던 것처럼 보인다.
+        if (!result.succeededIds().isEmpty()) {
+            AdminActionLog.record(principal.userId(), "BULK_REVIEW_PROPERTY_REPORT", "reportIds", result.succeededIds(),
+                    "newStatus", request.status());
+        }
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 }
