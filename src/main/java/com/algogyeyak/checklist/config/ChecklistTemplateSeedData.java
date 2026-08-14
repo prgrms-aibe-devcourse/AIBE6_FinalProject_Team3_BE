@@ -65,7 +65,13 @@ public final class ChecklistTemplateSeedData {
         // 소음·환경 (3개)
         order = add(templates, ChecklistCategory.NOISE, "층간소음이 생활에 무리가 없는 수준인가요?", null,
                 ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order);
-        order = add(templates, ChecklistCategory.NOISE, "외부 소음(도로·상가 등)이 심하지 않나요?", null,
+        // (2026-08-14 갱신) 저층/고층에 따라 신경 써야 할 소음의 종류가 다르다는 실사용 피드백 반영 -
+        // "저층이 더 심하다/고층이 더 심하다"로 일반화할 수 없어(저층은 도로·행인 소음, 고층은
+        // 바람·실외기 소음처럼 종류 자체가 다름), 층수 판정 로직을 새로 만드는 대신 두 케이스를
+        // guideText에 모두 안내해 방문자가 자신의 상황에 맞게 확인하도록 한다.
+        order = add(templates, ChecklistCategory.NOISE, "외부 소음(도로·상가 등)이 심하지 않나요?",
+                "저층이면 도로·차량·행인 소음이, 고층이면 바람 소리나 실외기 소음이 더 신경 쓰일 수 있어요. "
+                        + "창문을 닫은 상태와 연 상태 둘 다 확인해보세요.",
                 ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order);
         order = add(templates, ChecklistCategory.NOISE, "실내에 불쾌한 냄새가 없나요?", null,
                 ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order);

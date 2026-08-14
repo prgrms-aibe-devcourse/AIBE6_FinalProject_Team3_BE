@@ -91,6 +91,17 @@ class ChecklistTemplateSeedDataTest {
     }
 
     @Test
+    @DisplayName("(2026-08-14 갱신) 외부 소음 문항은 저층/고층 케이스를 구분한 guideText를 갖는다")
+    void outdoorNoiseItemHasFloorAwareGuideText() {
+        ChecklistItemTemplate outdoorNoise = templates.stream()
+                .filter(t -> t.getContent().equals("외부 소음(도로·상가 등)이 심하지 않나요?"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("외부 소음 문항을 찾을 수 없음"));
+
+        assertThat(outdoorNoise.getGuideText()).contains("저층").contains("고층");
+    }
+
+    @Test
     @DisplayName("(2026-08-14 신규) 방범창 문항은 연립다세대·단독다가구에만 적용된다")
     void securityWindowBarsItemOnlyAppliesToNonOfficetel() {
         ChecklistItemTemplate securityBars = templates.stream()
