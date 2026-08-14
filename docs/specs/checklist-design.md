@@ -118,7 +118,7 @@
 - **예시 이미지 스키마 신규 도입** — `checklist_item_template_images` 테이블(`ChecklistItemTemplateImage`, `template_id` FK)을 신설. `ChecklistItem`에도 원본 템플릿을 가리키는 `template` FK(nullable)를 추가해, 문항 조회 시 `item.getTemplate().getImages()`로 이미지를 가져옴. **guideText/helperText와 달리 스냅샷 복사하지 않고 항상 템플릿을 실시간 참조** — 이미지는 문항 내용처럼 시점 고정이 필요한 콘텐츠가 아니라(현재 AI 생성 이미지를 추후 실제 사진으로 교체할 예정), 관리자가 이미지를 교체하면 이미 만들어진 체크리스트에도 자동 반영되는 편이 낫다고 판단.
   - 이미지는 S3(`checklist-template-images/` prefix, 폴더 구분 없이 파일명으로만 구분)에 콘솔로 직접 업로드하고, `S3ImagePurpose.CHECKLIST_TEMPLATE`(신규, 프로필/매물 이미지와 동일한 public 정책)를 통해 `S3PresignService.generateDownloadUrl()`로 URL을 생성 — 프로필/매물 이미지가 이미 쓰던 인프라를 그대로 재사용.
   - 문항 content ↔ 이미지 key 매핑은 `ChecklistTemplateSeeder`에 데이터로 둠(`application.yml` 등 설정 파일이 아니라 코드) — 환경별로 달라지는 설정값이 아니라 `ChecklistTemplateSeedData`의 문항 내용과 같은 성격의 시드 데이터라고 판단.
-  - 관리자 페이지에 이미지 관리 API(업로드/삭제)는 아직 없음 — 지금은 시더 하드코딩으로 1차 반영하고, 추후 "관리자 페이지 확장" 작업 때 API로 옮길 예정(아래 "남은 이슈" 참고).
+  - ~~관리자 페이지에 이미지 관리 API(업로드/삭제)는 아직 없음~~ — ✅ **(2026-08-14 오후 해결)** `AdminChecklistTemplateController`에 이미지 목록조회(`GET`)/추가(`POST`)/삭제(`DELETE`) 3개 엔드포인트를 추가함. 파일 업로드 자체는 아직 지원하지 않고(S3 콘솔에 직접 올린 뒤) URL만 입력받는 방식 — presign/confirm 업로드 흐름은 이번 범위 밖. 신규 이미지는 항상 표시순서 맨 뒤에 추가되고, 순서를 바꾸려면 삭제 후 재추가해야 함(별도 재정렬 API 없음).
 - **`GET /checklists` 응답에 `title`(매물 제목) 필드 추가** — 위 "요구사항에 없던 추가 구현" 절 참고.
 
 ## 해결 내역 (이전 "확인 필요" 8개 항목)
@@ -148,7 +148,7 @@
 ## 남은 이슈 / 확인 필요
 
 1. **거래유형별 문항 분기는 여전히 없음** — 이번엔 매물유형 필터만 추가했고, 거래유형(전세/월세)에 따른 분기는 다루지 않음. 문항을 다시 살펴봐도 전세/월세 중 하나에만 해당하는 항목은 없어 지금 당장 필요하진 않다고 판단 — 필요성이 확인되면 동일한 필터 메커니즘(`applicablePropertyTypes`와 유사한 방식)으로 확장 가능
-2. **(2026-08-14 신규) 예시 이미지 관리자 API 없음** — 지금은 `ChecklistTemplateSeeder`에 문항 content ↔ S3 key 매핑을 하드코딩해두고 앱 최초 기동 시 한 번만 반영하는 구조. 이미지를 교체/추가하려면 코드 수정 + 재배포가 필요함(문항 텍스트/타입은 이미 관리자 CRUD로 재배포 없이 가능한 것과 대조적). 관리자 페이지 확장 작업(템플릿 버전 관리와 같은 묶음) 때 이미지 목록조회/추가/삭제 API를 추가할 예정 — 그 전까지는 스키마(`ChecklistItemTemplateImage`, `S3ImagePurpose.CHECKLIST_TEMPLATE`)만 준비된 상태.
+2. ~~**(2026-08-14 신규) 예시 이미지 관리자 API 없음** — 지금은 `ChecklistTemplateSeeder`에 문항 content ↔ S3 key 매핑을 하드코딩해두고 앱 최초 기동 시 한 번만 반영하는 구조. 이미지를 교체/추가하려면 코드 수정 + 재배포가 필요함.~~ — ✅ **(2026-08-14 오후 해결)** `AdminChecklistTemplateController`에 이미지 목록조회/추가/삭제 API 3개를 추가해, 이제 재배포 없이 이미지 추가/삭제가 가능함(문항 텍스트/타입과 동일한 수준으로 맞춰짐). 다만 앱 최초 기동 시 시더가 반영하는 초기 4개 문항(누수/콘센트/차단기/화재감지기)의 이미지는 여전히 `ChecklistTemplateSeeder` 하드코딩 그대로이고, 파일 업로드(presign/confirm) 자체는 지원하지 않아 URL은 S3 콘솔에서 직접 올린 뒤 API에 붙여넣어야 함.
 
 ## 전수조사 결과 (2026-08-12)
 
