@@ -10,13 +10,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 임장 체크리스트 템플릿(버전 2) 데이터. 기획서/요구사항 명세서 기준 24개 문항(매물유형별 1개 변형 적용 시), 5개 카테고리.
- * 매물유형별 분기는 템플릿 전체를 나누지 않고, 일부 문항만 {@link ChecklistItemTemplate#isApplicableTo}로 얇게 필터링한다
- * (v1 대비 변경점: 보안·안전의 "공동현관 잠금장치"를 매물유형별 변형 2개로 분리, 서류·행정에 "관리비 확인" 신규 추가).
+ * 임장 체크리스트 템플릿(버전 3) 데이터. 매물유형별 분기는 템플릿 전체를 나누지 않고, 일부 문항만
+ * {@link ChecklistItemTemplate#isApplicableTo}로 얇게 필터링한다
+ * (v2 대비 변경점 - 2026-08-14, 실사용 피드백 반영: 단창/이중창·누전·차단기·보일러종류·냉난방방식
+ * 5개 신규 추가 + 방범창(연립다세대·단독다가구 전용) 신규 추가. 매물유형별 적용 문항 수 상한이
+ * 24개→30개로 늘어남 - ChecklistTemplateSeedDataTest 참고).
  */
 public final class ChecklistTemplateSeedData {
 
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
 
     private ChecklistTemplateSeedData() {
     }
@@ -36,6 +38,29 @@ public final class ChecklistTemplateSeedData {
                 ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order);
         order = add(templates, ChecklistCategory.INDOOR, "냉난방 시설은 정상 작동하나요?", null,
                 ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order);
+
+        // (2026-08-14 신규) 단창/이중창·누전·차단기·보일러종류·냉난방방식 - 실사용 피드백(더 구체적인
+        // 확인 항목 요청) 반영. 콘센트·배선(기존 항목)과 누전·차단기를 하나로 합치는 것도 고려했으나,
+        // 합치면 "콘센트는 정상인데 차단기만 문제"인 상황을 하나의 체크로 구분할 수 없게 되어(어느
+        // 부분이 문제인지 불명확), 항목 수가 늘어나더라도 각각 독립 항목으로 유지하기로 결정.
+        order = add(templates, ChecklistCategory.INDOOR, "창문이 이중창(두 겹 유리)인가요?",
+                "창문 옆면에서 유리가 몇 겹인지 보거나, 유리를 두드려보면 구분할 수 있어요. "
+                        + "이중창은 유리 사이 공간 때문에 소리가 더 둔탁하고, 겨울철에 손을 대보면 단창보다 덜 차가워요.",
+                ChecklistImportance.GENERAL, ChecklistItemType.YES_NO, null, order);
+        order = add(templates, ChecklistCategory.INDOOR, "콘센트·전기 배선에 누전 위험이 없나요?",
+                "콘센트나 스위치를 만졌을 때 찌릿한 느낌이 있는지, 차단기함의 '테스트' 버튼을 눌렀을 때 정상적으로 내려가는지 확인하세요.",
+                "누전은 전기가 원래 흘러야 할 길이 아닌 곳으로 새는 걸 말해요. 눈으로 바로 보이진 않지만, "
+                        + "콘센트를 만졌을 때 찌릿하거나 차단기가 자주 내려간다면 의심해볼 수 있어요.",
+                ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order);
+        order = add(templates, ChecklistCategory.INDOOR, "차단기함 상태를 확인했나요?",
+                "현관 신발장 근처에서 차단기함을 찾아 스위치가 모두 위쪽(정상)에 있는지 확인하세요.",
+                ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order);
+        order = addWithOptions(templates, ChecklistCategory.INDOOR, "보일러 종류가 무엇인가요?", null,
+                ChecklistImportance.GENERAL, "가스보일러,기름보일러,전기보일러,지역난방", order);
+        order = addWithOptions(templates, ChecklistCategory.INDOOR, "냉난방 방식이 무엇인가요?",
+                "중앙난방은 건물 전체가 같이 켜지고 꺼지는 방식이라 개별 조절이 안 되고 운영 시간이 정해져 있을 수 있어요. "
+                        + "개별난방은 세대별로 자유롭게 조절할 수 있어요.",
+                ChecklistImportance.GENERAL, "중앙난방,개별난방,지역난방", order);
 
         // 소음·환경 (3개)
         order = add(templates, ChecklistCategory.NOISE, "층간소음이 생활에 무리가 없는 수준인가요?", null,
@@ -58,6 +83,10 @@ public final class ChecklistTemplateSeedData {
                 ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order);
         order = add(templates, ChecklistCategory.SAFETY, "소화기·화재감지기가 비치되어 있나요?", null,
                 ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order);
+        // (2026-08-14 신규) 방범창은 저층 주택에서 더 의미 있는 항목이라 오피스텔은 제외하고
+        // 연립다세대·단독다가구에만 노출한다.
+        order = add(templates, ChecklistCategory.SAFETY, "방범창이 설치되어 있고 정상 작동하나요?", null,
+                ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, order, "MULTI_FAMILY,DETACHED_HOUSE");
 
         // 서류·행정 (9개) - 요구사항 명세서 기준 8개 + 관리비 확인(신규, 요구사항 명세서 반영 필요)
         // REQUIRED 6개 문항은 guideText(실무 안내) 외에 helperText(부동산 지식 없는 사용자를 위한 풀어쓴 설명)도 함께 갖는다.
@@ -133,6 +162,30 @@ public final class ChecklistTemplateSeedData {
             int displayOrder
     ) {
         return add(templates, category, content, guideText, null, importance, itemType, code, displayOrder, null);
+    }
+
+    // MULTIPLE_CHOICE 타입 문항의 options까지 지정하는 오버로드.
+    private static int addWithOptions(
+            List<ChecklistItemTemplate> templates,
+            ChecklistCategory category,
+            String content,
+            String guideText,
+            ChecklistImportance importance,
+            String options,
+            int displayOrder
+    ) {
+        templates.add(ChecklistItemTemplate.builder()
+                .version(VERSION)
+                .category(category)
+                .content(content)
+                .guideText(guideText)
+                .importance(importance)
+                .itemType(ChecklistItemType.MULTIPLE_CHOICE)
+                .options(options)
+                .displayOrder(displayOrder)
+                .active(true)
+                .build());
+        return displayOrder + 1;
     }
 
     // helperText(부동산 지식 없는 사용자를 위한 풀어쓴 설명)까지 지정하는 오버로드.
