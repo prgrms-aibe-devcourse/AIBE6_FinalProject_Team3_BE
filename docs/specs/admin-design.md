@@ -30,7 +30,7 @@
 `Role`은 `USER`/`ADMIN` 2가지뿐이고(`user.enums.Role`), 일반 가입 경로(`createLocalUser`/`createOAuthUser`)는 항상 `Role.USER`로 생성됩니다. `Role.ADMIN`을 얻는 경로는 코드상 정확히 2가지입니다.
 
 1. **`AdminAccountSeeder`(앱 기동 시)** — `app.dev-login.enabled`가 켜져 있을 때만 동작. `app.dev-login.email`에 계정이 아직 없으면 `User.createLocalUser(...).grantAdminRole()`로 새 계정을 만들어 시딩합니다. 이미 그 이메일로 계정이 있으면 **어떤 이유로든 무조건 건드리지 않고 건너뜁니다**(과거엔 기존 계정을 조용히 ADMIN으로 승격시키는 "healing" 로직이 있었으나 보안상 제거됨 — `auth-design.md` 참고).
-2. **`AdminUserService.updateRole()`(관리자 페이지)** — 이미 `ADMIN`인 다른 관리자가 `PATCH /admin/users/{userId}/role`로 대상 유저의 `role`을 `ADMIN`으로 바꿔줄 수 있습니다(`User.changeRole()`). 이쪽은 `ADMIN→USER` 강등도 허용합니다.
+2. **`AdminUserService.updateRole()`(관리자 페이지)** — 이미 `ADMIN`인 다른 관리자가 `PATCH /admin/users/{userId}/role`로 대상 유저의 `role`을 `ADMIN`으로 바꿔줄 수 있습니다(**2026-08-14부터** `UserRepository.updateRoleIfNotWithdrawn()` 조건부 UPDATE — 이전엔 `User.changeRole()`이 담당했으나 아래 "전수조사 결과"의 TOCTOU 이슈로 교체됨). 이쪽은 `ADMIN→USER` 강등도 허용합니다.
 
 즉 "스스로 가입 시점에 ADMIN이 되는 방법"은 1번(개발용 시더) 하나뿐이고, 그 이후의 모든 승격/강등은 2번(이미 ADMIN인 사람이 관리자 페이지에서 부여)을 거칩니다.
 
@@ -52,7 +52,7 @@
 |---|---|---|
 | 유저 관리: 조회+검색 | 이메일/닉네임/권한/상태 필터 | ✅ `GET /admin/users` — email/nickname 부분일치, role/status 정확매칭, 페이지네이션(`Pageable`, 정렬 필드 화이트리스트 `createdAt`/`nickname`/`email`) |
 | 유저 관리: 상세 | — | ✅ `GET /admin/users/{id}` |
-| 유저 관리: 권한 변경 | USER↔ADMIN | ✅ `PATCH /admin/users/{id}/role` — 자기 자신 대상 차단(컨트롤러), 마지막 활성 관리자 강등 차단(`rejectIfLastActiveAdmin`, 2026-08-10부터 `PESSIMISTIC_WRITE`로 원자화), 탈퇴 유저 대상 차단(`User.changeRole`) |
+| 유저 관리: 권한 변경 | USER↔ADMIN | ✅ `PATCH /admin/users/{id}/role` — 자기 자신 대상 차단(컨트롤러), 마지막 활성 관리자 강등 차단(`rejectIfLastActiveAdmin`, 2026-08-10부터 `PESSIMISTIC_WRITE`로 원자화), 탈퇴 유저 대상 차단(**2026-08-14부터** `updateRoleIfNotWithdrawn` 조건부 UPDATE — 아래 "전수조사 결과" 참고) |
 | 유저 관리: 정지/활성화 | — | ✅ `PATCH /admin/users/{id}/status` — ACTIVE/SUSPENDED만 허용(WITHDRAWN은 본인 탈퇴 전용이라 제외), 자기 자신/마지막 활성 관리자/탈퇴 유저 차단 |
 | 매물 신고 검토: 목록/상세 | status/reason 필터 | ✅ `GET /admin/property-reports`, `GET /admin/property-reports/{id}` — propertyId/reporterId가 순수 FK라 서비스가 배치 조회해 주소·신고자 닉네임 합성 |
 | 매물 신고 검토: 처리 | RECEIVED→RESOLVED/REJECTED | ✅ `PATCH /admin/property-reports/{id}/review` — RECEIVED 상태에서만 전이 가능, 신고자 본인이 검토자인 경우 차단(`ADMIN_PROPERTY_REPORT_SELF_REVIEW`) |
@@ -92,7 +92,7 @@
 | 신고 검토 셀프리뷰 방지 | ✅ 신고자 본인이 검토자인 경우 `ADMIN_PROPERTY_REPORT_SELF_REVIEW`(409) |
 | 감사로그(누가/언제/무엇) | ✅ 위 섹션 참고 — 저장은 완비, 조회 API는 없음 |
 | 통계 조회 기간 제한 | ✅ 최대 90일(`toDailyCounts`가 하루 단위로 응답 포인트를 채우는 구현 특성상의 임의 상한) |
-| 동시성(TOCTOU) | ⚠️ **의도적으로 감수 중인 3곳** — (1) 체크리스트 문항 `code` 활성 중복 검사(`validateCode`), (2) 마지막 활성 문항 삭제/비활성 방지(`validateNotDeactivatingLastActiveTemplate`), (3) 매물 신고 동시 처리(`review()` — 두 관리자가 같은 신고를 동시에 다른 결과로 처리하면 나중 커밋이 조용히 덮어씀). 전부 "관리자 전용 화면, 저빈도"라는 동일 판단 기준으로 코드 주석에 한계를 명시하고 유지 중 |
+| 동시성(TOCTOU) | ⚠️ **의도적으로 감수 중인 3곳** — (1) 체크리스트 문항 `code` 활성 중복 검사(`validateCode`), (2) 마지막 활성 문항 삭제/비활성 방지(`validateNotDeactivatingLastActiveTemplate`), (3) 매물 신고 동시 처리(`review()` — 두 관리자가 같은 신고를 동시에 다른 결과로 처리하면 나중 커밋이 조용히 덮어씀). 전부 "관리자 전용 화면, 저빈도"라는 동일 판단 기준으로 코드 주석에 한계를 명시하고 유지 중. **별개로**, 권한/상태 변경이 본인 탈퇴와 경쟁하는 TOCTOU가 있었고 **(2026-08-14)** 부분 해결됨 — 아래 "전수조사 결과" 버그/정확성 1번 참고 |
 
 ## 요구사항에 없던 추가 구현
 
@@ -114,7 +114,7 @@
 
 ### 버그/정확성
 
-1. 특별히 발견된 이슈 없음. `AdminStatsService`의 날짜 경계 처리(`rangeEnd = end.plusDays(1)`로 종료일 포함), `AdminUserService.rejectIfLastActiveAdmin`의 원자성(`PESSIMISTIC_WRITE`), `AdminPropertyReportService`의 배치 조회(N+1 없음 — `findAllById`로 한 번에 조회), `AdminChecklistTemplateService`의 `code`/`itemType` 짝 검증과 마지막 활성 문항 보호 로직을 코드 레벨로 직접 추적했고, 로직 결함은 찾지 못했다.
+1. 특별히 발견된 이슈 없음. `AdminStatsService`의 날짜 경계 처리(`rangeEnd = end.plusDays(1)`로 종료일 포함), `AdminUserService.rejectIfLastActiveAdmin`의 원자성(`PESSIMISTIC_WRITE`), `AdminPropertyReportService`의 배치 조회(N+1 없음 — `findAllById`로 한 번에 조회), `AdminChecklistTemplateService`의 `code`/`itemType` 짝 검증과 마지막 활성 문항 보호 로직을 코드 레벨로 직접 추적했고, 로직 결함은 찾지 못했다. **(2026-08-14 정정)** 이 조사는 놓쳤지만, `User.changeRole()`/`suspend()`/`activate()`의 "탈퇴한 사용자는 대상에서 제외" 가드가 해당 트랜잭션이 대상을 읽은 시점의 메모리 스냅샷을 기준으로 판단해 사용자 본인의 탈퇴 커밋과 경쟁하면 TOCTOU로 우회될 수 있는 버그가 실제로 있었다(`user-design.md` 전수조사 결과 "버그/정확성" 2번 및 팀 테스트 `UserWithdrawFieldOverwriteIntegrationTest`가 이를 재현). `AdminUserService.updateRole()`/`updateStatus()`를 조건부 UPDATE(`UserRepository.updateRoleIfNotWithdrawn`/`updateStatusIfNotWithdrawn`, `WHERE status <> WITHDRAWN`)로 교체해 그 정확한 레이스(관리자가 먼저 읽고 탈퇴가 먼저 커밋된 뒤 관리자 쪽이 나중에 커밋)는 막았다. 다만 완전 봉쇄(정상적인 커밋 순서에서도 WITHDRAWN+ADMIN 조합 자체가 나올 수 없게 만드는 것, `User.withdraw()` 쪽 강제 재확인/고정)와 DB `CHECK` 제약까지는 적용하지 않았다 — 위 "동시성(TOCTOU)" 항목의 3곳과는 별개 이슈이며, 자세한 내용은 `user-design.md`를 참고.
 
 ### 보안
 
