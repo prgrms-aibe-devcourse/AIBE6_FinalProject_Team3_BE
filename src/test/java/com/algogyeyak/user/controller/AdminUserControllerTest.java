@@ -157,6 +157,7 @@ class AdminUserControllerTest {
     void 관리자_토큰으로_권한변경에_성공한다() throws Exception {
         User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+        when(userRepository.updateRoleIfNotWithdrawn(TARGET_ID, Role.ADMIN, UserStatus.WITHDRAWN)).thenReturn(1);
 
         mockMvc.perform(patch("/admin/users/{userId}/role", TARGET_ID)
                         .cookie(adminCookie())
@@ -226,6 +227,7 @@ class AdminUserControllerTest {
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
         when(userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE))
                 .thenReturn(List.of(target, otherAdmin));
+        when(userRepository.updateRoleIfNotWithdrawn(TARGET_ID, Role.USER, UserStatus.WITHDRAWN)).thenReturn(1);
 
         mockMvc.perform(patch("/admin/users/{userId}/role", TARGET_ID)
                         .cookie(adminCookie())
@@ -258,6 +260,7 @@ class AdminUserControllerTest {
     void 정지된_유저는_로그인_경로에서_거부되어야_하므로_상태변경_API가_SUSPENDED를_반영한다() throws Exception {
         User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+        when(userRepository.updateStatusIfNotWithdrawn(TARGET_ID, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
 
         mockMvc.perform(patch("/admin/users/{userId}/status", TARGET_ID)
                         .cookie(adminCookie())
@@ -274,6 +277,7 @@ class AdminUserControllerTest {
         User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
         target.suspend();
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+        when(userRepository.updateStatusIfNotWithdrawn(TARGET_ID, UserStatus.ACTIVE, UserStatus.WITHDRAWN)).thenReturn(1);
 
         mockMvc.perform(patch("/admin/users/{userId}/status", TARGET_ID)
                         .cookie(adminCookie())
@@ -413,6 +417,7 @@ class AdminUserControllerTest {
     void 일괄_상태변경에_성공한다() throws Exception {
         User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+        when(userRepository.updateStatusIfNotWithdrawn(TARGET_ID, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
 
         mockMvc.perform(patch("/admin/users/bulk-status")
                         .cookie(adminCookie())
@@ -423,8 +428,6 @@ class AdminUserControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.succeededIds[0]").value(TARGET_ID))
                 .andExpect(jsonPath("$.data.failures").isEmpty());
-        UserStatus after = target.getStatus();
-        org.junit.jupiter.api.Assertions.assertEquals(UserStatus.SUSPENDED, after);
     }
 
     // 목록에 자기 자신의 id가 섞여 있어도, 그 항목만 실패 목록에 담기고 나머지는 정상 처리돼야 한다.
@@ -432,6 +435,7 @@ class AdminUserControllerTest {
     void 일괄_상태변경에서_자기자신_id는_실패목록에만_담기고_나머지는_처리된다() throws Exception {
         User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+        when(userRepository.updateStatusIfNotWithdrawn(TARGET_ID, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
 
         mockMvc.perform(patch("/admin/users/bulk-status")
                         .cookie(adminCookie())
@@ -476,6 +480,7 @@ class AdminUserControllerTest {
     void 일괄_상태변경에서_중복된_id는_한_번만_처리된다() throws Exception {
         User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
         when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
+        when(userRepository.updateStatusIfNotWithdrawn(TARGET_ID, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
 
         mockMvc.perform(patch("/admin/users/bulk-status")
                         .cookie(adminCookie())

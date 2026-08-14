@@ -23,7 +23,7 @@ market-data/risk-analysis/contract-analysis/admin) + 공용(global) 코드 전�
 | 도메인 | 확실한 죽은 코드 | 특이사항 |
 |---|---|---|
 | auth | 4건 | |
-| user | 5건 | **실제 버그 1건과 연결**(WOLSE/MONTHLY_RENT — 원인은 frontend, 상세는 frontend 문서 참고) |
+| user | 5건 | **실제 버그 1건과 연결**(WOLSE/MONTHLY_RENT — 원인은 frontend, 상세는 frontend 문서 참고). **(2026-08-14 해결 확인)** frontend `app/mappers/user.ts`의 매핑 테이블이 `MONTHLY_RENT ↔ '월세'`로 정정됨 |
 | property | 4건 | |
 | checklist | 0건 | 가장 깨끗한 도메인 |
 | market-data/risk-analysis | 9건 | 가장 지저분한 도메인(enum 분기 다수가 현재 어댑터 구현상 도달 불가) |
@@ -54,8 +54,8 @@ market-data/risk-analysis/contract-analysis/admin) + 공용(global) 코드 전�
 4. **`UserSocialAccount.createdAt`** — `@CreatedDate`로 채워지지만 어디서도 안 읽음.
 5. **`UserPreference.createdAt`/`updatedAt`** — 마찬가지로 write-only.
 
-**⚠️ frontend와 연결된 실제 버그(backend 자체는 정상)**:
-백엔드 `TransactionType` enum은 `JEONSE, MONTHLY_RENT`로 올바르게 정의돼 있고 `UserService.java:342`가 `.name()`으로 그대로 직렬화한다. 그런데 frontend의 매핑 테이블이 `'WOLSE'` 키만 갖고 있어서, 월세 계정은 조회 시 값이 조용히 빠지고 저장 시 `"WOLSE"`(존재하지 않는 enum 상수)를 보내 Jackson 역직렬화가 실패할 가능성이 높다. **backend 쪽 수정은 불필요**(enum 자체는 맞음) — frontend 매핑 테이블만 고치면 된다. 상세는 frontend 문서의 "2. User" 항목 참고.
+**⚠️ frontend와 연결된 실제 버그(backend 자체는 정상)** — **✅ (2026-08-14 해결 확인)**:
+백엔드 `TransactionType` enum은 `JEONSE, MONTHLY_RENT`로 올바르게 정의돼 있고 `UserService.java:342`가 `.name()`으로 그대로 직렬화한다. 그런데 frontend의 매핑 테이블이 `'WOLSE'` 키만 갖고 있어서, 월세 계정은 조회 시 값이 조용히 빠지고 저장 시 `"WOLSE"`(존재하지 않는 enum 상수)를 보내 Jackson 역직렬화가 실패할 가능성이 높았다. **backend 쪽 수정은 불필요**(enum 자체는 맞음) — frontend 매핑 테이블만 고치면 되는 문제였다. 실제로 frontend `app/mappers/user.ts`의 `transactionTypeDtoToDomain`/`transactionTypeDomainToDto`가 `MONTHLY_RENT ↔ '월세'`로 정정되고 `types/api.ts`의 `UserTransactionTypeDto`도 `'JEONSE' | 'MONTHLY_RENT'`로 확인되어(코드 레벨로 직접 재확인함) 해결됐다. 상세는 frontend 문서의 "2. User" 항목 참고.
 
 ---
 

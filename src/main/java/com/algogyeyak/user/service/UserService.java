@@ -40,6 +40,7 @@ import java.util.regex.Pattern;
 public class UserService {
 
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
+    private static final String INACTIVE_USER_MESSAGE = "존재하지 않거나 탈퇴한 사용자입니다.";
 
     private final UserRepository userRepository;
     private final UserPreferenceRepository userPreferenceRepository;
@@ -239,7 +240,7 @@ public class UserService {
     // 상태에 맞는 안내 문구를 보여줄 수 있어야 하기 때문이다.
     private User getActiveUserOrThrow(Long userId) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, INACTIVE_USER_MESSAGE));
         if (user.isWithdrawn()) {
             throw new BusinessException(ErrorCode.USER_WITHDRAWN);
         }
@@ -278,7 +279,7 @@ public class UserService {
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status -> {
                 User managed = userRepository.findById(userId)
-                        .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+                        .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, INACTIVE_USER_MESSAGE));
                 managed.updateNickname(newNickname);
                 userRepository.saveAndFlush(managed);
             });

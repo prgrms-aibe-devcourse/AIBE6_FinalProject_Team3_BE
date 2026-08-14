@@ -49,6 +49,15 @@ public class AdminUserService {
         return AdminUserDetailResponse.from(findUser(userId));
     }
 
+    /**
+     * role 변경은 User.changeRole()로 엔티티 필드를 바꾸고 커밋 시점 dirty-checking에 맡기는 대신,
+     * UserRepository.updateRoleIfNotWithdrawn()으로 조건부 UPDATE를 직접 실행한다 - 그래야 "이
+     * 메서드가 대상을 읽은 시점엔 활성 상태였지만, 실제 UPDATE 시점엔 이미 본인 탈퇴가 커밋된"
+     * 레이스에서 그 탈퇴를 무시하고 role을 덮어쓰는 걸 막을 수 있다(UserRepository 참고). 영향받은
+     * row가 0건이면 원인은 "findUser()가 확인한 뒤 그 사이에 탈퇴함" 하나뿐이므로 안전하게 단정해
+     * 에러로 변환한다. user 엔티티의 role 필드 자체는 절대 건드리지 않는다 - 건드리면 이 엔티티가
+     * dirty로 남아 커밋 시점에 조건 없는 UPDATE가 한 번 더 나가 방금 막은 레이스가 되살아난다.
+     */
     @Transactional
     public AdminUserDetailResponse updateRole(Long actorId, Long userId, Role role) {
         User user = findUser(userId);
@@ -56,14 +65,20 @@ public class AdminUserService {
             rejectIfLastActiveAdmin(user);
         }
         Role previousRole = user.getRole();
-        user.changeRole(role);
+
+        int updated = userRepository.updateRoleIfNotWithdrawn(userId, role, UserStatus.WITHDRAWN);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_ROLE_TRANSITION, "탈퇴한 사용자는 권한을 변경할 수 없습니다.");
+        }
+
         adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_ROLE, userId,
                 Map.of("beforeRole", previousRole, "afterRole", role));
-        return AdminUserDetailResponse.from(user);
+        return AdminUserDetailResponse.from(user, role);
     }
 
-    // status는 컨트롤러 DTO 단계에서 이미 ACTIVE/SUSPENDED로 제한되어 있고, 탈퇴 유저에 대한 거부는
-    // User.suspend()/activate()가 던진다 - 여기서는 그 두 값 중 어느 쪽으로 갈지만 분기한다.
+    // status는 컨트롤러 DTO 단계에서 이미 ACTIVE/SUSPENDED로 제한되어 있다. 탈퇴 유저에 대한 거부는
+    // updateRole()과 동일한 이유로 조건부 UPDATE(updateStatusIfNotWithdrawn)의 영향받은 row 수로
+    // 판단한다 - User.suspend()/activate()를 더 이상 호출하지 않는다(이유는 updateRole() 참고).
     @Transactional
     public AdminUserDetailResponse updateStatus(Long actorId, Long userId, UserStatus status) {
         if (status != UserStatus.ACTIVE && status != UserStatus.SUSPENDED) {
@@ -74,13 +89,19 @@ public class AdminUserService {
         UserStatus previousStatus = user.getStatus();
         if (status == UserStatus.SUSPENDED) {
             rejectIfLastActiveAdmin(user);
-            user.suspend();
-        } else {
-            user.activate();
         }
+
+        int updated = userRepository.updateStatusIfNotWithdrawn(userId, status, UserStatus.WITHDRAWN);
+        if (updated == 0) {
+            String message = status == UserStatus.SUSPENDED
+                    ? "탈퇴한 사용자는 정지할 수 없습니다."
+                    : "탈퇴한 사용자는 활성화할 수 없습니다.";
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, message);
+        }
+
         adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_STATUS, userId,
                 Map.of("beforeStatus", previousStatus, "afterStatus", status));
-        return AdminUserDetailResponse.from(user);
+        return AdminUserDetailResponse.from(user, status);
     }
 
     /**
