@@ -45,6 +45,9 @@ public class PropertyRiskCheck {
     @Column(name = "checked_at", nullable = false)
     private LocalDateTime checkedAt;
 
+    @Version
+    private Long version;
+
     @Builder
     private PropertyRiskCheck(Property property, RiskSignalType signalType, RiskCheckStatus status,
                               RiskCheckReason reason, String policyVersion,

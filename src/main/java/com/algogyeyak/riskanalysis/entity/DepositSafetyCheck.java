@@ -62,6 +62,9 @@ public class DepositSafetyCheck {
     @Column(name = "calculated_at", nullable = false)
     private LocalDateTime calculatedAt;
 
+    @Version
+    private Long version;
+
     @Builder
     private DepositSafetyCheck(Property property, BigDecimal jeonseRatio, BigDecimal seniorDeposit,
                                BigDecimal maxClaimAmount, LocalDate referenceDate, String explanation,

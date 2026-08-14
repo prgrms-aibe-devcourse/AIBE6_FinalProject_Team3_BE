@@ -17,6 +17,7 @@ import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -173,7 +174,9 @@ class DepositSafetyCheckServiceTest {
         service.checkAndSave(property);
 
         verify(existing).overwrite(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
-        verify(depositSafetyCheckRepository, org.mockito.Mockito.never()).saveAndFlush(any());
+        // @Version 낙관적 락 충돌을 잡아내려면 트랜잭션 커밋 시점의 암묵적 flush에 맡기지 않고
+        // 명시적으로 saveAndFlush를 호출해야 한다 - updateCalculatedAbsorbingConflict() 참고.
+        verify(depositSafetyCheckRepository).saveAndFlush(existing);
     }
 
     @Test
@@ -198,6 +201,23 @@ class DepositSafetyCheckServiceTest {
 
         verify(winner).overwrite(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(depositSafetyCheckRepository, times(2)).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("이미 저장된 행을 덮어쓰다 낙관적 락 충돌(동시 갱신)이 나면 예외를 흡수하고 조용히 넘어간다")
+    void checkAndSaveAbsorbsOptimisticLockConflictOnExistingRow() {
+        setPolicy();
+        Property property = property(10L, TransactionType.MONTHLY_RENT, 10_000_000L);
+        DepositSafetyCheck existing = mock(DepositSafetyCheck.class);
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(existing));
+        when(depositSafetyCheckRepository.saveAndFlush(existing))
+                .thenThrow(new ObjectOptimisticLockingFailureException(DepositSafetyCheck.class, 10L));
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> service.checkAndSave(property))
+                .doesNotThrowAnyException();
+
+        verify(existing).overwrite(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(depositSafetyCheckRepository).saveAndFlush(existing);
     }
 
     private void verifyNoMarketLookup() {

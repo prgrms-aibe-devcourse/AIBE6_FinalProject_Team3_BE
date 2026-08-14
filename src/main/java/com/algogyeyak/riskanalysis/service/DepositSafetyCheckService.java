@@ -18,6 +18,7 @@ import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
 import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -200,8 +201,7 @@ public class DepositSafetyCheckService {
     private DepositSafetyCheck upsertUnavailable(Property property, BigDecimal seniorDeposit, BigDecimal maxClaimAmount, DepositSafetyCheckReason reason) {
         Optional<DepositSafetyCheck> existing = depositSafetyCheckRepository.findByPropertyId(property.getId());
         if (existing.isPresent()) {
-            existing.get().overwrite(null, seniorDeposit, maxClaimAmount, null, null, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
-            return existing.get();
+            return updateUnavailableAbsorbingConflict(property.getId(), seniorDeposit, maxClaimAmount, reason);
         }
 
         DepositSafetyCheck newCheck = DepositSafetyCheck.unavailable(property, seniorDeposit, maxClaimAmount, reason, policyConfig.getVersion());
@@ -218,7 +218,14 @@ public class DepositSafetyCheckService {
                     depositSafetyCheckRepository.findByPropertyId(property.getId())
                             .map(found -> {
                                 found.overwrite(null, seniorDeposit, maxClaimAmount, null, null, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
-                                depositSafetyCheckRepository.saveAndFlush(found);
+                                // 복구 재조회 자체도 세 번째 요청과 @Version 충돌할 수 있다 - 그마저도
+                                // 이미 유효한 값으로 반영된 상태이므로 흡수한다(updateUnavailableAbsorbingConflict/updateCalculatedAbsorbingConflict와
+                                // 동일 이유).
+                                try {
+                                    depositSafetyCheckRepository.saveAndFlush(found);
+                                } catch (ObjectOptimisticLockingFailureException ex) {
+                                    log.warn("DepositSafetyCheck 복구 중 동시 갱신 경쟁 감지 - 나중에 커밋된 값만 반영됨. propertyId={}", property.getId());
+                                }
                                 return found;
                             })
                             .orElse(null));
@@ -230,12 +237,38 @@ public class DepositSafetyCheckService {
         }
     }
 
+    // @Version 낙관적 락 충돌(동시 갱신 경쟁) 흡수 - 조회·수정·flush를 전부 REQUIRES_NEW 트랜잭션 안에서
+    // 끝낸다. 바깥 트랜잭션에서 읽은 엔티티를 여기서 mutate만 하고 별도 트랜잭션에서 flush하면, 바깥
+    // 세션은 그 엔티티가 이미 다른 세션에서 저장된 걸 몰라 여전히 dirty 상태로 남아있다가 다음 조회
+    // 시점의 auto-flush가 낡은 버전으로 다시 flush를 시도해 충돌한다(FakeListingSignalService의 동일
+    // 패턴에서 FakeListingSignalServiceConcurrencyTest로 실제 재현·확인함) - 그래서 재조회부터 다시
+    // REQUIRES_NEW 안에서 하는, insert 경쟁 복구와 동일한 패턴을 쓴다. 두 계산 다 유효한 결과라 데이터
+    // 손상이 아니므로(risk-analysis-design.md 전수조사 결과 코드 품질 2번), RiskRecalculationService의
+    // fail-safe 원칙과 동일하게 로그만 남기고 조용히 흡수한다. 이 요청이 경쟁에서 져도 이미 다른
+    // 트랜잭션이 유효한 값을 반영해뒀으므로, 그 현재 저장된 상태를 다시 읽어 반환한다(호출자에게
+    // "실제로 저장되지 않은 값"을 돌려주지 않기 위함) - 이 재조회도 REQUIRES_NEW로 해서 MySQL
+    // REPEATABLE READ 하의 스냅샷 문제를 피한다.
+    private DepositSafetyCheck updateUnavailableAbsorbingConflict(Long propertyId, BigDecimal seniorDeposit, BigDecimal maxClaimAmount, DepositSafetyCheckReason reason) {
+        try {
+            return requiresNewTransactionTemplate.execute(status ->
+                    depositSafetyCheckRepository.findByPropertyId(propertyId)
+                            .map(found -> {
+                                found.overwrite(null, seniorDeposit, maxClaimAmount, null, null, null, null, reason, policyConfig.getVersion(), DepositSafetyStatus.UNAVAILABLE);
+                                depositSafetyCheckRepository.saveAndFlush(found);
+                                return found;
+                            })
+                            .orElseThrow());
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("DepositSafetyCheck 동시 갱신 경쟁 감지 - 나중에 커밋된 값만 반영됨. propertyId={}", propertyId);
+            return requiresNewTransactionTemplate.execute(status -> depositSafetyCheckRepository.findByPropertyId(propertyId).orElseThrow());
+        }
+    }
+
     private DepositSafetyCheck upsertCalculated(Property property, BigDecimal ratio, BigDecimal seniorDeposit, BigDecimal maxClaimAmount,
                                                  LocalDate referenceDate, String explanation, Integer sampleCount, Integer radiusMeters) {
         Optional<DepositSafetyCheck> existing = depositSafetyCheckRepository.findByPropertyId(property.getId());
         if (existing.isPresent()) {
-            existing.get().overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, sampleCount, radiusMeters, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
-            return existing.get();
+            return updateCalculatedAbsorbingConflict(property.getId(), ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, sampleCount, radiusMeters);
         }
 
         DepositSafetyCheck newCheck = DepositSafetyCheck.calculated(property, ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, sampleCount, radiusMeters, policyConfig.getVersion());
@@ -248,7 +281,14 @@ public class DepositSafetyCheckService {
                     depositSafetyCheckRepository.findByPropertyId(property.getId())
                             .map(found -> {
                                 found.overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, sampleCount, radiusMeters, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
-                                depositSafetyCheckRepository.saveAndFlush(found);
+                                // 복구 재조회 자체도 세 번째 요청과 @Version 충돌할 수 있다 - 그마저도
+                                // 이미 유효한 값으로 반영된 상태이므로 흡수한다(updateUnavailableAbsorbingConflict/updateCalculatedAbsorbingConflict와
+                                // 동일 이유).
+                                try {
+                                    depositSafetyCheckRepository.saveAndFlush(found);
+                                } catch (ObjectOptimisticLockingFailureException ex) {
+                                    log.warn("DepositSafetyCheck 복구 중 동시 갱신 경쟁 감지 - 나중에 커밋된 값만 반영됨. propertyId={}", property.getId());
+                                }
                                 return found;
                             })
                             .orElse(null));
@@ -257,6 +297,24 @@ public class DepositSafetyCheckService {
                 throw e;
             }
             return winner;
+        }
+    }
+
+    // updateUnavailableAbsorbingConflict()와 동일한 이유·동일한 패턴.
+    private DepositSafetyCheck updateCalculatedAbsorbingConflict(Long propertyId, BigDecimal ratio, BigDecimal seniorDeposit, BigDecimal maxClaimAmount,
+                                                                   LocalDate referenceDate, String explanation, Integer sampleCount, Integer radiusMeters) {
+        try {
+            return requiresNewTransactionTemplate.execute(status ->
+                    depositSafetyCheckRepository.findByPropertyId(propertyId)
+                            .map(found -> {
+                                found.overwrite(ratio, seniorDeposit, maxClaimAmount, referenceDate, explanation, sampleCount, radiusMeters, null, policyConfig.getVersion(), DepositSafetyStatus.CALCULATED);
+                                depositSafetyCheckRepository.saveAndFlush(found);
+                                return found;
+                            })
+                            .orElseThrow());
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("DepositSafetyCheck 동시 갱신 경쟁 감지 - 나중에 커밋된 값만 반영됨. propertyId={}", propertyId);
+            return requiresNewTransactionTemplate.execute(status -> depositSafetyCheckRepository.findByPropertyId(propertyId).orElseThrow());
         }
     }
 }
