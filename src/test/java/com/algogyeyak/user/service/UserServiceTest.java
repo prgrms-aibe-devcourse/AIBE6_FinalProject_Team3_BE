@@ -3,14 +3,19 @@ package com.algogyeyak.user.service;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.dto.NicknameCheckResponse;
+import com.algogyeyak.user.dto.NicknamePolicy;
 import com.algogyeyak.user.dto.ProfileRegisterRequest;
 import com.algogyeyak.user.dto.ProfileUpdateRequest;
 import com.algogyeyak.user.dto.UserProfileResponse;
+import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.s3.service.S3PresignService;
+import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.TransactionType;
 import com.algogyeyak.user.repository.UserPreferenceRepository;
 import com.algogyeyak.user.repository.UserRepository;
+import com.algogyeyak.user.repository.UserSocialAccountRepository;
+import java.util.Collections;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -34,9 +39,13 @@ class UserServiceTest {
 
     private final UserRepository userRepository = mock(UserRepository.class);
     private final UserPreferenceRepository userPreferenceRepository = mock(UserPreferenceRepository.class);
+    private final UserSocialAccountRepository userSocialAccountRepository = mock(UserSocialAccountRepository.class);
+    private final ChecklistRepository checklistRepository = mock(ChecklistRepository.class);
+    private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final S3PresignService s3PresignService = mock(S3PresignService.class);
     private final UserService userService = new UserService(
-            userRepository, userPreferenceRepository, s3PresignService, mock(PlatformTransactionManager.class));
+            userRepository, userPreferenceRepository, userSocialAccountRepository, checklistRepository,
+            propertyRepository, s3PresignService, mock(PlatformTransactionManager.class));
 
     private User activeUser(Long id) {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
@@ -44,9 +53,8 @@ class UserServiceTest {
         return user;
     }
 
-    private ProfileRegisterRequest registerRequest(String nickname) {
+    private ProfileRegisterRequest registerRequest() {
         ProfileRegisterRequest request = new ProfileRegisterRequest();
-        ReflectionTestUtils.setField(request, "nickname", nickname);
         ReflectionTestUtils.setField(request, "interestRegion", "서울시 강남구");
         ReflectionTestUtils.setField(request, "transactionType", TransactionType.JEONSE);
         return request;
@@ -63,7 +71,20 @@ class UserServiceTest {
 
         BusinessException exception = assertThrows(BusinessException.class, () -> userService.withdraw(1L));
 
-        assertEquals(ErrorCode.NOT_FOUND, exception.getErrorCode());
+        assertEquals(ErrorCode.USER_SUSPENDED, exception.getErrorCode());
+    }
+
+    @Test
+    void withdrawThrowsWithDistinctErrorCodeWhenUserAlreadyWithdrawn() {
+        // "존재하지 않음"과 "이미 탈퇴함"이 예전엔 같은 ErrorCode.NOT_FOUND로 뭉뚱그려져 있었다 -
+        // 프론트가 두 경우를 구분해 안내할 수 있도록 별도 코드로 분리한 회귀 테스트.
+        User withdrawn = activeUser(1L);
+        withdrawn.withdraw();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(withdrawn));
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> userService.withdraw(1L));
+
+        assertEquals(ErrorCode.USER_WITHDRAWN, exception.getErrorCode());
     }
 
     @Test
@@ -75,23 +96,9 @@ class UserServiceTest {
         when(userPreferenceRepository.existsByUserId(1L)).thenReturn(true);
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> userService.registerProfile(1L, registerRequest(null)));
+                () -> userService.registerProfile(1L, registerRequest()));
 
         assertEquals(ErrorCode.USER_PROFILE_ALREADY_EXISTS, exception.getErrorCode());
-        assertEquals(HttpStatus.CONFLICT, exception.getStatus());
-    }
-
-    @Test
-    void registerProfileThrowsWhenNicknameAlreadyExists() {
-        User user = activeUser(1L);
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userPreferenceRepository.existsByUserId(1L)).thenReturn(false);
-        when(userRepository.existsByNicknameAndIdNot("중복닉네임", 1L)).thenReturn(true);
-
-        BusinessException exception = assertThrows(BusinessException.class,
-                () -> userService.registerProfile(1L, registerRequest("중복닉네임")));
-
-        assertEquals(ErrorCode.USER_NICKNAME_ALREADY_EXISTS, exception.getErrorCode());
         assertEquals(HttpStatus.CONFLICT, exception.getStatus());
     }
 
@@ -123,6 +130,43 @@ class UserServiceTest {
         UserProfileResponse response = userService.updateMyProfile(1L, request);
 
         assertEquals("새닉네임", response.getNickname());
+    }
+
+    @Test
+    void updateMyProfileThrowsWhenNewNicknameViolatesFormat() {
+        User user = activeUser(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        ProfileUpdateRequest request = new ProfileUpdateRequest();
+        ReflectionTestUtils.setField(request, "nickname", "닉네임!");
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> userService.updateMyProfile(1L, request));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        assertEquals(NicknamePolicy.MESSAGE, exception.getMessage());
+        verify(userRepository, never()).existsByNicknameAndIdNot(any(), any());
+    }
+
+    @Test
+    void updateMyProfileAllowsUnchangedNonConformingNicknameFromOAuthUser() {
+        // 카카오/구글 OAuth 가입은 NicknamePolicy를 거치지 않고 만들어진 닉네임을 가질 수 있다
+        // (공백 포함 등). 프론트는 닉네임을 안 바꿔도 현재 값을 그대로 재전송하므로, 그 값이 새
+        // 정책을 위반해도 "바뀌지 않았다면" 검증 자체가 생략돼야 프로필 수정이 막히지 않는다.
+        User oauthUser = User.createOAuthUser("oauth@example.com", "홍 길동", null);
+        ReflectionTestUtils.setField(oauthUser, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(oauthUser));
+        when(userPreferenceRepository.findByUserId(1L)).thenReturn(Optional.empty());
+        when(userPreferenceRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProfileUpdateRequest request = new ProfileUpdateRequest();
+        ReflectionTestUtils.setField(request, "nickname", "홍 길동");
+        ReflectionTestUtils.setField(request, "interestRegion", "서울시 강남구");
+
+        UserProfileResponse response = userService.updateMyProfile(1L, request);
+
+        assertEquals("홍 길동", response.getNickname());
+        verify(userRepository, never()).existsByNicknameAndIdNot(any(), any());
     }
 
     @Test

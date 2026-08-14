@@ -1,5 +1,6 @@
 package com.algogyeyak.user.service;
 
+import com.algogyeyak.admin.dto.AdminBulkActionResponse;
 import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.global.error.ErrorCode;
@@ -13,6 +14,9 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.user.repository.UserRepository;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +49,15 @@ public class AdminUserService {
         return AdminUserDetailResponse.from(findUser(userId));
     }
 
+    /**
+     * role 변경은 User.changeRole()로 엔티티 필드를 바꾸고 커밋 시점 dirty-checking에 맡기는 대신,
+     * UserRepository.updateRoleIfNotWithdrawn()으로 조건부 UPDATE를 직접 실행한다 - 그래야 "이
+     * 메서드가 대상을 읽은 시점엔 활성 상태였지만, 실제 UPDATE 시점엔 이미 본인 탈퇴가 커밋된"
+     * 레이스에서 그 탈퇴를 무시하고 role을 덮어쓰는 걸 막을 수 있다(UserRepository 참고). 영향받은
+     * row가 0건이면 원인은 "findUser()가 확인한 뒤 그 사이에 탈퇴함" 하나뿐이므로 안전하게 단정해
+     * 에러로 변환한다. user 엔티티의 role 필드 자체는 절대 건드리지 않는다 - 건드리면 이 엔티티가
+     * dirty로 남아 커밋 시점에 조건 없는 UPDATE가 한 번 더 나가 방금 막은 레이스가 되살아난다.
+     */
     @Transactional
     public AdminUserDetailResponse updateRole(Long actorId, Long userId, Role role) {
         User user = findUser(userId);
@@ -52,14 +65,20 @@ public class AdminUserService {
             rejectIfLastActiveAdmin(user);
         }
         Role previousRole = user.getRole();
-        user.changeRole(role);
+
+        int updated = userRepository.updateRoleIfNotWithdrawn(userId, role, UserStatus.WITHDRAWN);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_ROLE_TRANSITION, "탈퇴한 사용자는 권한을 변경할 수 없습니다.");
+        }
+
         adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_ROLE, userId,
                 Map.of("beforeRole", previousRole, "afterRole", role));
-        return AdminUserDetailResponse.from(user);
+        return AdminUserDetailResponse.from(user, role);
     }
 
-    // status는 컨트롤러 DTO 단계에서 이미 ACTIVE/SUSPENDED로 제한되어 있고, 탈퇴 유저에 대한 거부는
-    // User.suspend()/activate()가 던진다 - 여기서는 그 두 값 중 어느 쪽으로 갈지만 분기한다.
+    // status는 컨트롤러 DTO 단계에서 이미 ACTIVE/SUSPENDED로 제한되어 있다. 탈퇴 유저에 대한 거부는
+    // updateRole()과 동일한 이유로 조건부 UPDATE(updateStatusIfNotWithdrawn)의 영향받은 row 수로
+    // 판단한다 - User.suspend()/activate()를 더 이상 호출하지 않는다(이유는 updateRole() 참고).
     @Transactional
     public AdminUserDetailResponse updateStatus(Long actorId, Long userId, UserStatus status) {
         if (status != UserStatus.ACTIVE && status != UserStatus.SUSPENDED) {
@@ -70,13 +89,48 @@ public class AdminUserService {
         UserStatus previousStatus = user.getStatus();
         if (status == UserStatus.SUSPENDED) {
             rejectIfLastActiveAdmin(user);
-            user.suspend();
-        } else {
-            user.activate();
         }
+
+        int updated = userRepository.updateStatusIfNotWithdrawn(userId, status, UserStatus.WITHDRAWN);
+        if (updated == 0) {
+            String message = status == UserStatus.SUSPENDED
+                    ? "탈퇴한 사용자는 정지할 수 없습니다."
+                    : "탈퇴한 사용자는 활성화할 수 없습니다.";
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, message);
+        }
+
         adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_STATUS, userId,
                 Map.of("beforeStatus", previousStatus, "afterStatus", status));
-        return AdminUserDetailResponse.from(user);
+        return AdminUserDetailResponse.from(user, status);
+    }
+
+    /**
+     * 여러 유저를 한 번에 정지/정지해제한다. 대상 하나하나가 이미 updateStatus()의 가드(자기 자신
+     * 변경 금지, 마지막 활성 관리자 보호, 탈퇴 유저 제외)를 그대로 적용받으므로, 이건 원자적
+     * 전체성공-전체실패가 아니라 항목별 성공/실패가 갈리는 배치 처리다 - 하나가 가드에 막혀도
+     * 나머지는 계속 처리하고, 실패한 항목과 사유를 그대로 응답에 담아 돌려준다. updateStatus() 호출은
+     * 같은 인스턴스 안에서의 일반 메서드 호출(self-invocation)이라 별도 트랜잭션을 열지 않고 이
+     * 메서드의 트랜잭션 안에서 실행되며, 여기서 잡아낸 예외는 그 트랜잭션을 롤백시키지 않는다.
+     * 입력에 같은 id가 중복되면(프론트는 Set이라 안 만들지만 API 호출로는 가능) 먼저 처리된 id가
+     * 두 번째 시도에서 상태 전이 실패로 다시 걸려 같은 id가 성공/실패 양쪽에 나타날 수 있다 -
+     * 순서를 보존한 채 중복만 제거해 이 문제를 없앤다.
+     */
+    @Transactional
+    public AdminBulkActionResponse bulkUpdateStatus(Long actorId, List<Long> userIds, UserStatus status) {
+        List<Long> succeededIds = new ArrayList<>();
+        List<AdminBulkActionResponse.Failure> failures = new ArrayList<>();
+        for (Long userId : new LinkedHashSet<>(userIds)) {
+            try {
+                if (actorId.equals(userId)) {
+                    throw new BusinessException(ErrorCode.BAD_REQUEST, "자기 자신의 권한/상태는 변경할 수 없습니다.");
+                }
+                updateStatus(actorId, userId, status);
+                succeededIds.add(userId);
+            } catch (BusinessException e) {
+                failures.add(new AdminBulkActionResponse.Failure(userId, e.getErrorCode().name(), e.getMessage()));
+            }
+        }
+        return new AdminBulkActionResponse(succeededIds, failures);
     }
 
     /**

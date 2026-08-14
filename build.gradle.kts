@@ -28,6 +28,9 @@ dependencies {
     // 도메인의 캐싱 연결 준비도 겸한다(그쪽 실제 @Cacheable/캐시 대상 설계는 별도 작업). Lettuce는
     // 연결이 지연 생성이라 Redis가 안 떠 있어도 앱 기동 자체는 영향받지 않는다.
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
+    // 이메일 인증(회원가입)/비밀번호 재설정 메일 발송용. JavaMailSender는 spring.mail.* 프로퍼티만
+    // 채우면 자동 구성된다.
+    implementation("org.springframework.boot:spring-boot-starter-mail")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-security-oauth2-client")
     implementation("org.springframework.boot:spring-boot-starter-validation")

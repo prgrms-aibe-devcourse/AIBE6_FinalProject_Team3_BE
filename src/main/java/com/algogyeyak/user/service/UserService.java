@@ -1,13 +1,7 @@
 package com.algogyeyak.user.service;
 
-import com.algogyeyak.user.dto.NicknameCheckResponse;
-import com.algogyeyak.user.dto.ProfileRegisterRequest;
-import com.algogyeyak.user.dto.ProfileUpdateRequest;
-import com.algogyeyak.user.dto.UserProfileResponse;
-import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.entity.UserPreference;
-import com.algogyeyak.user.repository.UserPreferenceRepository;
-import com.algogyeyak.user.repository.UserRepository;
+import com.algogyeyak.checklist.entity.Checklist;
+import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.s3.dto.PresignedUploadRequest;
@@ -15,6 +9,19 @@ import com.algogyeyak.global.s3.dto.PresignedUploadResponse;
 import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.global.s3.util.S3ImagePurpose;
 import com.algogyeyak.global.s3.util.S3KeyGenerator;
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyStatus;
+import com.algogyeyak.property.repository.PropertyRepository;
+import com.algogyeyak.user.dto.NicknameCheckResponse;
+import com.algogyeyak.user.dto.NicknamePolicy;
+import com.algogyeyak.user.dto.ProfileRegisterRequest;
+import com.algogyeyak.user.dto.ProfileUpdateRequest;
+import com.algogyeyak.user.dto.UserProfileResponse;
+import com.algogyeyak.user.entity.User;
+import com.algogyeyak.user.entity.UserPreference;
+import com.algogyeyak.user.repository.UserPreferenceRepository;
+import com.algogyeyak.user.repository.UserRepository;
+import com.algogyeyak.user.repository.UserSocialAccountRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -25,24 +32,37 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
+import java.util.regex.Pattern;
+
 @Service
 @Transactional(readOnly = true)
 public class UserService {
 
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
+    private static final String INACTIVE_USER_MESSAGE = "존재하지 않거나 탈퇴한 사용자입니다.";
 
     private final UserRepository userRepository;
     private final UserPreferenceRepository userPreferenceRepository;
+    private final UserSocialAccountRepository userSocialAccountRepository;
+    private final ChecklistRepository checklistRepository;
+    private final PropertyRepository propertyRepository;
     private final S3PresignService s3PresignService;
     private final TransactionTemplate requiresNewTransactionTemplate;
 
     public UserService(
             UserRepository userRepository,
             UserPreferenceRepository userPreferenceRepository,
+            UserSocialAccountRepository userSocialAccountRepository,
+            ChecklistRepository checklistRepository,
+            PropertyRepository propertyRepository,
             S3PresignService s3PresignService,
             PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.userPreferenceRepository = userPreferenceRepository;
+        this.userSocialAccountRepository = userSocialAccountRepository;
+        this.checklistRepository = checklistRepository;
+        this.propertyRepository = propertyRepository;
         this.s3PresignService = s3PresignService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -69,19 +89,17 @@ public class UserService {
         return NicknameCheckResponse.builder().available(!exists).build();
     }
 
+    // 닉네임은 회원가입(로컬 이메일/비밀번호 signup 또는 소셜 로그인 콜백) 시점에 이미 확정되어
+    // 있고, 이후 바꾸는 유일한 경로는 updateMyProfile()(PATCH /users/me)이다 - 프론트도 이 등록
+    // 화면엔 닉네임 입력 UI 자체가 없어 항상 기존 값 그대로 넘어온다. 그래서 이 메서드는 닉네임을
+    // 다루지 않는다(과거엔 요청에 담긴 닉네임이 기존과 다르면 여기서도 바꿔주는 로직이 있었으나,
+    // 실제로 호출될 경로가 없는 죽은 코드라 제거함 - ProfileRegisterRequest.nickname 필드도 함께 제거).
     @Transactional
     public UserProfileResponse registerProfile(Long userId, ProfileRegisterRequest request) {
         User user = getActiveUserOrThrow(userId);
 
         if (userPreferenceRepository.existsByUserId(userId)) {
             throw new BusinessException(ErrorCode.USER_PROFILE_ALREADY_EXISTS);
-        }
-
-        String newNickname = null;
-        if (StringUtils.hasText(request.getNickname())
-                && !request.getNickname().equals(user.getNickname())) {
-            validateNicknameNotDuplicated(userId, request.getNickname());
-            newNickname = request.getNickname();
         }
 
         UserPreference preference = UserPreference.builder()
@@ -91,15 +109,7 @@ public class UserService {
                 .currentStage(request.getCurrentStage())
                 .build();
 
-        // 닉네임 변경과 preference 최초 등록을 하나의 트랜잭션으로 묶어서 커밋한다(아래 메서드 참고) -
-        // 둘을 changeNickname()/savePreferenceOrThrowIfAlreadyRegistered()처럼 각자 별도의
-        // REQUIRES_NEW로 커밋하면, 닉네임 변경이 먼저 커밋된 뒤 preference 저장만 실패해도 실패한
-        // 요청의 닉네임 변경만 그대로 남는 부분 실패가 생긴다.
-        registerProfileAtomically(userId, newNickname, preference);
-
-        if (newNickname != null) {
-            user.updateNickname(newNickname);
-        }
+        savePreferenceOrThrowIfAlreadyRegistered(userId, preference);
 
         return toResponse(user, preference);
     }
@@ -176,6 +186,7 @@ public class UserService {
 
         if (StringUtils.hasText(request.getNickname())
                 && !request.getNickname().equals(user.getNickname())) {
+            validateNicknameFormat(request.getNickname());
             changeNickname(user, userId, request.getNickname());
         }
 
@@ -204,14 +215,51 @@ public class UserService {
         String previousImageUrl = user.getProfileImageUrl();
         user.withdraw();
         deletePreviousProfileImageIfOwned(userId, previousImageUrl);
-        // TODO: user_social_accounts(OAuth 연동 정보, UserSocialAccount 엔티티) 처리 정책 적용 필요 — 확인 필요
-        // TODO: 탈퇴한 사용자의 Property/ContractAnalysis 등 연관 데이터 처리 방식 적용 필요 — 확인 필요
+
+        // OAuth 연동 정보는 하드 삭제한다 - 남겨두면 (provider, provider_id) unique 제약 때문에
+        // 같은 소셜 계정으로 재가입하려는 탈퇴자를 영구히 막게 된다. 다른 도메인이 이 테이블을
+        // 참조하지 않아 하드 삭제해도 안전하다.
+        userSocialAccountRepository.deleteAllByUserId(userId);
+
+        // 본인 전용 검색 선호도 설정도 하드 삭제한다 - 다른 도메인이 참조하지 않는다.
+        userPreferenceRepository.deleteByUserId(userId);
+
+        // 본인 소유 체크리스트도 하드 삭제한다 - 매물별 개인 임장노트라 다른 유저가 참조하지 않고,
+        // ChecklistItem은 cascade(orphanRemoval)로 함께 정리된다.
+        List<Checklist> checklists = checklistRepository.findAllByUserId(userId);
+        checklistRepository.deleteAll(checklists);
+
+        // 매물은 하드 삭제하지 않고 기존 soft-delete(Property.delete())를 그대로 재사용한다 - 다른
+        // 유저의 checklist/risk-analysis(PropertyRisk 등)가 이 매물을 참조하고 있어서, row 자체를
+        // 지우면 그쪽 데이터가 깨지거나(FK) 허위매물 탐지 이력이 함께 사라진다.
+        List<Property> properties = propertyRepository.findAllByUserIdAndStatusOrderByCreatedAtDesc(userId, PropertyStatus.ACTIVE);
+        properties.forEach(Property::delete);
     }
 
+    // "존재하지 않음"/"탈퇴함"/"정지됨"을 서로 다른 ErrorCode로 구분해서 던진다 - 프론트가 각
+    // 상태에 맞는 안내 문구를 보여줄 수 있어야 하기 때문이다.
     private User getActiveUserOrThrow(Long userId) {
-        return userRepository.findById(userId)
-                .filter(user -> !user.isWithdrawn() && !user.isSuspended())
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, INACTIVE_USER_MESSAGE));
+        if (user.isWithdrawn()) {
+            throw new BusinessException(ErrorCode.USER_WITHDRAWN);
+        }
+        if (user.isSuspended()) {
+            throw new BusinessException(ErrorCode.USER_SUSPENDED);
+        }
+        return user;
+    }
+
+    // 닉네임 형식은 "실제로 값이 바뀔 때"만 검사한다(registerProfile/updateMyProfile 호출부 참고) -
+    // ProfileRegisterRequest/ProfileUpdateRequest에 @Pattern을 걸어 항상 검사하면, OAuth 가입
+    // 사용자처럼 이 정책을 거치지 않고 만들어진 기존 닉네임(카카오/구글이 내려준 값 그대로, 공백·
+    // 특수문자 포함 가능)을 프론트가 매 요청 그대로 다시 실어 보낼 때마다(닉네임을 안 바꿔도) 검증에
+    // 걸려 프로필 등록/수정 자체가 막히는 문제가 있었다 - 닉네임 중복 검사(validateNicknameNotDuplicated)와
+    // 같은 이유로 같은 조건에서만 동작해야 한다.
+    private void validateNicknameFormat(String nickname) {
+        if (!Pattern.matches(NicknamePolicy.PATTERN, nickname)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, NicknamePolicy.MESSAGE);
+        }
     }
 
     private void validateNicknameNotDuplicated(Long userId, String nickname) {
@@ -231,7 +279,7 @@ public class UserService {
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status -> {
                 User managed = userRepository.findById(userId)
-                        .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
+                        .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, INACTIVE_USER_MESSAGE));
                 managed.updateNickname(newNickname);
                 userRepository.saveAndFlush(managed);
             });
@@ -251,32 +299,15 @@ public class UserService {
         user.updateNickname(newNickname);
     }
 
-    // registerProfile()의 사전 검사(existsByUserId/닉네임 중복) 통과 이후에도, 커밋 전에 동시에
-    // 같은 유저로 먼저 등록을 마친 다른 요청(중복 클릭 등)이 있으면 user_id 유니크 제약에, 동시에
-    // 같은 닉네임으로 바꾼 다른 요청이 있으면 닉네임 유니크 제약에 걸릴 수 있다. 닉네임 변경(있는
-    // 경우)과 preference INSERT를 같은 REQUIRES_NEW 트랜잭션 안에서 함께 시도해, 어느 한쪽이라도
-    // 실패하면 둘 다 롤백되게 한다 - 그래야 "닉네임만 바뀌고 preference 등록은 실패"하는 부분
-    // 실패가 생기지 않는다. 재확인도 REQUIRES_NEW(별도 세션)로 최신 커밋 상태를 봐야 한다(changeNickname()과
-    // 동일한 이유).
-    private void registerProfileAtomically(Long userId, String newNickname, UserPreference preference) {
+    // registerProfile()의 사전 검사(existsByUserId) 통과 이후에도, 커밋 전에 동시에 같은 유저로
+    // 먼저 등록을 마친 다른 요청(중복 클릭 등)이 있으면 user_id 유니크 제약에 걸릴 수 있다.
+    // saveOrFetchExistingPreference()와 달리 여기선 "이미 등록됨"을 성공으로 흡수하지 않고 정확한
+    // 409로 알려야 하므로, REQUIRES_NEW(별도 세션)로 분리해 실패해도 폐기되는 세션이 이 임시
+    // 트랜잭션뿐이도록 격리하고, 실패 시 재확인해 정확한 에러로 변환한다(changeNickname()과 동일한 이유).
+    private void savePreferenceOrThrowIfAlreadyRegistered(Long userId, UserPreference preference) {
         try {
-            requiresNewTransactionTemplate.executeWithoutResult(status -> {
-                if (newNickname != null) {
-                    User managed = userRepository.findById(userId)
-                            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "존재하지 않거나 탈퇴한 사용자입니다."));
-                    managed.updateNickname(newNickname);
-                    userRepository.saveAndFlush(managed);
-                }
-                userPreferenceRepository.saveAndFlush(preference);
-            });
+            requiresNewTransactionTemplate.executeWithoutResult(status -> userPreferenceRepository.saveAndFlush(preference));
         } catch (DataIntegrityViolationException e) {
-            if (newNickname != null) {
-                boolean nicknameTaken = Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(
-                        status -> userRepository.existsByNicknameAndIdNot(newNickname, userId)));
-                if (nicknameTaken) {
-                    throw new BusinessException(ErrorCode.USER_NICKNAME_ALREADY_EXISTS);
-                }
-            }
             boolean alreadyRegistered = Boolean.TRUE.equals(
                     requiresNewTransactionTemplate.execute(status -> userPreferenceRepository.existsByUserId(userId)));
             if (alreadyRegistered) {

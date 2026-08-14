@@ -44,7 +44,37 @@ public enum ErrorCode {
     // CookieUtils.SameSite=None 전환(크로스오리진 배포) 이후 최소 CSRF 방어로 추가 - CsrfHeaderFilter 참고.
     CSRF_HEADER_MISSING(HttpStatus.FORBIDDEN, "CSRF_HEADER_MISSING", "잘못된 요청입니다."),
 
+    // 이메일 인증(회원가입) - EmailVerificationService
+    // 인증번호 발송 대상 이메일이 이미 가입되어 있는 경우 - AUTH_EMAIL_ALREADY_EXISTS와 별개 코드로
+    // 두는 이유는 signup() 시점(닉네임/비밀번호까지 다 입력한 뒤)이 아니라 그 전 단계(이메일만 입력한
+    // 시점)에서 나는 실패라 프론트가 다른 화면 흐름으로 안내해야 하기 때문이다.
+    AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS", "이미 가입된 이메일입니다."),
+    // 재발송 쿨다운(60초) 이내 재요청 - 스팸 발송 방지.
+    AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS", "잠시 후 다시 시도해주세요."),
+    // 인증번호가 없거나(만료됨/발송한 적 없음), 틀렸거나, 시도 횟수를 초과한 경우를 모두 이 코드로
+    // 통일한다 - 6자리 숫자 코드는 브루트포스 공격 표면이 작지 않으므로, 실패 사유를 세분화해 노출하면
+    // 공격자가 "코드가 존재하는지"와 "시도 횟수가 얼마나 남았는지"를 구분해 알아낼 수 있다.
+    AUTH_EMAIL_VERIFICATION_CODE_INVALID(HttpStatus.BAD_REQUEST, "AUTH_EMAIL_VERIFICATION_CODE_INVALID", "인증번호가 올바르지 않거나 만료되었습니다."),
+    // signup() 호출 시점에 이 이메일에 대한 유효한 인증 완료 기록(Redis)이 없는 경우 - 인증번호 확인을
+    // 건너뛰고 바로 회원가입을 시도했거나, 인증 유효시간(30분)이 지난 뒤 뒤늦게 가입을 완료하려는 경우.
+    AUTH_EMAIL_NOT_VERIFIED(HttpStatus.FORBIDDEN, "AUTH_EMAIL_NOT_VERIFIED", "이메일 인증을 먼저 완료해주세요."),
+
+    // 비밀번호 재설정(로그아웃 상태) - PasswordResetService
+    AUTH_PASSWORD_RESET_TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "AUTH_PASSWORD_RESET_TOO_MANY_REQUESTS", "잠시 후 다시 시도해주세요."),
+    // 토큰이 없거나(만료/미발급), 이미 사용됐거나, 존재하지 않는 경우를 모두 이 코드로 통일한다 -
+    // AUTH_REFRESH_TOKEN_INVALID와 같은 이유(Redis TTL 자연 만료와 미발급을 구분할 수 없음, 계정
+    // 존재 여부를 굳이 세분화해 노출할 필요 없음).
+    AUTH_PASSWORD_RESET_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "AUTH_PASSWORD_RESET_TOKEN_INVALID", "유효하지 않거나 만료된 링크입니다."),
+    // SMTP 발송 실패(EmailService) - 외부 서비스 연동 실패라 CONTRACT_ANALYSIS_*_API_ERROR와 같은
+    // 이유로 502를 쓴다. Redis(코드/토큰 발급 자체)는 이미 성공한 뒤일 수 있어, 재시도 시 쿨다운에
+    // 걸릴 수 있음을 프론트가 안내해야 한다.
+    EMAIL_SEND_FAILED(HttpStatus.BAD_GATEWAY, "EMAIL_SEND_FAILED", "메일 발송에 실패했습니다. 잠시 후 다시 시도해주세요."),
+
     // User 도메인
+    // getActiveUserOrThrow()에서 "존재하지 않음"(공용 NOT_FOUND)과 구분해서 던진다 - 셋 다 404라
+    // 상태 코드는 같지만, code/message가 달라야 프론트가 탈퇴/정지 상태를 구분해 안내할 수 있다.
+    USER_WITHDRAWN(HttpStatus.NOT_FOUND, "USER_WITHDRAWN", "이미 탈퇴한 사용자입니다."),
+    USER_SUSPENDED(HttpStatus.NOT_FOUND, "USER_SUSPENDED", "정지된 사용자입니다."),
     USER_PROFILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_PROFILE_ALREADY_EXISTS", "이미 프로필이 등록되어 있습니다."),
     USER_NICKNAME_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_NICKNAME_ALREADY_EXISTS", "이미 사용 중인 닉네임입니다."),
 
@@ -83,6 +113,7 @@ public enum ErrorCode {
     CONTRACT_ANALYSIS_OCR_EMPTY_RESULT(HttpStatus.UNPROCESSABLE_CONTENT, "CONTRACT_ANALYSIS_OCR_EMPTY_RESULT", "OCR 인식 결과가 없습니다."),
     CONTRACT_ANALYSIS_OCR_API_ERROR(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_OCR_API_ERROR", "OCR 서비스 연동 중 오류가 발생했습니다."),
     CONTRACT_ANALYSIS_MASKING_NOT_CONFIRMED(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_MASKING_NOT_CONFIRMED", "마스킹 확인이 완료되지 않았습니다."),
+    CONTRACT_ANALYSIS_UNMASKED_PII_DETECTED(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_UNMASKED_PII_DETECTED", "마스킹되지 않은 개인정보가 포함되어 있습니다."),
     CONTRACT_ANALYSIS_MASKING_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "CONTRACT_ANALYSIS_MASKING_FAILED", "마스킹 처리 중 오류가 발생했습니다."),
     CONTRACT_ANALYSIS_AI_RESPONSE_INVALID(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_RESPONSE_INVALID", "AI 응답 형식이 올바르지 않습니다."),
     CONTRACT_ANALYSIS_AI_HALLUCINATION(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_HALLUCINATION", "AI가 입력에 없는 내용을 생성했습니다."),
@@ -102,6 +133,7 @@ public enum ErrorCode {
     ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_DUPLICATE_CODE", "이미 다른 활성 문항이 같은 코드를 사용하고 있습니다."),
     ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM", "마지막 문항은 삭제할 수 없습니다. 노출 여부를 꺼서 숨겨주세요."),
     ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE(HttpStatus.BAD_REQUEST, "ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE", "존재하지 않는 매물유형입니다."),
+    ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND", "존재하지 않는 이미지입니다."),
 
     // 파일 업로드(S3) 공통 - profile/property/contract 이미지 업로드가 전부 이 코드를 공유한다.
     FILE_EXTENSION_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "FILE_EXTENSION_NOT_ALLOWED", "허용되지 않는 파일 확장자입니다."),

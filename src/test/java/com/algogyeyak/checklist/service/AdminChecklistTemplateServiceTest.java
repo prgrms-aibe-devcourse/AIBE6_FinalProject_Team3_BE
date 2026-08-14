@@ -2,13 +2,17 @@ package com.algogyeyak.checklist.service;
 
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
+import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageCreateRequest;
+import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateUpdateRequest;
 import com.algogyeyak.checklist.entity.ChecklistCategory;
 import com.algogyeyak.checklist.entity.ChecklistImportance;
 import com.algogyeyak.checklist.entity.ChecklistItemCode;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
+import com.algogyeyak.checklist.entity.ChecklistItemTemplateImage;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
+import com.algogyeyak.checklist.repository.ChecklistItemTemplateImageRepository;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -37,11 +41,16 @@ class AdminChecklistTemplateServiceTest {
     private static final Long ACTOR_ID = 100L;
 
     private final ChecklistItemTemplateRepository checklistItemTemplateRepository = mock(ChecklistItemTemplateRepository.class);
+    private final ChecklistItemTemplateImageRepository checklistItemTemplateImageRepository = mock(ChecklistItemTemplateImageRepository.class);
     private final AdminAuditLogger adminAuditLogger = mock(AdminAuditLogger.class);
-    private final AdminChecklistTemplateService adminChecklistTemplateService =
-            new AdminChecklistTemplateService(checklistItemTemplateRepository, adminAuditLogger);
+    private final AdminChecklistTemplateService adminChecklistTemplateService = new AdminChecklistTemplateService(
+            checklistItemTemplateRepository, checklistItemTemplateImageRepository, adminAuditLogger);
 
     private ChecklistItemTemplate template(Long id, int version, int displayOrder) {
+        return template(id, version, displayOrder, true);
+    }
+
+    private ChecklistItemTemplate template(Long id, int version, int displayOrder, boolean active) {
         ChecklistItemTemplate template = ChecklistItemTemplate.builder()
                 .version(version)
                 .category(ChecklistCategory.INDOOR)
@@ -49,7 +58,7 @@ class AdminChecklistTemplateServiceTest {
                 .importance(ChecklistImportance.GENERAL)
                 .itemType(ChecklistItemType.CHECK)
                 .displayOrder(displayOrder)
-                .active(true)
+                .active(active)
                 .build();
         ReflectionTestUtils.setField(template, "id", id);
         return template;
@@ -87,9 +96,9 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
-    @DisplayName("생성 시 기존 문항 중 가장 높은 버전을 그대로 물려받는다")
+    @DisplayName("생성 시 활성 문항 중 가장 높은 버전을 그대로 물려받는다")
     void createInheritsHighestExistingVersion() {
-        when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc())
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
                 .thenReturn(List.of(template(1L, 2, 1), template(2L, 3, 2)));
         when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -98,7 +107,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 30, null
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 30, null
                 )
         );
 
@@ -108,9 +117,13 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
-    @DisplayName("기존 문항이 하나도 없으면 버전 1로 생성한다")
-    void createDefaultsToVersionOneWhenNoTemplatesExist() {
-        when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of());
+    @DisplayName("회귀 테스트 - 비활성 문항의 버전이 활성 문항보다 높아도 무시하고 활성 문항 기준으로 버전을 매긴다")
+    void createIgnoresHigherVersionFromInactiveTemplates() {
+        // 과거에 비활성화된 문항(version=5)이 현재 활성 문항(version=2)보다 버전이 높게 남아있는
+        // 상황 - 전체(findAllByOrderByDisplayOrderAsc) 기준으로 최대값을 구하면 새 문항이 5를
+        // 물려받아, 실제로 쓰이는 활성 문항 집합(version=2)과 어긋난 값을 갖게 된다.
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(template(1L, 2, 1, true)));
         when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -118,7 +131,26 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, null
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 30, null
+                )
+        );
+
+        assertThat(result.version()).isEqualTo(2);
+        verify(checklistItemTemplateRepository, never()).findAllByOrderByDisplayOrderAsc();
+    }
+
+    @Test
+    @DisplayName("기존 문항이 하나도 없으면 버전 1로 생성한다")
+    void createDefaultsToVersionOneWhenNoTemplatesExist() {
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
+                ACTOR_ID,
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, null
                 )
         );
 
@@ -135,7 +167,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,TYPO"
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, "OFFICETEL,TYPO"
                 )
         ))
                 .isInstanceOf(BusinessException.class)
@@ -150,7 +182,7 @@ class AdminChecklistTemplateServiceTest {
         // 회귀 테스트 - split(",")가 "OFFICETEL,"에서 만드는 빈 문자열 토큰을 거르지 않으면, 오타가
         // 아니라 단순 구분자 습관 차이일 뿐인데도 ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE로
         // 거부됐다.
-        when(checklistItemTemplateRepository.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
         when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -158,7 +190,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, "OFFICETEL,"
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, "OFFICETEL,"
                 )
         );
 
@@ -176,13 +208,32 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, " , "
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, " , "
                 )
         ))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE));
         verifyNoAuditLog();
+    }
+
+    @Test
+    @DisplayName("MULTIPLE_CHOICE 문항을 options와 함께 생성할 수 있다")
+    void createSavesMultipleChoiceOptions() {
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistItemTemplateRepository.save(any(ChecklistItemTemplate.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
+                ACTOR_ID,
+                new AdminChecklistItemTemplateCreateRequest(
+                        ChecklistCategory.INDOOR, "보일러 종류가 무엇인가요?", null, null,
+                        ChecklistImportance.GENERAL, ChecklistItemType.MULTIPLE_CHOICE,
+                        "가스보일러,기름보일러,전기보일러,지역난방", null, 1, null
+                )
+        );
+
+        assertThat(result.options()).isEqualTo("가스보일러,기름보일러,전기보일러,지역난방");
     }
 
     @Test
@@ -200,7 +251,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", "안내", null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, null, false
                 )
         );
 
@@ -210,6 +261,31 @@ class AdminChecklistTemplateServiceTest {
         assertThat(result.displayOrder()).isEqualTo(9);
         assertThat(result.active()).isFalse();
         assertThat(result.version()).isEqualTo(2); // 수정으로 버전이 바뀌지 않는다
+    }
+
+    @Test
+    @DisplayName("회귀 테스트 - 비활성 문항을 재활성화하면 낡은 버전이 아니라 현재 활성 집합 기준 버전으로 재정렬된다")
+    void updateRealignsVersionWhenReactivatingTemplateWithStaleVersion() {
+        // 과거에 버전 5일 때 비활성화된 문항 - 그 사이 다른 문항들은 create()를 거치며 버전 2로
+        // 올라와 있다. 이 문항을 그대로 재활성화하면(버전을 안 건드리면) 활성 집합에 버전 2와 5가
+        // 섞여, ChecklistService.createChecklist()가 그 이후 임의의 버전을 새 체크리스트에 찍는다.
+        ChecklistItemTemplate stale = template(1L, 5, 1, false);
+        ChecklistItemTemplate currentlyActive = template(2L, 2, 2);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(stale));
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(currentlyActive));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
+                ACTOR_ID,
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, null, true
+                )
+        );
+
+        assertThat(result.active()).isTrue();
+        assertThat(result.version()).isEqualTo(2);
     }
 
     @Test
@@ -223,7 +299,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, "TYPO", true
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, "TYPO", true
                 )
         ))
                 .isInstanceOf(BusinessException.class)
@@ -242,7 +318,7 @@ class AdminChecklistTemplateServiceTest {
                 999L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.AREA, "내용", null, null,
-                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, 1, null, true
+                        ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, null, true
                 )
         ))
                 .isInstanceOf(BusinessException.class)
@@ -258,7 +334,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null,
                         ChecklistItemCode.TRUST_REGISTRATION, 1, null
                 )
         ))
@@ -278,7 +354,7 @@ class AdminChecklistTemplateServiceTest {
                 ACTOR_ID,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (중복)", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, null,
                         ChecklistItemCode.TRUST_REGISTRATION, 2, null
                 )
         ))
@@ -301,7 +377,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (문구 수정)", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, null,
                         ChecklistItemCode.TRUST_REGISTRATION, 1, null, true
                 )
         );
@@ -323,7 +399,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, null,
                         ChecklistItemCode.TRUST_REGISTRATION, 1, null, true
                 )
         ))
@@ -397,7 +473,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, null, false
                 )
         ))
                 .isInstanceOf(BusinessException.class)
@@ -420,7 +496,7 @@ class AdminChecklistTemplateServiceTest {
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
-                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, false
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, null, 9, null, false
                 )
         );
 
@@ -440,6 +516,119 @@ class AdminChecklistTemplateServiceTest {
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
 
         verify(checklistItemTemplateRepository, never()).delete(any(ChecklistItemTemplate.class));
+        verifyNoAuditLog();
+    }
+
+    private ChecklistItemTemplateImage image(Long id, ChecklistItemTemplate template, String imageUrl, int displayOrder) {
+        ChecklistItemTemplateImage image = ChecklistItemTemplateImage.builder()
+                .template(template)
+                .imageUrl(imageUrl)
+                .displayOrder(displayOrder)
+                .build();
+        ReflectionTestUtils.setField(image, "id", id);
+        return image;
+    }
+
+    @Test
+    @DisplayName("문항의 이미지 목록을 표시순서대로 반환한다")
+    void listImagesReturnsImagesInDisplayOrder() {
+        ChecklistItemTemplate template = template(1L, 3, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        when(checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(1L))
+                .thenReturn(List.of(
+                        image(10L, template, "https://example.com/1.jpg", 1),
+                        image(11L, template, "https://example.com/2.jpg", 2)
+                ));
+
+        List<AdminChecklistItemTemplateImageResponse> result = adminChecklistTemplateService.listImages(1L);
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).imageUrl()).isEqualTo("https://example.com/1.jpg");
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 문항의 이미지 목록을 조회하면 ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND 예외가 발생한다")
+    void listImagesThrowsWhenTemplateNotFound() {
+        when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.listImages(999L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("이미지를 추가하면 기존 이미지 중 가장 큰 표시순서 다음 값으로 저장된다")
+    void addImageAssignsNextDisplayOrder() {
+        ChecklistItemTemplate template = template(1L, 3, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        when(checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(1L))
+                .thenReturn(List.of(image(10L, template, "https://example.com/1.jpg", 1)));
+        when(checklistItemTemplateImageRepository.save(any(ChecklistItemTemplateImage.class)))
+                .thenAnswer(invocation -> {
+                    ChecklistItemTemplateImage arg = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(arg, "id", 20L);
+                    return arg;
+                });
+
+        AdminChecklistItemTemplateImageResponse result = adminChecklistTemplateService.addImage(
+                ACTOR_ID, 1L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/2.jpg"));
+
+        assertThat(result.imageUrl()).isEqualTo("https://example.com/2.jpg");
+        assertThat(result.displayOrder()).isEqualTo(2);
+        verify(adminAuditLogger).log(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 문항에 이미지를 추가하면 ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND 예외가 발생하고 저장되지 않는다")
+    void addImageThrowsWhenTemplateNotFound() {
+        when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.addImage(
+                ACTOR_ID, 999L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/1.jpg")))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
+        verify(checklistItemTemplateImageRepository, never()).save(any());
+        verifyNoAuditLog();
+    }
+
+    @Test
+    @DisplayName("이미지를 삭제한다")
+    void deleteImageRemovesImage() {
+        ChecklistItemTemplate template = template(1L, 3, 1);
+        ChecklistItemTemplateImage image = image(10L, template, "https://example.com/1.jpg", 1);
+        when(checklistItemTemplateImageRepository.findById(10L)).thenReturn(Optional.of(image));
+
+        adminChecklistTemplateService.deleteImage(ACTOR_ID, 1L, 10L);
+
+        verify(checklistItemTemplateImageRepository).delete(image);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 이미지를 삭제하면 ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND 예외가 발생한다")
+    void deleteImageThrowsWhenImageNotFound() {
+        when(checklistItemTemplateImageRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.deleteImage(ACTOR_ID, 1L, 999L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND));
+        verifyNoAuditLog();
+    }
+
+    @Test
+    @DisplayName("다른 문항 소유의 이미지를 삭제하려 하면 ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND 예외가 발생한다")
+    void deleteImageThrowsWhenImageBelongsToDifferentTemplate() {
+        ChecklistItemTemplate otherTemplate = template(2L, 3, 1);
+        ChecklistItemTemplateImage image = image(10L, otherTemplate, "https://example.com/1.jpg", 1);
+        when(checklistItemTemplateImageRepository.findById(10L)).thenReturn(Optional.of(image));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.deleteImage(ACTOR_ID, 1L, 10L))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND));
+        verify(checklistItemTemplateImageRepository, never()).delete(any());
         verifyNoAuditLog();
     }
 }

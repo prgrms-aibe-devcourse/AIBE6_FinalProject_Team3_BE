@@ -22,6 +22,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -114,7 +116,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        JwtUserPrincipal principal = new JwtUserPrincipal(userId, user.getEmail(), user.getRole());
+        // 비밀번호가 바뀐 뒤(본인 변경 또는 비밀번호 재설정) 그 이전에 발급된 access token은
+        // 서명/만료가 아직 유효해도 거부한다 - 그러지 않으면 이미 탈취됐거나 다른 기기에 열려
+        // 있던 access token이 최대 만료 시간(access-token-validity-seconds)까지 계속 유효하게
+        // 남는다. 발급 시각(iat)은 매 요청 새로 만들지 않으므로 클록 스큐 문제 없이 서버 자체
+        // 시계로만 비교한다(passwordChangedAt도 같은 서버에서 LocalDateTime.now()로 찍힘).
+        if (user.getPasswordChangedAt() != null && claims.getIssuedAt() != null) {
+            LocalDateTime issuedAt = LocalDateTime.ofInstant(claims.getIssuedAt().toInstant(), ZoneId.systemDefault());
+            if (issuedAt.isBefore(user.getPasswordChangedAt())) {
+                request.setAttribute(AUTH_FAILURE_REASON_ATTRIBUTE, ErrorCode.AUTH_TOKEN_INVALID);
+                return;
+            }
+        }
+
+        JwtUserPrincipal principal =
+                new JwtUserPrincipal(userId, user.getEmail(), user.getRole(), user.getNickname(), user.getProfileImageUrl());
 
         List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()));
         var authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);

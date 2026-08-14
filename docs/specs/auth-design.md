@@ -85,7 +85,7 @@
 
 - 구조적으로 중요한 지점: 이 필터는 인증에 실패해도 예외를 던지지 않고 `SecurityContext`를 비운 채 다음 필터로 그냥 넘긴다. 그래서 "왜" 실패했는지를 이후 단계(Spring Security의 `authenticationEntryPoint`, 실제 401 응답을 만드는 지점)까지 전달할 방법이 없었다 — 이번에 필터가 실패 사유를 `request.setAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE, errorCode)`로 남기고, `SecurityConfig`의 `authenticationEntryPoint`가 이 값을 읽어 응답 코드를 정하도록 연결했다(속성이 없으면 기본값 `UNAUTHORIZED`).
 - 로그아웃으로 jti가 블랙리스트에 오른(revoke된) 토큰도 `AUTH_TOKEN_INVALID`로 분류한다 — "더 이상 쓸 수 없는 토큰"이라는 점에서 형식 오류/서명 위조와 같은 취급.
-- **"비활성 사용자"(탈퇴 등)는 구분하지 않고 보류함.** 이유: 필터는 무상태 검증 원칙상 매 요청마다 DB를 조회하지 않는다(`com.algogyeyak.user` 조회는 `/auth/me`만 예외적으로 함). 비활성 사용자를 필터 레벨에서 구분하려면 모든 요청에 DB 조회를 추가해야 하는데, 이는 "Access Token 검증 시 외부 API/DB 미호출"이라는 비기능 요구사항과 충돌한다. 실제로 이 기능(계정 비활성화)이 아직 구현되어 있지 않기도 해서, 필요해지면 그때 다시 설계하기로 함. 지금은 `/auth/me`가 이미 하던 대로 컨트롤러 레벨에서 DB 재조회 후 `ErrorCode.UNAUTHORIZED`(코드 구분 없음, 메시지만 "존재하지 않거나 탈퇴한 사용자입니다")로 응답한다.
+- **"비활성 사용자"(탈퇴 등)는 구분하지 않고 보류함.** 이유: ~~필터는 무상태 검증 원칙상 매 요청마다 DB를 조회하지 않는다(`com.algogyeyak.user` 조회는 `/auth/me`만 예외적으로 함). 비활성 사용자를 필터 레벨에서 구분하려면 모든 요청에 DB 조회를 추가해야 하는데, 이는 "Access Token 검증 시 외부 API/DB 미호출"이라는 비기능 요구사항과 충돌한다. 실제로 이 기능(계정 비활성화)이 아직 구현되어 있지 않기도 해서, 필요해지면 그때 다시 설계하기로 함.~~ **(2026-08-12 정정)** 이 전제들은 더 이상 사실이 아님 — `JwtAuthenticationFilter.authenticate()`가 이미 `isRevoked()` 확인에 얹어 매 인증 요청마다 `userRepository.findById()`로 DB를 조회하고 `isWithdrawn()`/`isSuspended()`까지 확인하도록 바뀌었고, `UserStatus.SUSPENDED`/`User.suspend()`와 관리자 정지 기능도 이미 구현되어 있다(전수조사 결과 코드 품질 1번 참고) — "비활성 사용자"를 별도 코드로 구분하지 않기로 한 이 결정은 두 전제가 모두 사라진 상태라 재검토할 만하다. 지금은 `/auth/me`가 이미 하던 대로 컨트롤러 레벨에서 DB 재조회 후 `ErrorCode.UNAUTHORIZED`(코드 구분 없음, 메시지만 "존재하지 않거나 탈퇴한 사용자입니다")로 응답한다.
 - **(2026-07-28 갱신)** 프론트엔드가 `isSessionInvalidErrorCode()`(`app/lib/api/http.ts`)로 이 세 코드(+`UNAUTHORIZED`)를 전부 인식하도록 갱신함(frontend PR #30 `fix/auth-modify_according_docs`, `dev` 머지 완료) — 갱신 전에는 `PasswordUpdateFormClient`가 `UNAUTHORIZED` 하나만 체크하고 있어서, 이 코드 세분화가 먼저 머지되면 만료/무효 케이스에서 재로그인 유도가 실제로 깨지는 상태였음(리뷰로 발견). 다만 화면에 보여줄 문구 자체는 여전히 하나로 통합 — "재로그인 필요 여부" 판단에만 네 코드를 씀.
 
 ## 토큰 재발급 — 요구사항 대비
@@ -133,7 +133,7 @@
 | 실패 사유 과도한 노출 금지 | O | ✅ (계정 존재 여부 비노출 등, 위 참고) |
 | HTTPS(운영) | O | ⚠️ 코드에서 강제하는 부분은 못 찾음 — 인프라(로드밸런서 등) 레벨에서 처리하는 것으로 추정, 확인 필요 |
 | 동일 소셜 계정 중복 생성 방지 | O | ✅ `(provider, providerId)` 유니크 제약 + 동시성 레이스 처리(재조회 후 재시도) |
-| Access Token 검증 시 외부 API 미호출 | O | ✅ 로컬 서명 검증만 함 |
+| Access Token 검증 시 외부 API 미호출 | O | ~~✅ 로컬 서명 검증만 함~~ **(2026-08-12 정정)** 더 이상 사실이 아님 — `JwtAuthenticationFilter.authenticate()`가 로컬 서명 검증에 더해 매 요청마다 `userRepository.findById()`로 DB를 조회해 탈퇴/정지 여부까지 확인함(전수조사 결과 코드 품질 1번 참고). 외부 API 호출은 여전히 없음 |
 
 ## 요구사항에 없던 추가 구현
 
@@ -152,3 +152,22 @@
 4. ~~"Refresh Token 별도 저장소 없음"(요구사항) vs 실제 DB 저장 — 원래 의도 확인~~ — ✅ 2026-07-29 DB 유지로 확정했다가, 🔁 2026-08-03 Redis로 재전환(위 "토큰 재발급" 섹션 참고). PR 범위는 access token blacklist + refresh token 저장소까지만 — 유저 role/status 캐시와 관리자 통계 캐시는 별도 단계로 후순위.
 5. ~~`/auth/logout`의 Swagger 설명(jti 블랙리스트)과 실제 코드 불일치~~ — ✅ 2026-07-28 해결. jti 블랙리스트 구현 완료(로그아웃 섹션 참고), PR #54 `fix/auth-access_token&refresh_token`로 `dev` 머지 완료
 6. ~~토큰 검증 실패 사유가 전부 401로 뭉뚱그려지는 게 의도인지 (요구사항은 사유 구분을 요구함)~~ — ✅ 2026-07-28 3/4 해결. `AUTH_TOKEN_MISSING`/`AUTH_TOKEN_INVALID`/`AUTH_TOKEN_EXPIRED` 구현 완료(토큰 검증 섹션 참고), PR #54로 `dev` 머지 완료. "비활성 사용자" 구분은 무상태 검증 원칙과 충돌하고 실제 기능도 아직 없어 보류
+
+## 전수조사 결과 (2026-08-12)
+
+`com.algogyeyak.auth.*` 전체(jwt/oauth/service/token/config/controller/dto/handler/util)와 관련 테스트를 코드 기준으로 전수조사했다. 아래는 기존 문서에 없던 새 발견 및 기존 서술에 대한 재검증 결과만 담았다.
+
+### 버그/정확성
+
+1. 특별히 발견된 이슈 없음. `LocalAuthService`/`RefreshTokenService`/`CustomOAuth2UserService`의 동시성 처리(REQUIRES_NEW 격리 + 재조회 복구), `LocalAuthService.login()`의 타이밍-세이프 비교(더미 해시), `RefreshTokenService`의 Redis Lua 스크립트(issue/rotate/revoke) 원자성, `JwtAuthenticationFilter`/`AccessTokenRevocationService`의 fail-closed 처리를 코드 레벨로 직접 추적했고, 로직 결함은 찾지 못했다.
+
+### 보안
+
+1. ~~**정지(SUSPENDED) 계정 상태 노출 수준이 로그인 경로마다 다르다.** `CustomOAuth2UserService.rejectIfBlocked()`(`oauth/CustomOAuth2UserService.java:94-99`)는 정지된 계정으로 소셜 로그인을 시도하면 `OAuth2Error("account_blocked", "로그인할 수 없는 계정입니다.")`를 명시적으로 던지고, 이 코드는 그대로 프론트(`login/page.tsx`의 `account_blocked: "정지되었거나 이용할 수 없는 계정입니다. 고객센터에 문의해주세요."`)까지 전달돼 "이 계정이 존재하며 정지 상태"라는 사실이 사용자에게 드러난다. 반면 `LocalAuthService.login()`(`service/LocalAuthService.java:101-116`)은 정지된 계정을 "계정 없음"과 동일하게 `AUTH_INVALID_CREDENTIALS`로 뭉뚱그리고(계정 존재 여부 비노출이 의도된 설계 — 위 "이메일 로그인" 섹션 참고), `JwtAuthenticationFilter.authenticate()`(`jwt/JwtAuthenticationFilter.java:112-115`)도 이미 로그인된 세션이 정지 처리된 경우 `AUTH_TOKEN_INVALID`로만 응답해 구분하지 않는다. 즉 같은 SUSPENDED 상태인데 소셜 로그인 경로만 정지 사실을 명시적으로 알려주고, 로컬 로그인/기존 세션 경로는 의도적으로 숨긴다 — 계정 열거(enumeration) 방지 원칙이 로그인 방식에 따라 일관되지 않게 적용되고 있다.~~ — ✅ **(2026-08-12 해결)** `rejectIfBlocked()`가 `account_blocked` 대신 일반 실패 코드(`oauth_login_failed`)를 던지도록 통일해, 로컬 로그인/토큰 검증과 동일하게 계정 존재·정지 여부를 노출하지 않는다. 회귀 방지용으로 `CustomOAuth2UserServiceTest`에 에러 코드 assertion을 추가함.
+
+### 코드 품질 (중복/구조/일관성)
+
+1. ~~**"토큰 검증" 섹션(2026-07-28 항목)의 서술이 현재 코드와 더 이상 맞지 않는다.** 문서는 "필터는 무상태 검증 원칙상 매 요청마다 DB를 조회하지 않는다"고 적고 "비활성 사용자" 구분을 보류한 이유로 "실제로 이 기능(계정 비활성화)이 아직 구현되어 있지 않다"를 들지만, 실제로는 `JwtAuthenticationFilter.authenticate()`가 이미 매 인증 요청마다 DB를 조회하고 `isWithdrawn()`/`isSuspended()`까지 확인하도록 바뀌어 있다.~~ — ✅ **(2026-08-12 해결)** 위 "토큰 검증" 섹션(88번째 줄)과 "비기능 요구사항" 표(136번째 줄)의 낡은 서술을 취소선+정정으로 반영함. **다만 이 발견이 함께 제기한 설계 질문("비활성 사용자 사유를 `AUTH_TOKEN_SUSPENDED` 등으로 구분할지")은 별도 결정 사항이라 아래에 남겨둔다.**
+   - **(2026-08-12 검토 후 보류)** "무상태 유지"/"기능 미구현" 두 전제가 사라져 재검토할 여지는 있지만, 실제로 사유를 구분하면 얻는 이득(사용자에게 "정지됨"을 알려줄 수 있음)이 오늘 고친 "계정 존재/정지 여부 비노출" 원칙과 정면으로 충돌한다 — 정지 여부를 코드로 구분해 내려주는 순간 그 자체가 계정 열거(enumeration) 벡터가 된다. 그래서 이번엔 "필터가 DB를 매번 조회한다"는 근거만 정정하고, 실제로 별도 코드를 추가하는 결정은 하지 않기로 했다. 계정 열거 방지가 우선순위에서 밀리는 상황이 되면 그때 다시 논의.
+2. ~~`AuthController.me()`(`controller/AuthController.java:171-179`)가 `JwtAuthenticationFilter.authenticate()`(`jwt/JwtAuthenticationFilter.java:99-115`)와 거의 동일한 "findById + isWithdrawn/isSuspended" 조회를 요청당 한 번 더 수행한다.~~ — ✅ **(2026-08-12 해결)** `JwtUserPrincipal`에 `nickname`/`profileImageUrl`을 추가해 필터가 이미 조회한 `User`에서 그대로 채워 넣도록 하고, `AuthController.me()`는 DB 재조회 없이 `principal`만으로 `MeResponse`를 구성하도록 바꿈 — 존재/탈퇴/정지 재확인도 필터가 이미 통과시킨 요청에만 도달하므로 함께 제거. 관련 테스트(`AuthControllerTest`, `PropertyControllerTest` 등 `JwtUserPrincipal`을 직접 생성하는 3개 테스트) 전부 통과 확인.
+3. ~~`SecurityConfig.filterChain()`(`config/SecurityConfig.java:85-101`)에서 `"/actuator/health"`가 `permitAll` 매처 목록에 두 곳(89번째 줄, 101번째 줄)에 중복 등록돼 있다. 동작상 문제는 없으나(둘 다 permitAll) 왜 나뉘어 있는지 의도가 불분명해 유지보수 시 혼동을 줄 수 있다 — 하나로 합치는 것을 권장한다.~~ — ✅ **(2026-08-12 해결)** 중복 항목 제거, `/actuator/prometheus`와 같은 곳에서 한 번만 선언하도록 정리.

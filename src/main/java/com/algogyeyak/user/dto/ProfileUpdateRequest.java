@@ -10,9 +10,14 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class ProfileUpdateRequest {
 
-    @Size(min = 2, max = 20, message = "닉네임은 2~20자여야 합니다.")
+    // 형식(NicknamePolicy)/중복 검사는 여기서 무조건 하지 않고, UserService.updateMyProfile()이
+    // "본인 기존 닉네임과 실제로 다를 때만" 수행한다 - OAuth 가입 사용자는 이 정책을 거치지 않고
+    // 만들어진 기존 닉네임(카카오/구글 값 그대로)을 가질 수 있는데, 프론트가 안 바꿔도 매 요청
+    // 그대로 재전송하는 이 필드에 @Pattern을 걸면 그 값을 안 바꾼 요청까지 막혀버리기 때문이다.
     private String nickname;
 
+    // 실측 최댓값 근거는 ProfileRegisterRequest.interestRegion 참고.
+    @Size(max = 30, message = "관심 지역은 30자를 넘을 수 없습니다.")
     private String interestRegion;
 
     private TransactionType transactionType;

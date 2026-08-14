@@ -150,11 +150,32 @@
    - 7-1. ~~페이지네이션이 전혀 없음~~ → `page`/`size`/`sort` 지원으로 해소됨. 단, 응답이 `List`에서 `PageResponse`로 바뀐 breaking change라 FE 연동 확인 필요
 8. `PropertyType`에 아파트(APARTMENT)가 없음 — 의도된 범위인지 확인
 9. 매물 수정 시 주소/매물유형/거래유형 변경이 애초에 불가능한 구조 — 요구사항의 "주소 변경 시 재정규화" 시나리오 자체가 발생할 수 없음
-10. ~~이미지 형식/크기 검증 미구현~~ → 형식(확장자 화이트리스트/프로토콜)·개수(최대 10장) 검증은 추가됨. **바이트 크기 검증은 여전히 불가능** — 실제 업로드 인프라(S3 등)가 아직 확정되지 않아서, 담당자가 정해지고 인프라가 붙은 이후에나 처리 가능
-11. 등록 이후 이미지 추가/변경/삭제가 불가능함
+10. ~~이미지 형식/크기 검증 미구현~~ → 형식(확장자 화이트리스트/프로토콜)·개수(최대 10장) 검증은 추가됨. ~~**바이트 크기 검증은 여전히 불가능** — 실제 업로드 인프라(S3 등)가 아직 확정되지 않아서, 담당자가 정해지고 인프라가 붙은 이후에나 처리 가능~~ **(2026-08-12 정정)** `PropertyImageUploadController`(`/properties/images/upload-url`, `/properties/images/confirm`) + `S3PresignService`/`S3ImagePurpose.PROPERTY`로 실제 S3 업로드 인프라와 10MB 크기 검증이 이미 구축됨. 다만 등록/수정 API의 `validateImages()`가 이 경로를 거쳤는지 확인하지 않아, 임의의 외부 http(s) 이미지 URL을 그대로 넣으면 크기 제한 없이 그대로 통과·저장됨 — 인프라·검증 로직은 있지만 등록/수정 API가 강제하지 않아 여전히 우회 가능한 상태(전수조사 결과 보안 2번 참고)
+11. ~~등록 이후 이미지 추가/변경/삭제가 불가능함~~ — **(2026-08-12 정정)** `PropertyImageUploadController`(S3 presign/confirm) 도입 이후 등록/수정(`PATCH /properties/{propertyId}`) 모두 `images` 필드로 첨부·교체가 가능해짐(전수조사 결과 도입부 참고)
 12. ~~매물 중복 등록 판단이 도로명주소가 있을 때만 동작~~ → 지번주소 폴백으로 해소됨
 13. ~~매물 신고 "기타" 사유의 입력값 길이 제한 검증이 없음~~ → 500자 제한(`REPORT_DETAIL_TOO_LONG`)으로 해소됨
 14. `PROPERTY_TYPE_NOT_SUPPORTED`는 여전히 죽은 코드. `PROPERTY_INVALID_SEARCH_CONDITION`은 서비스 코드상 size≤0 가드로 연결은 됐지만 `@PageableDefault`를 쓰는 현재 컨트롤러 흐름상 실질적으로 도달하기 어려움
 15. ~~단독/다가구 매칭정확도 안내 문구가 `DETACHED_HOUSE`에만 나가고 `MULTI_FAMILY`는 빠져 있음~~ → 둘 다 대상으로 해소됨
 16. "권한 없는 사용자에게 존재 여부를 노출하지 않는다"는 요구사항과 달리, 실제로는 404(존재하지 않음)와 403(권한 없음)을 구분해서 응답함
 17. 보증금/면적 검증이 "0 이상"이 아니라 "0 초과"(`@Positive`)로 구현되어 있음 — `PropertyRegisterRequest` Javadoc에 의도적 결정으로 문서화되어 있으나, 요구사항 문서와의 차이 자체는 남아있어 확인 필요
+
+## 전수조사 결과 (2026-08-12)
+
+재확인 결과: 기존 "남은 이슈" 중 10·11(이미지 검증/추가 불가)번은 이미 코드상 해소되어 있었다 — `PropertyImageUploadController`(`/properties/images/upload-url`, `/properties/images/confirm`) + `S3PresignService`/`S3ImagePurpose.PROPERTY`(확장자·컨텐츠타입·10MB 크기 제한)로 실제 S3 업로드 플로우가 구축되어 있으며, 등록/수정 모두 `images` 필드로 첨부·교체가 가능하다. 이 문서의 "요구사항에 없던 추가 구현"/"남은 이슈" 섹션이 이 변경 이전 시점 기준으로 남아 있어 실제 코드와 크게 벗어나 있다 — 다음 업데이트 때 해당 항목들을 정리 필요. 아래는 이 재확인 과정에서 새로 발견한 이슈다.
+
+**(2026-08-13 정정)** 위 문단이 원래 "1(제목/`title`)번도 해소됨"이라고 적고 있었으나, "남은 이슈" 목록의 실제 1번은 매매(SALE)/`askingPrice` 부재 항목이라 제목과는 무관하다 — 목록이 개정되며 항목 번호가 밀렸는데 이 문단이 따라가지 못한 허상 참조였다. 실제로 `Property.title`/`PropertyRegisterRequest.title` 필드 자체는 이미 존재하지만(코드로 확인), 이걸 지적하던 원래 "남은 이슈" 항목이 이미 목록에서 빠져 있어 정정할 대상이 없다 — 참조만 제거.
+
+### 버그/정확성
+
+1. 목록 조회 검색조건의 `region`이 LIKE 패턴에 이스케이프 없이 그대로 들어간다(`PropertyRepository.search`, `a.roadAddress LIKE CONCAT('%', :region, '%')` 부분). 사용자가 검색어에 `%`나 `_`를 포함해서 보내면(오타·복붙 등으로) SQL LIKE 와일드카드로 해석되어 의도한 것보다 넓거나 좁게 매칭될 수 있다. 본인 소유 매물만 대상이라 심각한 정보노출은 아니지만 검색 정확도 버그다. 수정 방향: region 값에서 `%`/`_`/이스케이프 문자를 치환하고 `LIKE ... ESCAPE '\'`를 사용.
+2. `PropertyImage.sortOrder`(`PropertyImage.java:41`, 빌더 파라미터 `PropertyImage.java:44-48`) 컬럼이 선언돼 있지만 실제로는 어디서도 값이 채워지지 않는다 — `PropertyService.applyImages()`(`PropertyService.java:378-388`)가 `imageUrl`/`roomType`만 설정하고 `sortOrder`는 항상 null이다. `Property.images`(`Property.java:79`, `@OneToMany`)에도 `@OrderBy`가 없어 조회 시 순서를 보장하지 않는다. Frontend `PropertyImageUploader.tsx`의 주석("BE는 순서를 보장하는 컬럼(@OrderBy 등) 없이 저장 시점의 삽입 순서를 그대로 돌려주므로...")이 이 사실을 알고 있고 "대표사진(첫 이미지)" 기능이 여기에 의존한다 — 즉 대표사진 지정이 명시적 순서 컬럼이 아니라 관찰된 동작(삽입 순서 유지)에만 의존하는 상태라, 쿼리 플랜/캐시가 바뀌면 순서가 흔들릴 수 있다. 수정 방향: `sortOrder`를 실제로 채우고 `@OrderBy("sortOrder")`를 추가하거나, 아니면 죽은 필드이니 제거.
+
+### 보안
+
+1. ~~`PropertyImageUploadController.confirm()`(`/properties/images/confirm`, `PropertyImageUploadController.java:53-61`)이 요청받은 `key`가 호출자 소유인지 전혀 검증하지 않는다. ... 수정 방향: 프로필과 동일하게 `confirm()`에 `@AuthenticationPrincipal`을 받아 `S3KeyGenerator.isPropertyImageOwnedBy(userId, key)`(공통 코드에 이미 준비되어 있음)로 소유권 검증을 추가.~~ — ✅ **(2026-08-13 해결 확인)** `dev`를 이 브랜치에 병합하는 과정에서 확인 — property 담당자가 정확히 이 방향대로 이미 수정해 `dev`에 올려뒀다. `confirm()`이 `@AuthenticationPrincipal`을 받아 `S3KeyGenerator.isPropertyImageOwnedBy(principal.userId(), request.key())`를 호출하고, 실패 시 `FILE_KEY_ACCESS_DENIED`를 던진다. 교차 도메인 오용(공통 코드의 `validatePurposePrefix()`)과 같은 purpose·다른 소유자(이번 수정) 두 경로 다 막혀 있다.
+2. `PropertyService.validateImages()`(`PropertyService.java:359-376`)는 `imageUrl`이 http(s)이고 허용 확장자로 끝나는지만 확인하며, 그 URL이 실제로 `POST /properties/images/confirm`을 거친 값인지·호출자 소유인지는 전혀 확인하지 않는다. 즉 `POST /properties`/`PATCH /properties/{id}`에 임의의 외부 http(s) 이미지 URL(예: 다른 사이트의 대용량 이미지, 또는 이미 확정된 타인의 매물 이미지 URL)을 그대로 넣어도 그대로 통과·저장된다. 새로 구축된 S3 presign 기반 바이트 크기/컨텐츠타입 검증(`S3PresignService.validateContentLength`/`confirmUpload`)은 "권장 경로"일 뿐 서버가 강제하지 않아, 이 경로를 건너뛰면 크기 제한 없는 임의 URL이 그대로 저장된다는 뜻이다. (참고: 기존 "남은 이슈" 10번은 "업로드 인프라가 없어 크기 검증이 애초에 불가능하다"였는데, 지금은 인프라·검증 로직 자체는 존재하되 등록/수정 API가 그 경로를 타도록 강제하지 않아 여전히 우회 가능하다는 쪽으로 성격이 바뀌었다 — 문서 갱신 필요.)
+
+### 코드 품질 (중복/구조/일관성)
+
+1. `ErrorCode.PROPERTY_REQUIRED_FIELD_MISSING`(`ErrorCode.java:54`)도 `PROPERTY_TYPE_NOT_SUPPORTED`와 같은 패턴의 죽은 에러코드다 — 선언 외에 코드베이스 전체에서 참조되는 곳이 없다(필수값 검증은 실제로 Bean Validation `@NotBlank`/`@NotNull`이 처리하고 일반 400으로 응답됨). 기존 문서 14번이 `PROPERTY_TYPE_NOT_SUPPORTED`만 지적했는데, 동일한 성격의 죽은 코드가 하나 더 있다.
+2. `S3KeyGenerator.normalizeExtension`(확장자 화이트리스트 검증)과 `S3PresignService.validateContentType`(Content-Type 화이트리스트 검증)이 서로 독립적으로만 검증되고 상호 일치 여부는 확인하지 않는다 — 예를 들어 `fileExtension="jpg"`, `contentType="image/gif"`처럼 서로 안 맞는 조합도 `S3ImagePurpose.PROPERTY`의 개별 화이트리스트 안에만 들면 presigned URL이 발급된다. 심각한 문제는 아니지만(실제 파일 바이트까지 확인하는 건 아니라 확장자-타입 위장은 애초에 완전히 막기 어려움), 확장자와 Content-Type이 다른 파일이 그대로 저장될 수 있다는 점은 향후 이미지 처리(리사이징 등) 도입 시 참고할 필요가 있다.
