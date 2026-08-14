@@ -60,13 +60,72 @@ class ChecklistTemplateSeederTest {
     }
 
     @Test
-    @DisplayName("이미 템플릿이 있으면 다시 저장하지 않는다")
-    void doesNotReseedWhenTemplatesAlreadyExist() throws Exception {
-        when(repository.count()).thenReturn(23L);
+    @DisplayName("일부 문항만 이미 있으면 없는 문항만 추가로 저장한다")
+    void insertsOnlyMissingTemplatesWhenSomeAlreadyExist() throws Exception {
+        when(repository.count()).thenReturn(1L);
+        ChecklistItemTemplate existing = mock(ChecklistItemTemplate.class);
+        when(existing.getContent()).thenReturn("채광은 충분한가요?");
+        when(existing.getImages()).thenReturn(List.of());
+        when(repository.findAll()).thenReturn(List.of(existing));
+        when(repository.saveAll(anyList())).thenReturn(List.of());
 
         seeder.run(new DefaultApplicationArguments());
 
-        verify(repository, never()).saveAll(anyList());
+        int desiredCount = ChecklistTemplateSeedData.initialTemplates().size();
+        org.mockito.ArgumentCaptor<List<ChecklistItemTemplate>> captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(repository).saveAll(captor.capture());
+        assertThat(captor.getValue()).hasSize(desiredCount - 1);
+        assertThat(captor.getValue()).noneMatch(template -> template.getContent().equals("채광은 충분한가요?"));
+    }
+
+    @Test
+    @DisplayName("이미 있는 문항은 v3 시드 설계(순번 등)에 맞춰 재동기화하고 version도 갱신한다")
+    void resyncsExistingTemplateToLatestSeed() throws Exception {
+        when(repository.count()).thenReturn(1L);
+        ChecklistItemTemplate existing = mock(ChecklistItemTemplate.class);
+        when(existing.getContent()).thenReturn("채광은 충분한가요?");
+        when(existing.getImages()).thenReturn(List.of());
+        when(repository.findAll()).thenReturn(List.of(existing));
+        when(repository.saveAll(anyList())).thenReturn(List.of());
+
+        seeder.run(new DefaultApplicationArguments());
+
+        verify(existing).resyncFromSeed(
+                eq(ChecklistCategory.INDOOR), eq("채광은 충분한가요?"), any(), any(),
+                eq(ChecklistImportance.GENERAL), eq(ChecklistItemType.CHECK), any(), any(),
+                eq(2), any(), eq(3)
+        );
+    }
+
+    @Test
+    @DisplayName("기존 문항 중 예시 이미지가 아직 없는 문항에는 이미지를 뒤늦게 연결한다")
+    void attachesImagesToExistingTemplateThatNeverGotThem() throws Exception {
+        when(repository.count()).thenReturn(1L);
+        ChecklistItemTemplate existing = mock(ChecklistItemTemplate.class);
+        when(existing.getContent()).thenReturn("벽면·천장·바닥에 누수 흔적이나 곰팡이가 없나요?");
+        when(existing.getImages()).thenReturn(List.of());
+        when(repository.findAll()).thenReturn(List.of(existing));
+        when(repository.saveAll(anyList())).thenReturn(List.of());
+        when(s3PresignService.generateDownloadUrl(any(), eq(S3ImagePurpose.CHECKLIST_TEMPLATE)))
+                .thenReturn("https://bucket.s3.ap-northeast-2.amazonaws.com/dummy.jpg");
+
+        seeder.run(new DefaultApplicationArguments());
+
+        verify(imageRepository, times(3)).save(any());
+    }
+
+    @Test
+    @DisplayName("기존 문항에 이미 예시 이미지가 붙어있으면 다시 연결하지 않는다")
+    void skipsImageAttachmentWhenExistingTemplateAlreadyHasImages() throws Exception {
+        when(repository.count()).thenReturn(1L);
+        ChecklistItemTemplate existing = mock(ChecklistItemTemplate.class);
+        when(existing.getContent()).thenReturn("벽면·천장·바닥에 누수 흔적이나 곰팡이가 없나요?");
+        when(existing.getImages()).thenReturn(List.of(mock(ChecklistItemTemplateImage.class)));
+        when(repository.findAll()).thenReturn(List.of(existing));
+        when(repository.saveAll(anyList())).thenReturn(List.of());
+
+        seeder.run(new DefaultApplicationArguments());
+
         verify(imageRepository, never()).save(any());
     }
 
