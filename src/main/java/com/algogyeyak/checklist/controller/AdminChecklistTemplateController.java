@@ -3,10 +3,13 @@ package com.algogyeyak.checklist.controller;
 import com.algogyeyak.admin.service.AdminActionLog;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
+import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageCreateRequest;
+import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateResponse;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateUpdateRequest;
 import com.algogyeyak.checklist.service.AdminChecklistTemplateService;
 import com.algogyeyak.global.response.ApiResponse;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -70,6 +73,48 @@ public class AdminChecklistTemplateController {
     public ApiResponse<Void> delete(@AuthenticationPrincipal JwtUserPrincipal principal, @PathVariable Long templateId) {
         adminChecklistTemplateService.delete(principal.userId(), templateId);
         AdminActionLog.record(principal.userId(), "DELETE_CHECKLIST_TEMPLATE", "templateId", templateId);
+        return ApiResponse.successWithoutData();
+    }
+
+    // (2026-08-14) 예시 이미지 관리 - 관리자 업로드 화면 없이 URL만 입력받는다. 실제 파일은 S3 콘솔에
+    // 직접 올린다는 전제(관리자 페이지에서 파일 업로드까지 지원하려면 presign/confirm 흐름이 별도로
+    // 필요 - AdminChecklistTemplateService.listImages/addImage/deleteImage 주석 참고).
+    @Operation(summary = "문항 예시 이미지 목록 조회", description = "문항에 연결된 예시 이미지를 표시순서대로 반환한다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "존재하지 않는 문항 (ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND)")
+    @GetMapping("/{templateId}/images")
+    public ApiResponse<List<AdminChecklistItemTemplateImageResponse>> listImages(@PathVariable Long templateId) {
+        return ApiResponse.success(adminChecklistTemplateService.listImages(templateId));
+    }
+
+    @Operation(summary = "문항 예시 이미지 추가", description = "이미 S3에 업로드된 이미지의 URL을 받아 문항에 연결한다(파일 업로드 자체는 지원하지 않음). 새 이미지는 항상 표시순서 맨 뒤에 추가된다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "추가 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "imageUrl이 비어있음")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "존재하지 않는 문항 (ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND)")
+    @PostMapping("/{templateId}/images")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<AdminChecklistItemTemplateImageResponse> addImage(
+            @AuthenticationPrincipal JwtUserPrincipal principal,
+            @PathVariable Long templateId,
+            @Valid @RequestBody AdminChecklistItemTemplateImageCreateRequest request
+    ) {
+        AdminChecklistItemTemplateImageResponse result =
+                adminChecklistTemplateService.addImage(principal.userId(), templateId, request);
+        AdminActionLog.record(principal.userId(), "ADD_CHECKLIST_TEMPLATE_IMAGE", "templateId", templateId);
+        return ApiResponse.success(result);
+    }
+
+    @Operation(summary = "문항 예시 이미지 삭제", description = "문항에 연결된 예시 이미지를 삭제한다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "삭제 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "존재하지 않거나 다른 문항 소유의 이미지 (ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND)")
+    @DeleteMapping("/{templateId}/images/{imageId}")
+    public ApiResponse<Void> deleteImage(
+            @AuthenticationPrincipal JwtUserPrincipal principal,
+            @PathVariable Long templateId,
+            @PathVariable Long imageId
+    ) {
+        adminChecklistTemplateService.deleteImage(principal.userId(), templateId, imageId);
+        AdminActionLog.record(principal.userId(), "DELETE_CHECKLIST_TEMPLATE_IMAGE", "imageId", imageId);
         return ApiResponse.successWithoutData();
     }
 }
