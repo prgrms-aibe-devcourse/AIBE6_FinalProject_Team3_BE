@@ -2,6 +2,7 @@ package com.algogyeyak.user.dto;
 
 import com.algogyeyak.user.enums.CurrentStage;
 import com.algogyeyak.user.enums.TransactionType;
+import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -15,6 +16,8 @@ public class ProfileUpdateRequest {
     // 그대로 재전송하는 이 필드에 @Pattern을 걸면 그 값을 안 바꾼 요청까지 막혀버리기 때문이다.
     private String nickname;
 
+    // 실측 최댓값 근거는 ProfileRegisterRequest.interestRegion 참고.
+    @Size(max = 30, message = "관심 지역은 30자를 넘을 수 없습니다.")
     private String interestRegion;
 
     private TransactionType transactionType;

@@ -32,6 +32,8 @@ public class UserPreference {
     @JoinColumn(name = "user_id", nullable = false, unique = true)
     private User user;
 
+    // 길이 제약 근거는 ProfileRegisterRequest.interestRegion 참고.
+    @Column(length = 30)
     private String interestRegion;
 
     @Enumerated(EnumType.STRING)
