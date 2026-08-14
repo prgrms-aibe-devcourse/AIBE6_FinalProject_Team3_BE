@@ -387,6 +387,30 @@ class CustomOAuth2UserServiceTest {
         assertEquals("test@kakao.com", user.getEmail());
     }
 
+    // 회귀 테스트 - provider가 닉네임을 안 줘서(getNickname() == null) 최초 nickname 자체가 이미
+    // "provider_providerId" fallback 형식이었는데, 그 값이 다른 유저의 닉네임과 우연히 겹친
+    // 경우다. fallbackNickname을 다시 계산해도 지금 막 충돌한 nickname과 완전히 같은 문자열이라
+    // 재시도는 무의미한데, 예전엔 이걸 모르고 재귀를 한 번 더 돈 뒤 결국 email_conflict로
+    // 떨어져 실제 원인(닉네임 충돌)과 다른 에러가 노출됐다.
+    @Test
+    void throwsNicknameConflictInsteadOfEmailConflictWhenFallbackNicknameItselfCollides() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.empty());
+        when(repository.existsByNickname("kakao_123")).thenReturn(true);
+        when(repository.saveAndFlush(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+
+        OAuth2AuthenticationException exception = assertThrows(OAuth2AuthenticationException.class,
+                () -> service.processOAuth2User("kakao", kakaoOAuth2User(123L, null, null, null)));
+
+        assertEquals("oauth_nickname_conflict", exception.getError().getErrorCode());
+        // 재시도 자체가 무의미하므로 saveAndFlush는 딱 한 번만 시도돼야 한다(무한 재귀 없음의 증거).
+        verify(repository).saveAndFlush(any(User.class));
+    }
+
     // --- 다중 소셜 연동(user_social_accounts) 전용 시나리오 ---
 
     @Test

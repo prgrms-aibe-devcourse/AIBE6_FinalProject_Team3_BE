@@ -240,6 +240,31 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
+    @DisplayName("회귀 테스트 - 비활성 문항을 재활성화하면 낡은 버전이 아니라 현재 활성 집합 기준 버전으로 재정렬된다")
+    void updateRealignsVersionWhenReactivatingTemplateWithStaleVersion() {
+        // 과거에 버전 5일 때 비활성화된 문항 - 그 사이 다른 문항들은 create()를 거치며 버전 2로
+        // 올라와 있다. 이 문항을 그대로 재활성화하면(버전을 안 건드리면) 활성 집합에 버전 2와 5가
+        // 섞여, ChecklistService.createChecklist()가 그 이후 임의의 버전을 새 체크리스트에 찍는다.
+        ChecklistItemTemplate stale = template(1L, 5, 1, false);
+        ChecklistItemTemplate currentlyActive = template(2L, 2, 2);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(stale));
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(currentlyActive));
+
+        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
+                ACTOR_ID,
+                1L,
+                new AdminChecklistItemTemplateUpdateRequest(
+                        ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
+                        ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null, 9, null, true
+                )
+        );
+
+        assertThat(result.active()).isTrue();
+        assertThat(result.version()).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("존재하지 않는 매물유형으로 수정하면 ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE 예외가 발생한다")
     void updateThrowsWhenApplicablePropertyTypeIsUnknown() {
         ChecklistItemTemplate existing = template(1L, 2, 1);

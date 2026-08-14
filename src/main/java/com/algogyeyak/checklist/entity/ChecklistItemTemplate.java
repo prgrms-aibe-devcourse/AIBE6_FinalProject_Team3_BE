@@ -138,4 +138,13 @@ public class ChecklistItemTemplate {
         this.applicablePropertyTypes = applicablePropertyTypes;
         this.active = active;
     }
+
+    /**
+     * 비활성 → 활성으로 재활성화되는 경우에만 호출한다. 비활성 상태 동안에는 버전을 건드리지 않으므로
+     * (update() javadoc 참고), 과거에 다른 버전으로 비활성화됐던 문항을 그대로 재활성화하면 활성
+     * 문항 집합의 버전이 뒤섞인다 - 재활성화 시점의 활성 집합 기준 버전으로 다시 맞춰준다.
+     */
+    public void realignVersionOnReactivation(int version) {
+        this.version = version;
+    }
 }
