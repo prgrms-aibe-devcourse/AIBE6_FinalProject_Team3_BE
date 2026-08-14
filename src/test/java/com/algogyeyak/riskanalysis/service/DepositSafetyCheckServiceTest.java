@@ -62,7 +62,6 @@ class DepositSafetyCheckServiceTest {
         ReflectionTestUtils.setField(policyConfig, "jeonseRatioCautionFrom", 80);
         ReflectionTestUtils.setField(policyConfig, "jeonseRatioWarnFrom", 100);
         ReflectionTestUtils.setField(policyConfig, "jeonseRatioWarnTo", 150);
-        ReflectionTestUtils.setField(policyConfig, "jeonseRatioAlertOver", 150);
     }
 
     @Test

@@ -171,7 +171,7 @@ public class DepositSafetyCheckService {
     }
 
     // 안전(80% 미만)/주의(80~100%)/위험(100~150%)/입력값 재확인(150% 초과) 4단계 - 임계값은
-    // RiskPolicyConfig의 jeonseRatioCautionFrom/WarnFrom/WarnTo/AlertOver로 관리한다.
+    // RiskPolicyConfig의 jeonseRatioCautionFrom/WarnFrom/WarnTo로 관리한다.
     private String buildExplanation(BigDecimal ratioPercent) {
         int ratio = ratioPercent.intValue();
         if (ratio < policyConfig.getJeonseRatioCautionFrom()) {
