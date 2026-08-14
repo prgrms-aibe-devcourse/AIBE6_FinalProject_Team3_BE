@@ -6,16 +6,24 @@ import com.algogyeyak.checklist.repository.ChecklistItemTemplateImageRepository;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.global.s3.util.S3ImagePurpose;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 앱이 시작될 때 체크리스트 템플릿이 비어있으면 초기 시드 데이터를 채워 넣는다.
- * 마이그레이션 도구(Flyway 등) 도입 전까지 쓰는 임시 방식이다.
+ * 앱이 시작될 때 체크리스트 템플릿을 시드 데이터와 맞춘다. 테이블이 완전히 비어있으면(최초 배포) 전체를
+ * 새로 채우고, 이미 데이터가 있으면(운영처럼 이전 버전이 이미 시딩된 경우) content(문항 텍스트)로
+ * 매칭해 없는 문항만 추가하고 기존 문항은 이번 시드 설계(순번 등)에 맞춰 재동기화한다 - 그래야 배포
+ * 후에도 새로 추가된 시드 문항이 운영 DB에 실제로 반영된다(2026-08-14, 체크리스트 v3 배포 후 신규
+ * 6개 문항이 운영에 반영 안 됐던 문제를 계기로 추가됨). 마이그레이션 도구(Flyway 등) 도입 전까지
+ * 쓰는 임시 방식이다.
  */
 @Component
 @RequiredArgsConstructor
@@ -50,14 +58,51 @@ public class ChecklistTemplateSeeder implements ApplicationRunner {
     private final S3PresignService s3PresignService;
 
     @Override
+    @Transactional
     public void run(ApplicationArguments args) {
-        if (checklistItemTemplateRepository.count() > 0) {
+        List<ChecklistItemTemplate> desired = ChecklistTemplateSeedData.initialTemplates();
+
+        if (checklistItemTemplateRepository.count() == 0) {
+            List<ChecklistItemTemplate> saved = checklistItemTemplateRepository.saveAll(desired);
+            attachImages(saved);
             return;
         }
 
-        List<ChecklistItemTemplate> saved =
-                checklistItemTemplateRepository.saveAll(ChecklistTemplateSeedData.initialTemplates());
-        attachImages(saved);
+        resyncToLatestSeed(desired);
+    }
+
+    // 이미 시딩된 DB(운영 등)에 새 시드 버전이 배포됐을 때, 아직 없는 문항만 추가하고 기존 문항은 이번
+    // 시드 설계(카테고리·순번 등)에 맞춰 재동기화한다. 문항 식별은 content(문항 텍스트)로 한다 - 시드
+    // 데이터에서 문항이 추가될 때 기존 문항의 텍스트를 바꾸는 경우는 없어서 이 매칭이 안전하다.
+    // 이미지도 아직 안 붙어있는 문항(신규 추가된 문항 + 예전에 이미지 연결 기능이 없던 시절 시딩된
+    // 기존 문항 둘 다)에만 뒤늦게 붙여서, 재배포될 때마다 중복으로 쌓이지 않게 한다.
+    private void resyncToLatestSeed(List<ChecklistItemTemplate> desired) {
+        Map<String, ChecklistItemTemplate> existingByContent = checklistItemTemplateRepository.findAll().stream()
+                .collect(Collectors.toMap(ChecklistItemTemplate::getContent, Function.identity(), (a, b) -> a));
+
+        List<ChecklistItemTemplate> missing = new ArrayList<>();
+        List<ChecklistItemTemplate> resyncedWithoutImages = new ArrayList<>();
+        for (ChecklistItemTemplate wanted : desired) {
+            ChecklistItemTemplate existing = existingByContent.get(wanted.getContent());
+            if (existing == null) {
+                missing.add(wanted);
+                continue;
+            }
+            existing.resyncFromSeed(wanted.getCategory(), wanted.getContent(), wanted.getGuideText(), wanted.getHelperText(),
+                    wanted.getImportance(), wanted.getItemType(), wanted.getOptions(), wanted.getCode(),
+                    wanted.getDisplayOrder(), wanted.getApplicablePropertyTypes(), wanted.getVersion());
+            if (existing.getImages().isEmpty()) {
+                resyncedWithoutImages.add(existing);
+            }
+        }
+
+        List<ChecklistItemTemplate> savedMissing = missing.isEmpty()
+                ? List.of()
+                : checklistItemTemplateRepository.saveAll(missing);
+
+        List<ChecklistItemTemplate> needsImages = new ArrayList<>(savedMissing);
+        needsImages.addAll(resyncedWithoutImages);
+        attachImages(needsImages);
     }
 
     private void attachImages(List<ChecklistItemTemplate> savedTemplates) {

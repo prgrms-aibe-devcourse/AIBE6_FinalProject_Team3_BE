@@ -158,6 +158,37 @@ public class ChecklistItemTemplate {
     }
 
     /**
+     * 시더가 이미 시딩된 DB(운영 등)를 새 시드 버전으로 재동기화할 때 쓴다 - update()와 달리 version도
+     * 함께 갱신한다(단순 문구 수정이 아니라 실제로 새 시드 버전을 반영하는 작업이라서). active는
+     * 건드리지 않는다 - 관리자가 수동으로 비활성화했을 수 있는데 시더 재동기화가 그걸 되돌리면 안 된다.
+     */
+    public void resyncFromSeed(
+            ChecklistCategory category,
+            String content,
+            String guideText,
+            String helperText,
+            ChecklistImportance importance,
+            ChecklistItemType itemType,
+            String options,
+            ChecklistItemCode code,
+            int displayOrder,
+            String applicablePropertyTypes,
+            int version
+    ) {
+        this.category = category;
+        this.content = content;
+        this.guideText = guideText;
+        this.helperText = helperText;
+        this.importance = importance;
+        this.itemType = itemType;
+        this.options = options;
+        this.code = code;
+        this.displayOrder = displayOrder;
+        this.applicablePropertyTypes = applicablePropertyTypes;
+        this.version = version;
+    }
+
+    /**
      * 비활성 → 활성으로 재활성화되는 경우에만 호출한다. 비활성 상태 동안에는 버전을 건드리지 않으므로
      * (update() javadoc 참고), 과거에 다른 버전으로 비활성화됐던 문항을 그대로 재활성화하면 활성
      * 문항 집합의 버전이 뒤섞인다 - 재활성화 시점의 활성 집합 기준 버전으로 다시 맞춰준다.
