@@ -100,6 +100,7 @@ public class Checklist {
         for (ChecklistItemTemplate template : templates) {
             checklist.items.add(ChecklistItem.builder()
                     .checklist(checklist)
+                    .template(template)
                     .category(template.getCategory())
                     .content(template.getContent())
                     .guideText(template.getGuideText())

@@ -42,6 +42,12 @@ public class ChecklistItem {
     @JoinColumn(name = "checklist_id", nullable = false)
     private Checklist checklist;
 
+    // 예시 이미지를 조회할 때만 쓰는 참조 - 원본 템플릿이 삭제되거나(관리자 기능 없음, 발생 안 함)
+    // null일 수 있는 과거 데이터(이 컬럼 추가 이전에 생성된 체크리스트)를 감안해 nullable로 둔다.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "template_id")
+    private ChecklistItemTemplate template;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ChecklistCategory category;
@@ -87,6 +93,7 @@ public class ChecklistItem {
     @Builder
     private ChecklistItem(
             Checklist checklist,
+            ChecklistItemTemplate template,
             ChecklistCategory category,
             String content,
             String guideText,
@@ -97,6 +104,7 @@ public class ChecklistItem {
             int displayOrder
     ) {
         this.checklist = checklist;
+        this.template = template;
         this.category = category;
         this.content = content;
         this.guideText = guideText;
