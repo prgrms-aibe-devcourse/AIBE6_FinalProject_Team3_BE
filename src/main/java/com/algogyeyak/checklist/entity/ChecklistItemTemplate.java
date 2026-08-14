@@ -8,13 +8,17 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * 체크리스트 문항 템플릿. 실제 체크리스트(Checklist/ChecklistItem)는 여기서 내용을 스냅샷으로
@@ -72,6 +76,12 @@ public class ChecklistItemTemplate {
     // 매물유형별로 템플릿 전체를 나누지 않고, 일부 문항만 얇게 필터링하기 위한 용도라 별도 컬렉션 테이블 없이 문자열로 둔다.
     @Column(name = "applicable_property_types")
     private String applicablePropertyTypes;
+
+    // 예시 이미지(참고용). ChecklistItem으로 스냅샷 복사되지 않고 항상 이 템플릿을 통해 조회한다 -
+    // 자세한 이유는 ChecklistItemTemplateImage 클래스 주석 참고.
+    @OrderBy("displayOrder ASC")
+    @OneToMany(mappedBy = "template")
+    private List<ChecklistItemTemplateImage> images = new ArrayList<>();
 
     @Builder
     private ChecklistItemTemplate(
