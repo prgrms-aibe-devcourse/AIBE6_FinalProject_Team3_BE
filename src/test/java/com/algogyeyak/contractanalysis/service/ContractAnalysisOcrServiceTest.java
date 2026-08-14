@@ -19,7 +19,8 @@ import org.springframework.web.multipart.MultipartFile;
 class ContractAnalysisOcrServiceTest {
 
     private final ClovaOcrClient clovaOcrClient = mock(ClovaOcrClient.class);
-    private final ContractAnalysisOcrService service = new ContractAnalysisOcrService(clovaOcrClient);
+    private final ContractAnalysisOcrService service =
+            new ContractAnalysisOcrService(clovaOcrClient, new ImagePreprocessor());
 
     private MultipartFile jpegImage() {
         MultipartFile image = mock(MultipartFile.class);
