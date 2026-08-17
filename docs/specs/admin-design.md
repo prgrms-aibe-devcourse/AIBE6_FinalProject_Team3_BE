@@ -51,7 +51,7 @@
 | 기능 | 원 계획(2026-07-31 등) | 실제 구현 |
 |---|---|---|
 | 유저 관리: 조회+검색 | 이메일/닉네임/권한/상태 필터 | ✅ `GET /admin/users` — email/nickname 부분일치, role/status 정확매칭, 페이지네이션(`Pageable`, 정렬 필드 화이트리스트 `createdAt`/`nickname`/`email`) |
-| 유저 관리: 상세 | — | ~~✅ `GET /admin/users/{id}`~~ **(제거됨, 2026-08-14 죽은 코드 감사)** 프론트가 목록 재조회로만 화면을 갱신하고 이 엔드포인트를 호출한 적이 없어 삭제됨. 이 표는 기존 계획 대비 실제를 기록하는 문서라 삭제 이력만 남긴다 |
+| 유저 관리: 상세 | — | ~~✅ `GET /admin/users/{id}`~~ **(제거됨, 2026-08-14 죽은 코드 감사)** 백엔드 엔드포인트/서비스/테스트는 있었지만 프론트 어디서도 이 API를 호출한 적이 없어 삭제됨(`2026-08-14-defensive-dead-code-audit.md` admin #3). 이 표는 기존 계획 대비 실제를 기록하는 문서라 삭제 이력만 남긴다 |
 | 유저 관리: 권한 변경 | USER↔ADMIN | ✅ `PATCH /admin/users/{id}/role` — 자기 자신 대상 차단(컨트롤러), 마지막 활성 관리자 강등 차단(`rejectIfLastActiveAdmin`, 2026-08-10부터 `PESSIMISTIC_WRITE`로 원자화), 탈퇴 유저 대상 차단(**2026-08-14부터** `updateRoleIfNotWithdrawn` 조건부 UPDATE — 아래 "전수조사 결과" 참고) |
 | 유저 관리: 정지/활성화 | — | ✅ `PATCH /admin/users/{id}/status` — ACTIVE/SUSPENDED만 허용(WITHDRAWN은 본인 탈퇴 전용이라 제외), 자기 자신/마지막 활성 관리자/탈퇴 유저 차단 |
 | 유저 관리: 상태 일괄 변경 | *(2026-08-13 멘토링 피드백으로 신규 추가)* | ✅ `PATCH /admin/users/bulk-status` — 아래 "유저 상태 일괄 변경" 섹션 참고 |
