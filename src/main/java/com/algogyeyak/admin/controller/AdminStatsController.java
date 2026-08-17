@@ -3,6 +3,8 @@ package com.algogyeyak.admin.controller;
 import com.algogyeyak.admin.dto.AdminDashboardStatsResponse;
 import com.algogyeyak.admin.service.AdminStatsService;
 import com.algogyeyak.global.response.ApiResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -21,11 +23,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/admin/stats")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN')")
+@Tag(name = "Admin - Stats", description = "관리자 전용 통계 대시보드 API")
 public class AdminStatsController {
 
     private final AdminStatsService adminStatsService;
 
     // startDate/endDate를 생략하면 오늘 기준 최근 14일로 동작한다(AdminStatsService 기본값).
+    @Operation(summary = "대시보드 통계 조회", description = "기간(startDate~endDate)별 관리자 대시보드 통계를 반환한다. 기간 생략 시 최근 14일 기준.")
     @GetMapping("/dashboard")
     public ResponseEntity<ApiResponse<AdminDashboardStatsResponse>> dashboard(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
