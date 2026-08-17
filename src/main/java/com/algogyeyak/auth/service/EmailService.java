@@ -23,6 +23,14 @@ public class EmailService {
     @Value("${app.mail.from}")
     private String fromAddress;
 
+    // 이메일 본문의 "N분간 유효" 문구를 실제 TTL 설정값에서 계산한다 - 하드코딩하면 설정만 바뀌었을 때
+    // 본문 문구가 조용히 틀려진다(EmailVerificationService/PasswordResetService가 같은 값으로 TTL을 건다).
+    @Value("${app.email-verification.code-validity-seconds}")
+    private long codeValiditySeconds;
+
+    @Value("${app.password-reset.token-validity-seconds}")
+    private long resetTokenValiditySeconds;
+
     public EmailService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
     }
@@ -37,8 +45,8 @@ public class EmailService {
 
                 인증번호: %s
 
-                인증번호는 발급 후 5분간 유효합니다. 본인이 요청하지 않았다면 이 메일을 무시해주세요.
-                """.formatted(code));
+                인증번호는 발급 후 %d분간 유효합니다. 본인이 요청하지 않았다면 이 메일을 무시해주세요.
+                """.formatted(code, codeValiditySeconds / 60));
         send(message);
     }
 
@@ -52,9 +60,9 @@ public class EmailService {
 
                 %s
 
-                이 링크는 발급 후 30분간 유효하며, 1회만 사용할 수 있습니다. 본인이 요청하지 않았다면
+                이 링크는 발급 후 %d분간 유효하며, 1회만 사용할 수 있습니다. 본인이 요청하지 않았다면
                 이 메일을 무시해주세요 - 링크를 클릭하지 않으면 비밀번호는 변경되지 않습니다.
-                """.formatted(resetLink));
+                """.formatted(resetLink, resetTokenValiditySeconds / 60));
         send(message);
     }
 
