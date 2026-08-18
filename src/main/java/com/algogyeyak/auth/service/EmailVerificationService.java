@@ -63,10 +63,10 @@ public class EmailVerificationService {
     public void requestCode(String email) {
         String normalizedEmail = EmailNormalizer.normalize(email);
 
-        if (userRepository.existsByEmail(normalizedEmail)) {
-            throw new BusinessException(ErrorCode.AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS);
-        }
-
+        // 쿨다운 확인을 계정 존재 확인보다 먼저 해야 한다 - 순서가 반대였을 때는 "이미 가입된
+        // 이메일"로 확정되는 분기가 이 메서드의 다른 모든 결과(미가입 이메일의 쿨다운, 코드
+        // 확인의 maxAttempts)와 달리 아무 속도 제한도 받지 않아, 이 엔드포인트가 원래도 의도된
+        // 이메일-존재 오라클이라는 점을 감안해도 무제한 속도로 이메일을 열거할 수 있었다.
         String cooldownKey = cooldownKey(normalizedEmail);
         Boolean cooldownSet;
         try {
@@ -77,6 +77,10 @@ public class EmailVerificationService {
         }
         if (!Boolean.TRUE.equals(cooldownSet)) {
             throw new BusinessException(ErrorCode.AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS);
+        }
+
+        if (userRepository.existsByEmail(normalizedEmail)) {
+            throw new BusinessException(ErrorCode.AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS);
         }
 
         String code = generateCode();
@@ -93,7 +97,20 @@ public class EmailVerificationService {
             emailService.sendVerificationCode(normalizedEmail, code);
         } catch (MailException e) {
             log.error("이메일 인증번호 발송 실패 email={}", normalizedEmail, e);
+            // 쿨다운은 실제 발송 성공을 전제로 한 제한이다 - 발송 자체가 서버 쪽 이유(SMTP 일시
+            // 장애 등)로 실패했는데 쿨다운만 그대로 남으면, 사용자는 코드/링크를 받지도 못한 채
+            // 서버 잘못으로 60초를 그냥 기다려야 한다. 발송 실패는 사용자 잘못이 아니므로 쿨다운을
+            // 풀어 즉시 재시도할 수 있게 한다.
+            releaseCooldownBestEffort(cooldownKey, normalizedEmail);
             throw new BusinessException(ErrorCode.EMAIL_SEND_FAILED);
+        }
+    }
+
+    private void releaseCooldownBestEffort(String cooldownKey, String normalizedEmail) {
+        try {
+            redisTemplate.delete(cooldownKey);
+        } catch (DataAccessException e) {
+            log.warn("메일 발송 실패 후 쿨다운 해제 실패(TTL로 자연 정리됨) email={}", normalizedEmail, e);
         }
     }
 

@@ -5,8 +5,13 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
+import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -17,6 +22,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class LocalAuthService {
 
+    private static final Logger log = LoggerFactory.getLogger(LocalAuthService.class);
+
     // login()이 계정 없음/소셜 전용 계정(passwordHash 없음)일 때 BCrypt 비교 자체를 건너뛰면,
     // 그 경로가 실제 비밀번호 불일치 경로보다 눈에 띄게 빨라 응답 시간만으로 "이 이메일에 로컬
     // 비밀번호가 있는지"를 알아낼 수 있다(에러 메시지/코드는 이미 동일하게 처리돼 있었지만 처리
@@ -25,24 +32,35 @@ public class LocalAuthService {
     private static final String DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY =
             "$2a$10$CwTycUXWue0Thq9StjUM0uJ8Q0kQAr9Z6FkQx9F.C2t2CSqDNXW0e";
 
+    private static final String LOGIN_ATTEMPTS_KEY_PREFIX = "auth:login:attempts:";
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailVerificationService emailVerificationService;
     private final TransactionTemplate requiresNewTransactionTemplate;
+    private final StringRedisTemplate redisTemplate;
 
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
+
+    @Value("${app.login.max-attempts}")
+    private int loginMaxAttempts;
+
+    @Value("${app.login.lockout-window-seconds}")
+    private long loginLockoutWindowSeconds;
 
     public LocalAuthService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             EmailVerificationService emailVerificationService,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            StringRedisTemplate redisTemplate) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailVerificationService = emailVerificationService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.redisTemplate = redisTemplate;
     }
 
     @Transactional
@@ -112,7 +130,27 @@ public class LocalAuthService {
 
     @Transactional(readOnly = true)
     public User login(String email, String rawPassword) {
-        User user = userRepository.findByEmail(EmailNormalizer.normalize(email))
+        String normalizedEmail = EmailNormalizer.normalize(email);
+
+        // 무차별대입 방지 - 이메일 존재 여부와 무관하게(계정이 없어도) 항상 같은 방식으로
+        // 카운트해야 위 타이밍 안전장치와 같은 이유로 계정 존재 여부가 새어나가지 않는다.
+        // EmailVerificationService.confirmCode()의 maxAttempts와 동일한 패턴 - Redis 장애 시에는
+        // 가용성을 우선해 로그인 자체를 막지 않는다(무차별대입 방지가 로그인 가용성보다 우선순위가
+        // 높지 않다는 판단).
+        String attemptsKeyName = loginAttemptsKey(normalizedEmail);
+        try {
+            Long attempts = redisTemplate.opsForValue().increment(attemptsKeyName);
+            if (attempts != null && attempts == 1L) {
+                redisTemplate.expire(attemptsKeyName, Duration.ofSeconds(loginLockoutWindowSeconds));
+            }
+            if (attempts != null && attempts > loginMaxAttempts) {
+                throw new BusinessException(ErrorCode.AUTH_TOO_MANY_LOGIN_ATTEMPTS);
+            }
+        } catch (DataAccessException e) {
+            log.warn("Redis 장애로 로그인 시도 횟수 확인 실패 - 가용성을 우선해 로그인은 계속 진행합니다", e);
+        }
+
+        User user = userRepository.findByEmail(normalizedEmail)
                 .filter(found -> !found.isWithdrawn() && !found.isSuspended())
                 .orElse(null);
 
@@ -128,7 +166,18 @@ public class LocalAuthService {
             throw new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS);
         }
 
+        // 로그인 성공 - 이 이메일에 대한 시도 횟수를 리셋한다(실패하면 TTL로 자연 정리되므로 무시해도 무방).
+        try {
+            redisTemplate.delete(attemptsKeyName);
+        } catch (DataAccessException e) {
+            log.warn("로그인 성공 후 시도 횟수 초기화 실패(TTL로 자연 정리됨) email={}", normalizedEmail, e);
+        }
+
         return user;
+    }
+
+    private static String loginAttemptsKey(String normalizedEmail) {
+        return LOGIN_ATTEMPTS_KEY_PREFIX + normalizedEmail;
     }
 
     /**

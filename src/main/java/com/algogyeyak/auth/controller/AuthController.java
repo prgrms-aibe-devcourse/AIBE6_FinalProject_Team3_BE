@@ -222,6 +222,7 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "로그인 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 형식이 올바르지 않음 (이메일/비밀번호 누락)")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "이메일 또는 비밀번호가 올바르지 않음 (AUTH_INVALID_CREDENTIALS)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "같은 이메일로 로그인 시도가 너무 많음 (AUTH_TOO_MANY_LOGIN_ATTEMPTS)")
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<MeResponse>> login(
             @Valid @RequestBody LoginRequest request, HttpServletResponse response) {
