@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -96,23 +97,44 @@ class PropertyImageOrphanCleanupJobTest {
     void 삭제_후보_비율이_임계치를_넘으면_아무것도_삭제하지_않는다() {
         // DB 조회가 비정상적으로 비어(연결 실패/잘못된 환경 등) 참조된 이미지가 하나도 없다고 나온
         // 상황을 재현한다 - 실제로 2026-08-18에 로컬 테스트에서 이 시나리오로 65건이 전부 삭제됐다.
+        // 서킷브레이커의 표본 하한(MIN_OBJECTS_FOR_CIRCUIT_BREAKER=10)을 넘도록 객체를 충분히 둔다.
         double strictRatio = 0.5;
         PropertyImageOrphanCleanupJob strictJob = new PropertyImageOrphanCleanupJob(
                 s3PresignService, propertyImageRepository,
                 new PropertyImageCleanupProperties(GRACE_PERIOD_HOURS, strictRatio)
         );
         Instant old = Instant.now().minus(GRACE_PERIOD_HOURS + 1, ChronoUnit.HOURS);
-        List<S3ObjectSummary> allOrphaned = List.of(
-                new S3ObjectSummary("property-images/1/a.jpg", old),
-                new S3ObjectSummary("property-images/1/b.jpg", old),
-                new S3ObjectSummary("property-images/1/c.jpg", old),
-                new S3ObjectSummary("property-images/1/d.jpg", old)
-        );
+        List<S3ObjectSummary> allOrphaned = IntStream.range(0, 12)
+                .mapToObj(i -> new S3ObjectSummary("property-images/1/orphan-" + i + ".jpg", old))
+                .toList();
         when(propertyImageRepository.findAllImageUrls()).thenReturn(List.of());
         when(s3PresignService.listObjects(S3ImagePurpose.PROPERTY)).thenReturn(allOrphaned);
 
         strictJob.cleanUp();
 
         verify(s3PresignService, never()).deleteObject(anyString());
+    }
+
+    @Test
+    void 표본이_적으면_삭제_비율이_높아도_서킷브레이커가_개입하지_않는다() {
+        // 전체 객체가 서킷브레이커 표본 하한(10) 미만이면, 100% 고아여도 정상적인 소량 정리로 보고
+        // 그대로 삭제한다 - 비율 판단이 통계적으로 의미 없는 규모에서 false positive를 막기 위함.
+        double strictRatio = 0.5;
+        PropertyImageOrphanCleanupJob strictJob = new PropertyImageOrphanCleanupJob(
+                s3PresignService, propertyImageRepository,
+                new PropertyImageCleanupProperties(GRACE_PERIOD_HOURS, strictRatio)
+        );
+        Instant old = Instant.now().minus(GRACE_PERIOD_HOURS + 1, ChronoUnit.HOURS);
+        List<S3ObjectSummary> fewOrphaned = List.of(
+                new S3ObjectSummary("property-images/1/a.jpg", old),
+                new S3ObjectSummary("property-images/1/b.jpg", old)
+        );
+        when(propertyImageRepository.findAllImageUrls()).thenReturn(List.of());
+        when(s3PresignService.listObjects(S3ImagePurpose.PROPERTY)).thenReturn(fewOrphaned);
+
+        strictJob.cleanUp();
+
+        verify(s3PresignService).deleteObject("property-images/1/a.jpg");
+        verify(s3PresignService).deleteObject("property-images/1/b.jpg");
     }
 }

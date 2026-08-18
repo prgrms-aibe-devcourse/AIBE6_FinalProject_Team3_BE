@@ -45,6 +45,12 @@ public class PropertyImageOrphanCleanupJob {
     private final PropertyImageRepository propertyImageRepository;
     private final PropertyImageCleanupProperties properties;
 
+    // 서킷브레이커(maxDeleteRatio)는 "비율"로 판단하기 때문에 전체 객체 수가 적을 때는 오히려
+    // 오작동한다 - 예를 들어 정상적으로 이탈해서 남은 고아 이미지 2개가 전체 4개 중 절반이면
+    // 정상적인 소량 정리인데도 비율만 보면 재앙 상황과 구분이 안 된다. 표본이 이 값 미만이면
+    // 비율 판단이 통계적으로 의미가 없다고 보고 서킷브레이커 자체를 적용하지 않는다.
+    private static final int MIN_OBJECTS_FOR_CIRCUIT_BREAKER = 10;
+
     // zone을 명시하지 않으면 서버(JVM)의 기본 타임존을 따르는데, 배포 환경에 타임존 설정이 따로
     // 없어 컨테이너가 UTC로 뜨면 "09:30"이 실제로는 KST 18:30에 실행돼 서버 운영시간(09~18시) 밖으로
     // 밀려날 수 있다 - 서버/로컬 환경 설정과 무관하게 항상 KST 기준으로 돌도록 여기서 고정한다.
@@ -66,7 +72,9 @@ public class PropertyImageOrphanCleanupJob {
         // 서킷브레이커: 삭제 후보가 전체 대비 비정상적으로 큰 비율을 차지하면 이번 실행을 통째로
         // 건너뛴다. DB 조회가 잘못된 환경/연결 실패 등으로 비정상적으로 비면 "참조된 이미지가 거의
         // 없다"고 오판해 정상 운영 중인 이미지까지 통째로 지워버릴 수 있다(2026-08-18 실제 재현됨).
-        if (!objects.isEmpty() && candidates.size() > objects.size() * properties.maxDeleteRatio()) {
+        // 단, 표본이 MIN_OBJECTS_FOR_CIRCUIT_BREAKER 미만이면 비율 자체가 의미 없으므로 적용하지 않는다.
+        if (objects.size() >= MIN_OBJECTS_FOR_CIRCUIT_BREAKER
+                && candidates.size() > objects.size() * properties.maxDeleteRatio()) {
             log.warn("매물 이미지 고아 객체 정리 중단(서킷브레이커) - 전체 {}건 중 삭제 후보 {}건으로 "
                             + "임계 비율({})을 초과해 이번 실행을 건너뜁니다. DB 연결/환경 설정을 확인하세요.",
                     objects.size(), candidates.size(), properties.maxDeleteRatio());
