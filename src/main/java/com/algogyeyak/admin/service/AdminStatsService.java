@@ -17,8 +17,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import lombok.RequiredArgsConstructor;
@@ -115,17 +113,17 @@ public class AdminStatsService {
                 new AdminStatsDistributionResponse.PropertyRegistrationCount(true, registeredCount),
                 new AdminStatsDistributionResponse.PropertyRegistrationCount(false, unregisteredCount));
 
-        List<AdminStatsDistributionResponse.ReportReasonCount> byReportReason = mapToCounts(
-                PropertyReportReason.values(),
-                reason -> propertyReportRepository.countByReasonAndCreatedAtBetween(reason, rangeStart, rangeEnd),
-                AdminStatsDistributionResponse.ReportReasonCount::new);
+        Map<PropertyReportReason, Long> reasonCounts = propertyReportRepository
+                .countGroupedByReasonAndCreatedAtBetween(rangeStart, rangeEnd).stream()
+                .collect(Collectors.toMap(
+                        PropertyReportRepository.ReasonCount::getReason, PropertyReportRepository.ReasonCount::getCount));
+        // GROUP BY 결과에는 해당 기간에 실제로 접수된 사유만 나타나므로, 나머지 사유는 0건으로
+        // 채워야 이전과 동일하게 모든 사유가 응답에 나타난다(프론트가 이 목록을 그대로 렌더링).
+        List<AdminStatsDistributionResponse.ReportReasonCount> byReportReason = Arrays.stream(PropertyReportReason.values())
+                .map(reason -> new AdminStatsDistributionResponse.ReportReasonCount(
+                        reason, reasonCounts.getOrDefault(reason, 0L)))
+                .toList();
 
         return new AdminStatsDistributionResponse(byPropertyRegistration, byReportReason);
-    }
-
-    private <E, R> List<R> mapToCounts(E[] values, Function<E, Long> counter, BiFunction<E, Long, R> toResult) {
-        return Arrays.stream(values)
-                .map(value -> toResult.apply(value, counter.apply(value)))
-                .toList();
     }
 }

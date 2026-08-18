@@ -29,11 +29,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /**
      * 관리자 페이지 유저 목록 조회. email/nickname은 부분일치(LIKE), role/status는 정확 매칭이며
      * 전부 선택 조건이다(null이면 필터링하지 않음) - PropertyRepository.search와 동일한 패턴.
+     * email/nickname 파라미터는 호출부(AdminUserService.list)가 LIKE 와일드카드(%, _)를 이스케이프한
+     * 뒤 넘긴다는 전제다 - ESCAPE '\'로 그 이스케이프를 실제로 해석한다.
      */
     @Query("""
             SELECT u FROM User u
-            WHERE (:email IS NULL OR u.email LIKE CONCAT('%', :email, '%'))
-              AND (:nickname IS NULL OR u.nickname LIKE CONCAT('%', :nickname, '%'))
+            WHERE (:email IS NULL OR u.email LIKE CONCAT('%', :email, '%') ESCAPE '\\')
+              AND (:nickname IS NULL OR u.nickname LIKE CONCAT('%', :nickname, '%') ESCAPE '\\')
               AND (:role IS NULL OR u.role = :role)
               AND (:status IS NULL OR u.status = :status)
             """)
@@ -84,16 +86,26 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * 이 UPDATE는 WHERE의 status 조건을 실행 시점의 최신 커밋 데이터로 평가한다(락을 잡는 쓰기
      * 문이라 findAllByRoleAndStatusForUpdate와 동일하게 REPEATABLE READ 스냅샷이 아니라 current
      * read) - 그 사이 탈퇴가 먼저 커밋됐다면 영향받은 row가 0건이 되어 안전하게 감지된다.
+     *
+     * <p>JPQL bulk UPDATE는 영속성 컨텍스트/dirty-checking을 완전히 우회하는 순수 SQL이라
+     * {@code @LastModifiedDate}(AuditingEntityListener)가 전혀 관여하지 않는다 - updatedAt을
+     * 여기서 직접 갱신하지 않으면 실제로 role/status가 바뀌어도 마지막 수정 시각이 그대로
+     * 남는다. 호출부(AdminUserService)가 응답에 쓸 값과 동일한 타임스탬프를 넘겨야 DB에 저장된
+     * 값과 응답이 어긋나지 않는다.
      */
     @Modifying
-    @Query("UPDATE User u SET u.role = :role WHERE u.id = :id AND u.status <> :excludedStatus")
-    int updateRoleIfNotWithdrawn(@Param("id") Long id, @Param("role") Role role, @Param("excludedStatus") UserStatus excludedStatus);
+    @Query("UPDATE User u SET u.role = :role, u.updatedAt = :updatedAt WHERE u.id = :id AND u.status <> :excludedStatus")
+    int updateRoleIfNotWithdrawn(
+            @Param("id") Long id, @Param("role") Role role, @Param("excludedStatus") UserStatus excludedStatus,
+            @Param("updatedAt") LocalDateTime updatedAt);
 
     /**
      * updateRoleIfNotWithdrawn과 동일한 이유로, 정지/활성화(AdminUserService.updateStatus)도
-     * 조건부 UPDATE로 처리한다.
+     * 조건부 UPDATE로 처리한다(updatedAt을 함께 갱신해야 하는 이유도 동일).
      */
     @Modifying
-    @Query("UPDATE User u SET u.status = :status WHERE u.id = :id AND u.status <> :excludedStatus")
-    int updateStatusIfNotWithdrawn(@Param("id") Long id, @Param("status") UserStatus status, @Param("excludedStatus") UserStatus excludedStatus);
+    @Query("UPDATE User u SET u.status = :status, u.updatedAt = :updatedAt WHERE u.id = :id AND u.status <> :excludedStatus")
+    int updateStatusIfNotWithdrawn(
+            @Param("id") Long id, @Param("status") UserStatus status, @Param("excludedStatus") UserStatus excludedStatus,
+            @Param("updatedAt") LocalDateTime updatedAt);
 }

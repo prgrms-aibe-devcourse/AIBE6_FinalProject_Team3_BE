@@ -53,9 +53,6 @@ public class User {
     @Column(nullable = false)
     private UserStatus status;
 
-    @Column(name = "withdrawn_at")
-    private LocalDateTime withdrawnAt;
-
     // updatePasswordHash() 호출마다(setPassword()의 자기 변경, 비밀번호 재설정 confirm 둘 다) 갱신된다.
     // JwtAuthenticationFilter가 access token의 발급 시각(iat)이 이 값보다 이전이면 그 토큰을 무효로
     // 처리하는 데 쓴다 - 그래야 비밀번호가 바뀐 뒤 탈취됐거나 열려 있던 기존 access token이 만료
@@ -173,7 +170,6 @@ public class User {
      */
     public void withdraw() {
         this.status = UserStatus.WITHDRAWN;
-        this.withdrawnAt = LocalDateTime.now();
         this.nickname = WITHDRAWN_NICKNAME_PREFIX + this.id;
         this.email = (this.email != null) ? "withdrawn_" + this.id + "@" + WITHDRAWN_EMAIL_DOMAIN : null;
         this.passwordHash = null;

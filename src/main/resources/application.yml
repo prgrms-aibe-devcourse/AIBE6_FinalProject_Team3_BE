@@ -87,6 +87,10 @@ app:
   password-reset:
     token-validity-seconds: 1800 # 30분
     request-cooldown-seconds: 60
+  login:
+    max-attempts: 10
+    lockout-window-seconds: 300 # 5분 - 윈도우 내 시도 횟수가 이 값을 넘으면 이후 시도를 거부한다.
+
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   cookie:
@@ -141,7 +145,6 @@ risk-policy:
   jeonse-ratio-caution-from: 80
   jeonse-ratio-warn-from: 100
   jeonse-ratio-warn-to: 150
-  jeonse-ratio-alert-over: 150
   multi-account-detection-enabled: false
   same-account-threshold-count: 3
   same-account-window-days: 7
@@ -152,10 +155,22 @@ risk-policy:
 
 aws:
   s3:
-    bucket: 3team-storage-495264909330-ap-northeast-2-an
+    bucket: ${AWS_S3_BUCKET:dummy-bucket-for-local}
     region: ap-northeast-2
     access-key: ${AWS_ACCESS_KEY:dummy-access-key-for-local}
     secret-key: ${AWS_SECRET_KEY:dummy-secret-key-for-local}
+
+# 매물 이미지 고아 객체 정리 배치(PropertyImageOrphanCleanupJob, #214) 정책값. 서버가 24시간
+# 상시 기동이 아니라 09~18시에만 켜져 있어서(비용 절감), 새벽 시간대로 잡으면 서버가 꺼져 있어
+# @Scheduled 자체가 절대 실행되지 않는다 - 대신 서버가 켜지는 시각(09:00) 이후 애플리케이션
+# 컨텍스트가 완전히 뜰 시간을 감안해 09:30으로 잡았다.
+property:
+  image-cleanup:
+    cron: 0 30 9 * * *
+    grace-period-hours: 24
+    # 삭제 후보가 전체 S3 객체의 50%를 넘으면 이번 실행을 건너뛰고 경고만 남긴다(서킷브레이커,
+    # PropertyImageCleanupProperties 참고).
+    max-delete-ratio: 0.5
 
 # Prometheus
 management:

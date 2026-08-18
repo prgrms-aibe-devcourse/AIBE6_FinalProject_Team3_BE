@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -399,8 +400,30 @@ class AdminPropertyReportControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.succeededIds[0]").value(REPORT_ID))
                 .andExpect(jsonPath("$.data.succeededIds.length()").value(1))
-                .andExpect(jsonPath("$.data.failures[0].id").value(999))
-                .andExpect(jsonPath("$.data.failures[0].errorCode").value("ADMIN_PROPERTY_REPORT_SELF_REVIEW"));
+                .andExpect(jsonPath("$.data.failures[0].id").value(999));
+    }
+
+    // 회귀 테스트 - BusinessException이 아닌 예외(예: DB 접근 오류)가 배치 중간 항목에서 나면,
+    // 이 예외가 잡히지 않고 트랜잭션 프록시 경계를 벗어나 전체 트랜잭션이 롤백되며 이미 처리된
+    // 앞 항목까지 함께 취소되던 버그가 있었다. 지금은 이런 예외도 흡수해 500이 아니라 200으로
+    // 응답하고, 앞선 성공은 succeededIds에 그대로 남아야 한다.
+    @Test
+    void 일괄_검토처리는_BusinessException이_아닌_예외도_흡수하고_앞선_성공을_유지한다() throws Exception {
+        PropertyReport report = buildReport();
+        when(propertyReportRepository.findById(REPORT_ID)).thenReturn(Optional.of(report));
+        when(propertyReportRepository.findById(999L))
+                .thenThrow(new DataAccessResourceFailureException("db unavailable"));
+
+        mockMvc.perform(patch("/admin/property-reports/bulk-review")
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reportIds":[%d,999],"status":"RESOLVED"}
+                                """.formatted(REPORT_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.succeededIds[0]").value(REPORT_ID))
+                .andExpect(jsonPath("$.data.succeededIds.length()").value(1))
+                .andExpect(jsonPath("$.data.failures[0].id").value(999));
     }
 
     @Test

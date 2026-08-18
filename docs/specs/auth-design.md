@@ -122,6 +122,44 @@
 - jti는 **토큰 단위** 무효화라 유저 단위가 아님 — 같은 유저가 두 브라우저에서 각각 로그인했다면 한쪽 로그아웃이 다른 쪽 access token까지 무효화하지는 않음(각자 다른 jti)
 - PR #54 `fix/auth-access_token&refresh_token`로 구현되어 `dev`에 머지 완료. jti 블랙리스트는 이후 2026-08-03에 Redis로 이전됨(위 "토큰 재발급" 섹션 참고)
 
+## 이메일 인증(회원가입) / 비밀번호 재설정 — (PR #195, 2026-08-14 병합)
+
+이 섹션은 2026-08-12 전수조사 이후 신규로 병합된 기능이라 이 문서에 반영이 빠져 있었다
+(2026-08-17 후속 감사로 발견해 추가). 두 기능 모두 별도 DB 테이블 없이 **Redis 전용**으로
+구현되어 있다 — `2026-07-24-password-reset-design.md`(레포 밖 로컬 문서)는 `PasswordResetToken`
+JPA 엔티티를 제안한 사전 설계안이었으나 실제로는 채택되지 않았다.
+
+- **`EmailVerificationService`** — 회원가입 전 이메일 소유권 확인. `auth:email-verify:*` 프리픽스로
+  Redis에 코드 해시(SHA-256, 원문 미저장)/시도 횟수/발송 쿨다운/인증 완료 티켓을 저장한다.
+  - `requestCode`: 이미 가입된 이메일이면 거부, 발송 쿨다운(`resend-cooldown-seconds`)을
+    `setIfAbsent`로 강제, 6자리 코드 발급 시 이전 시도 횟수 리셋.
+  - `confirmCode`: 시도 횟수가 `max-attempts`를 넘으면 코드 자체를 무효화(재발급 강제), 성공 시
+    `verified-ticket-validity-seconds` 동안 유효한 인증 완료 티켓 발급.
+  - `isVerified`/`consumeVerified`: `signup()`이 계정 생성 직전 확인하고, 성공 후에만 소비 — 닉네임
+    중복 등으로 가입이 실패하면 재시도할 수 있도록 티켓을 남겨둔다.
+- **`PasswordResetService`** — 로그아웃 상태의 "비밀번호를 잊으셨나요?" 플로우. `RefreshTokenService`와
+  동일한 패턴(원문 토큰 대신 SHA-256 해시만 저장, 유저당 최신 토큰 하나만 유효, Redis Lua 스크립트로
+  발급/소비를 원자화)을 그대로 재사용한다.
+  - `requestReset`: 계정 존재 여부를 응답으로 노출하지 않기 위해 — 존재하지 않는 이메일/소셜 전용
+    계정/탈퇴·정지 계정은 물론, **계정이 확정된 이후 단계의 실패(토큰 발급 Redis 장애, 메일 발송
+    실패)까지 로그만 남기고 항상 동일한 성공 응답**을 반환한다. 쿨다운도 계정 존재 여부와 무관하게
+    동일하게 적용된다. ⚠️ 단, **쿨다운 확인 자체의 Redis 장애는 예외**다 — `setIfAbsent` 호출이
+    던지는 `DataAccessException`은 (아직 계정 존재 여부가 확정되기 전이라 노출 리스크가 없으므로)
+    `AUTH_TOKEN_STORE_UNAVAILABLE`(503)로 그대로 전파된다. "항상 200"은 계정 조회 이후 단계에만
+    해당하고, 요청 초입의 Redis 장애는 503으로 드러난다(2026-08-17 후속 검토로 정정 — 최초 작성 시
+    이 구분 없이 "Redis 장애까지 전부 성공"이라고 과도하게 넓게 서술했었음).
+  - `confirmReset`: 토큰을 원자적으로 소비(GET+DEL)한 뒤 비밀번호를 변경하고, **기존 refresh
+    token(전체 세션)을 모두 무효화**한다(재설정 = 탈취된 세션이 있었을 수 있다는 전제).
+- **이메일 본문의 "N분간 유효" 문구**는 `EmailService`가 위 두 서비스와 동일한 설정값
+  (`code-validity-seconds`/`token-validity-seconds`)에서 분/초로 계산해 넣는다(2026-08-17 수정 —
+  이전엔 하드코딩되어 있어 설정값을 바꾸면 문구만 조용히 틀려질 수 있었다. 단순 `초/60` 정수
+  나눗셈으로 처음 고쳤을 때 60초 단위가 아닌 설정값에서 "0분"처럼 틀어지는 문제가 재발해,
+  분+초를 함께 표기하는 `formatValidity()`로 다시 수정함).
+- **Swagger**: `AuthController`의 `/auth/email-verification/{request,confirm}`,
+  `/auth/password-reset/{request,confirm}` 엔드포인트에 `@Operation`이 이미 붙어 있다(문서화 완료,
+  `2026-07-27-auth-swagger-documentation.md`는 이 엔드포인트들이 추가되기 전 시점 문서라 목록에는
+  없지만 실제 코드는 문서화돼 있다).
+
 ## 비기능 요구사항 — 대조
 
 | 항목 | 요구사항 | 실제 |

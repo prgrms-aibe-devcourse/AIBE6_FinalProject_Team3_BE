@@ -9,6 +9,6 @@ import java.util.List;
 // 적용됐는지 알 수 없게 된다.
 public record AdminBulkActionResponse(List<Long> succeededIds, List<Failure> failures) {
 
-    public record Failure(Long id, String errorCode, String message) {
+    public record Failure(Long id, String message) {
     }
 }

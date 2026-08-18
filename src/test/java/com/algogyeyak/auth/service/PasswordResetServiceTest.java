@@ -131,6 +131,11 @@ class PasswordResetServiceTest {
                 .sendPasswordResetLink(anyString(), anyString());
 
         service.requestReset("test@example.com");
+
+        // 회귀 테스트 - 메일 발송이 서버 쪽 이유로 실패했는데 쿨다운만 남으면, 사용자가 링크를
+        // 받지도 못한 채 60초를 그냥 기다려야 한다(응답 자체는 계정 존재 여부 비노출을 위해 여전히
+        // 성공으로 유지되지만, 쿨다운은 풀어 즉시 재시도를 허용해야 한다).
+        verify(redisTemplate).delete("auth:password-reset:cooldown:test@example.com");
     }
 
     @Test
@@ -169,6 +174,24 @@ class PasswordResetServiceTest {
         assertEquals("new-encoded-hash", user.getPasswordHash());
         assertNotNull(user.getPasswordChangedAt());
         verify(refreshTokenService).revokeAllForUser(1L);
+    }
+
+    // 회귀 테스트 - 재설정 토큰은 CONSUME_SCRIPT로 이미 돌이킬 수 없이 소각된 뒤라, 그 다음 단계인
+    // revokeAllForUser()가 Redis 장애로 실패해도 비밀번호 변경 자체가 롤백되면 안 된다(토큰은 이미
+    // 없어졌는데 비밀번호도 안 바뀌면 사용자는 완전히 새 이메일을 다시 받아야 한다). 세션 정리는
+    // best-effort여야 하고, confirmReset()은 예외 없이 정상 종료해야 한다.
+    @Test
+    void confirmResetSucceedsEvenWhenSessionRevocationFails() {
+        User user = localUser(1L);
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), anyString());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+        doThrow(new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE))
+                .when(refreshTokenService).revokeAllForUser(1L);
+
+        service.confirmReset("some-token", "newPassword1");
+
+        assertEquals("new-encoded-hash", user.getPasswordHash());
     }
 
     @Test

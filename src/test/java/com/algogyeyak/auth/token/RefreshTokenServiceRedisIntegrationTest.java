@@ -202,6 +202,47 @@ class RefreshTokenServiceRedisIntegrationTest {
                 "정지된 사용자의 rotate 시도 후 새로 만든 by-hash가 고아로 남으면 안 된다");
     }
 
+    // 회귀 테스트 - ROTATE_SCRIPT 커밋 직후~deleteOrphanedSession() 정리 사이에 같은 유저의
+    // issue()(새 로그인)가 끼어들면, by-user는 이미 그 새 세션의 hash를 가리키게 된다. 예전에는
+    // deleteOrphanedSession()이 무조건 삭제라 이 새 세션의 back-pointer까지 지워버렸다(강제
+    // 재로그인 유발) - 그 레이스를 실제 Redis 상태로 직접 재현해, 지금은 by-user가 여전히 그
+    // 새 세션을 가리킬 때는 지우지 않는지 확인한다.
+    @Test
+    void deleteOrphanedSessionDoesNotClobberADifferentSessionCreatedConcurrently() {
+        String userId = "999";
+        String orphanedHash = "orphaned-hash-from-rejected-rotate";
+        String concurrentSessionHash = "concurrent-fresh-login-hash";
+        redisTemplate.opsForValue().set("auth:refresh-token:by-user:" + userId, concurrentSessionHash);
+        redisTemplate.opsForValue().set("auth:refresh-token:by-hash:" + orphanedHash, userId);
+
+        ReflectionTestUtils.invokeMethod(refreshTokenService, "deleteOrphanedSession", userId, orphanedHash);
+
+        assertEquals(concurrentSessionHash, redisTemplate.opsForValue().get("auth:refresh-token:by-user:" + userId),
+                "동시 로그인이 만든 최신 세션의 back-pointer가 지워지면 안 된다");
+        assertEquals(null, redisTemplate.opsForValue().get("auth:refresh-token:by-hash:" + orphanedHash),
+                "고아가 된 by-hash 자체는 정리되어야 한다");
+    }
+
+    @Test
+    void revokeAllForUserDeletesTheCurrentSessionsBothKeys() throws Exception {
+        User user = saveUser("revoke-all@example.com");
+        String rawToken = refreshTokenService.issue(user);
+        String userIdString = String.valueOf(user.getId());
+
+        refreshTokenService.revokeAllForUser(user.getId());
+
+        assertEquals(null, redisTemplate.opsForValue().get("auth:refresh-token:by-user:" + userIdString));
+        assertEquals(null, redisTemplate.opsForValue().get("auth:refresh-token:by-hash:" + hash(rawToken)));
+        assertThrows(BusinessException.class, () -> refreshTokenService.rotate(rawToken));
+    }
+
+    @Test
+    void revokeAllForUserIsNoOpWhenNoActiveSession() {
+        User user = saveUser("revoke-all-noop@example.com");
+
+        refreshTokenService.revokeAllForUser(user.getId());
+    }
+
     @Test
     void revokeThenRotateWithSameTokenFails() {
         User user = saveUser("revoke@example.com");

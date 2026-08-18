@@ -69,6 +69,7 @@ public class PriceAnomalyDetector implements SignalDetector {
             case INSUFFICIENT_SAMPLE -> RiskCheckReason.NO_COMPARABLE_TRANSACTION;
             case ADDRESS_INFO_MISSING -> RiskCheckReason.ADDRESS_INFO_MISSING;
             case PROPERTY_TYPE_UNSUPPORTED -> RiskCheckReason.PROPERTY_TYPE_UNSUPPORTED;
+            case TRANSACTION_TYPE_UNSUPPORTED -> RiskCheckReason.TRANSACTION_TYPE_UNSUPPORTED;
             case EXTERNAL_API_FAILURE, RATE_LIMIT_EXCEEDED, INVALID_RESPONSE_FORMAT -> RiskCheckReason.DATA_FETCH_FAILURE;
         };
     }
