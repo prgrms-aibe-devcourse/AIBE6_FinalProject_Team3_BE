@@ -99,6 +99,21 @@ public class RefreshTokenService {
             return userId
             """.formatted(BY_USER_KEY_PREFIX), String.class);
 
+    // KEYS[1] = by-user:{userId}, KEYS[2] = by-hash:{newHash}, ARGV[1] = newHash.
+    // by-user가 지금도 newHash를 가리킬 때만 지운다 - ROTATE_SCRIPT 커밋 직후~이 정리 사이에
+    // 동시 issue()(새 로그인)가 끼어들면 by-user가 이미 그 새 세션의 hash를 가리키게 되는데, 이걸
+    // 확인 없이 무조건 지우면 방금 로그인한 세션의 back-pointer가 지워져 그 세션이 이후 rotate()를
+    // 못 하게 된다(강제 재로그인). by-hash:{newHash}는 이 raw token이 클라이언트에 반환된 적 없어
+    // 악용될 수 없지만(정리 목적일 뿐), 조건 없이 지워도 된다 - 이미 동시 issue()의 ISSUE_SCRIPT가
+    // 지웠다면 DEL은 그냥 no-op이다.
+    private static final RedisScript<Long> DELETE_ORPHANED_SESSION_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+              redis.call('DEL', KEYS[1])
+            end
+            redis.call('DEL', KEYS[2])
+            return 1
+            """, Long.class);
+
     private final StringRedisTemplate redisTemplate;
     private final UserRepository userRepository;
 
@@ -231,7 +246,8 @@ public class RefreshTokenService {
 
     private void deleteOrphanedSession(String userId, String newHash) {
         try {
-            redisTemplate.delete(List.of(byUserKey(userId), byHashKey(newHash)));
+            redisTemplate.execute(DELETE_ORPHANED_SESSION_SCRIPT,
+                    List.of(byUserKey(userId), byHashKey(newHash)), newHash);
         } catch (DataAccessException e) {
             log.warn("탈퇴/미존재 사용자의 refresh token 정리 실패 (TTL로 자연 정리됨) userId={}", userId, e);
         }

@@ -13,7 +13,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -188,14 +188,15 @@ class RefreshTokenServiceTest {
     }
 
     // ROTATE_SCRIPT가 이미 새 by-hash/by-user를 써버린 뒤 사용자 상태 확인에서 거부되는 경우,
-    // by-user만 지우면 새로 만든 by-hash가 TTL까지 고아로 남는다 - 둘 다 지우는지 검증한다.
+    // by-user만 지우면 새로 만든 by-hash가 TTL까지 고아로 남는다 - 정리 스크립트가 두 키 모두를
+    // 대상으로 실행되는지 검증한다(조건부 삭제 자체의 동시성 안전성은 통합 테스트에서 검증).
     @SuppressWarnings("unchecked")
     private void assertCleansUpBothOrphanedKeysFor(String userId) {
-        ArgumentCaptor<Collection<String>> keysCaptor = ArgumentCaptor.forClass(Collection.class);
-        verify(redisTemplate).delete(keysCaptor.capture());
-        Collection<String> deletedKeys = keysCaptor.getValue();
-        assertTrue(deletedKeys.contains("auth:refresh-token:by-user:" + userId));
-        assertTrue(deletedKeys.stream().anyMatch(key -> key.startsWith("auth:refresh-token:by-hash:")));
+        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
+        verify(redisTemplate).execute(any(RedisScript.class), keysCaptor.capture(), anyString());
+        List<String> keys = keysCaptor.getValue();
+        assertTrue(keys.contains("auth:refresh-token:by-user:" + userId));
+        assertTrue(keys.stream().anyMatch(key -> key.startsWith("auth:refresh-token:by-hash:")));
     }
 
     @Test
