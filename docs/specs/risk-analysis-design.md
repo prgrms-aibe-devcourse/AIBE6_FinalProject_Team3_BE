@@ -48,6 +48,7 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 - `get(userId, propertyId)`는 조회 전용(계산 트리거 안 함) — 아직 한 번도 계산된 적 없으면(`DepositSafetyCheck` row 없음) `status`가 `null`인 응답을 그대로 반환.
 - 구현 중 발견한 설계 이슈: `upsertUnavailable`/`upsertCalculated`가 애초엔 저장 후 `findByPropertyId()`로 재조회해서 응답을 만들었는데, 저장 직후 다시 조회하는 건 프로덕션에서도 불필요한 DB 왕복이라 `calculate()`가 저장된 엔티티를 직접 반환하도록 고침(단위 테스트에서 mock의 `save()` 기본 반환값이 `null`이라는 걸로 발견).
 - `GET /properties/{propertyId}/deposit-safety`, `POST /properties/{propertyId}/deposit-safety/recalculate` 컨트롤러(`DepositSafetyController`) 구현 완료 — 둘 다 `DepositSafetyCheckResponse` 하나를 재사용.
+- **(#173 완료)** `DepositSafetyCheckResponse`에 판정 근거 데이터를 추가로 노출: `sampleCount`/`radiusMeters`(계산에 쓰인 매매 실거래 표본 수·반경 — `MarketSalePrice`/`DepositSafetyCheck` 엔티티에 컬럼 추가), `cautionFrom`/`warnFrom`/`warnTo`(전세가율 안전/주의/위험 구간 경계값 — `RiskPolicyConfig`에서 그대로 전달). 이전에는 FE가 "전세가율 51%, 안전한 편" 같은 결론만 받고 왜 그런지 근거를 볼 수 없었는데, 이제 "몇 건/반경 몇 m 기준"과 "구간 경계값"을 함께 내려줘 멘토 피드백("판정 기준값·근거 데이터가 안 보인다")을 해소함. FE는 #121에서 이 필드들을 `RiskAnalysisClient.tsx`에 렌더링.
 
 ## 다른 도메인에 남아있는 연계 흔적
 
