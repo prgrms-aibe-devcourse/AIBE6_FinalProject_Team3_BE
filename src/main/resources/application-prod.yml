@@ -94,5 +94,6 @@ molit:
 
 aws:
   s3:
+    bucket: ${AWS_S3_BUCKET}
     access-key: ${AWS_ACCESS_KEY}
     secret-key: ${AWS_SECRET_KEY}

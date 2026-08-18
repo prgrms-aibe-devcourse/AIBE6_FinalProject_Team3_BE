@@ -151,7 +151,7 @@ risk-policy:
 
 aws:
   s3:
-    bucket: 3team-storage-495264909330-ap-northeast-2-an
+    bucket: ${AWS_S3_BUCKET:dummy-bucket-for-local}
     region: ap-northeast-2
     access-key: ${AWS_ACCESS_KEY:dummy-access-key-for-local}
     secret-key: ${AWS_SECRET_KEY:dummy-secret-key-for-local}
