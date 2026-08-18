@@ -135,8 +135,12 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
     @Query("SELECT p.createdAt FROM Property p WHERE p.createdAt >= :start AND p.createdAt < :end")
     List<LocalDateTime> findCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
-    // 관리자 통계 대시보드: 신규 등록 매물 수 카드용(기간 내 등록 + 활성 상태).
-    long countByStatusAndCreatedAtBetween(PropertyStatus status, LocalDateTime start, LocalDateTime end);
+    // 관리자 통계 대시보드: 신규 등록 매물 수 카드용(기간 내 등록). 요약 카드는 아래 추이 차트
+    // (findCreatedAtBetween)와 항상 합이 맞아야 하므로(AdminStatsService.summary() 참고), 이 카드도
+    // 같은 이유로 status 필터링을 하지 않는다 - 기간 내 등록됐다가 이후 삭제된 매물도 "등록 발생"
+    // 자체는 카운트에 포함된다. (예전엔 ACTIVE로 필터링했는데, 그러면 기간 내 삭제된 등록 건이
+    // 추이 차트 합계에는 잡히고 이 카드에는 안 잡혀 같은 화면에서 숫자가 어긋났다.)
+    long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
     // 관리자 통계 대시보드: 매물 등록자/미등록자 분포용 - 주어진 유저 id들 중 매물을 1건이라도
     // 등록한 유저가 몇 명인지. 가입 시점과 무관하게 "등록한 적이 있는지"를 기준으로 삼으므로(가입은

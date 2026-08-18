@@ -179,12 +179,20 @@ public class RefreshTokenService {
     // 동시 로그인(issue())이 이미 by-user를 가로챘다면, 위에서 방금 커밋한 newHash 항목은 issue()가
     // 자기 자신의 ISSUE_SCRIPT 안에서 이미 지운 뒤다 - 여기서 별도로 지울 것이 없고, 클라이언트에
     // 유효하지 않은 세션을 성공으로 돌려주지 않도록 즉시 거부하기만 하면 된다.
+    //
+    // 이 확인 자체가 Redis 장애로 실패하는 경우는 위의 실패(AUTH_TOKEN_STORE_UNAVAILABLE)와 다르게
+    // 다뤄야 한다 - ROTATE_SCRIPT는 이미 커밋되어 새 세션이 Redis에 실제로 살아있는 상태이므로, 여기서
+    // 다시 503을 던지면 "이미 죽은 이전 토큰을 들고 재시도하라"는 응답이 되어 클라이언트를 무한 재시도로
+    // 몰아넣는다(재시도해도 이전 토큰은 AUTH_REFRESH_TOKEN_INVALID로만 실패함). 이 재확인은 애초에
+    // "동시 로그인" 극히 드문 타이밍을 즉시 실패로 앞당기기 위한 부가 확인일 뿐, 실패해도 원자적 롤백이
+    // 필요한 것은 아니므로 best-effort로 스킵하고 정상 성공 처리한다.
     private void rejectIfSessionAlreadySupersededByConcurrentLogin(String userId, String newHash) {
         String currentPointer;
         try {
             currentPointer = redisTemplate.opsForValue().get(byUserKey(userId));
         } catch (DataAccessException e) {
-            throw redisUnavailable(e);
+            log.warn("동시 로그인 재확인 실패(Redis 일시 장애로 간주, rotate 자체는 이미 성공해 계속 진행) userId={}", userId, e);
+            return;
         }
         if (!newHash.equals(currentPointer)) {
             throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID,
@@ -199,6 +207,24 @@ public class RefreshTokenService {
         } catch (DataAccessException e) {
             // 로그아웃을 fail-closed로 실패시킨다 — 여기서 조용히 넘어가면 클라이언트는 로그아웃에
             // 성공한 줄 알지만 refresh token은 실제로는 계속 살아있게 된다.
+            throw redisUnavailable(e);
+        }
+    }
+
+    /**
+     * 비밀번호 재설정 성공 시(PasswordResetService) 탈취됐을 수 있는 기존 세션을 강제로 끊어내기
+     * 위해 사용한다. revoke(rawToken)과 달리 raw token 없이 userId만으로 지운다 - by-user가
+     * 가리키는 현재 세션의 by-hash까지 함께 지워야 refresh_token 쿠키가 남아 있어도 /auth/refresh가
+     * 더 이상 성공하지 못한다.
+     */
+    public void revokeAllForUser(Long userId) {
+        String userIdString = String.valueOf(userId);
+        try {
+            String currentHash = redisTemplate.opsForValue().get(byUserKey(userIdString));
+            if (currentHash != null) {
+                redisTemplate.delete(List.of(byUserKey(userIdString), byHashKey(currentHash)));
+            }
+        } catch (DataAccessException e) {
             throw redisUnavailable(e);
         }
     }

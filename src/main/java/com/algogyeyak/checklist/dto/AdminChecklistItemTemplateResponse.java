@@ -16,6 +16,7 @@ public record AdminChecklistItemTemplateResponse(
         String helperText,
         ChecklistImportance importance,
         ChecklistItemType itemType,
+        String options,
         int displayOrder,
         boolean active,
         String applicablePropertyTypes
@@ -31,6 +32,7 @@ public record AdminChecklistItemTemplateResponse(
                 template.getHelperText(),
                 template.getImportance(),
                 template.getItemType(),
+                template.getOptions(),
                 template.getDisplayOrder(),
                 template.isActive(),
                 template.getApplicablePropertyTypes()

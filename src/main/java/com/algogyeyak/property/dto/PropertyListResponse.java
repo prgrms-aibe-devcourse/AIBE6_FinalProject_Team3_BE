@@ -7,7 +7,8 @@ import java.time.LocalDateTime;
 /**
  * 매물 목록조회(GET /properties) 응답용 요약 DTO.
  * 상세조회(PropertyRegisterResponse류)와 달리 목록에서는 주소 전체/이미지 등은 생략하고
- * 카드형 UI에 필요한 최소 정보만 내려준다.
+ * 카드형 UI에 필요한 최소 정보만 내려준다 - 단, representativeImageUrl(대표 이미지 한 장)만은
+ * 예외로 내려준다(멘토링 피드백: 목록에서도 매물 이미지를 확인할 수 있어야 함).
  */
 public record PropertyListResponse(
         Long propertyId,
@@ -26,7 +27,8 @@ public record PropertyListResponse(
         MarketComparisonResponse marketComparison,
         Integer checkSignalCount,
         String signalSummary,
-        Integer jeonseRatio
+        Integer jeonseRatio,
+        String representativeImageUrl
 ) {
     /**
      * checklistProgress는 체크리스트를 아예 시작하지 않았으면 null(체크리스트 자체가 없어서 분모가
@@ -40,7 +42,8 @@ public record PropertyListResponse(
      * 신호 자체가 없음 - 0건과는 다르다). 실행됐다면 PropertyRisk(리스크가 실제로 발견된 신호만 저장됨)
      * 개수와 그 description들을 이어붙인 요약 문자열이다. jeonseRatio는 DepositSafetyCheck.status가
      * CALCULATED일 때만 값이 있고, 그 외(UNAVAILABLE/FAILED/미실행)엔 null - DepositSafetyCheckResponse와
-     * 동일하게 percent 정수만 내려주고 "%" 표기는 FE 책임으로 둔다.
+     * 동일하게 percent 정수만 내려주고 "%" 표기는 FE 책임으로 둔다. representativeImageUrl은 이미지가
+     * 한 장도 없는 매물이면 null(FE에서 플레이스홀더 처리).
      */
     public static PropertyListResponse from(
             Property property,
@@ -48,7 +51,8 @@ public record PropertyListResponse(
             MarketComparisonResponse marketComparison,
             Integer checkSignalCount,
             String signalSummary,
-            Integer jeonseRatio
+            Integer jeonseRatio,
+            String representativeImageUrl
     ) {
         var address = property.getAddress();
         return new PropertyListResponse(
@@ -68,7 +72,8 @@ public record PropertyListResponse(
                 marketComparison,
                 checkSignalCount,
                 signalSummary,
-                jeonseRatio
+                jeonseRatio,
+                representativeImageUrl
         );
     }
 }

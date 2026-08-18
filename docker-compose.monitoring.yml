@@ -18,7 +18,7 @@ services:
     image: grafana/grafana:latest
     container_name: grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD를 .env에 설정해야 합니다 - 비워두면 Grafana 기본 관리자 비밀번호(admin)가 그대로 남습니다}
       - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL}
     volumes:
       - grafana-data:/var/lib/grafana

@@ -37,6 +37,15 @@ public class ContractAnalysisMaskingService {
     private static final int NAME_GROUP = 2;
     private static final String NAME_MASK = "[성명]";
 
+    // /analyze가 클라이언트로부터 받은 maskedText가 실제로 마스킹을 거쳤는지 자체적으로 검증할 때 쓴다.
+    // 이름(NAME_PATTERN)은 라벨 인접 여부에 의존해 오탐/누락이 잦아 이 게이트에는 포함하지 않는다 -
+    // 주민등록번호/전화번호/계좌번호처럼 패턴 자체로 명백히 식별 가능한 것만 거부 사유로 삼는다.
+    public boolean containsUnmaskedPii(String text) {
+        return RRN_PATTERN.matcher(text).find()
+                || PHONE_PATTERN.matcher(text).find()
+                || ACCOUNT_PATTERN.matcher(text).find();
+    }
+
     public ContractAnalysisMaskingResponse mask(ContractAnalysisMaskingRequest request) {
         if (!StringUtils.hasText(request.text())) {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_INVALID_INPUT);

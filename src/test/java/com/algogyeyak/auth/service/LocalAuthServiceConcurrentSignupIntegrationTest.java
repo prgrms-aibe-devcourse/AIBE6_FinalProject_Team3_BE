@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -19,6 +20,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 
 /**
  * {@link LocalAuthServiceTest#signupRecoversAsEmailDuplicateWhenConcurrentSignupHitsUniqueConstraint}는
@@ -41,9 +44,15 @@ class LocalAuthServiceConcurrentSignupIntegrationTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    // 이 테스트는 DB 레벨 레이스(REPEATABLE READ 스냅샷/유니크 제약)만 검증 대상이므로, 이메일 인증
+    // 자체는 이미 끝난 것으로 간주하고 Redis 의존 없이 항상 통과시킨다.
+    @MockitoBean
+    private EmailVerificationService emailVerificationService;
+
     @Test
     void secondSignupRecoversAsEmailDuplicateEvenWhenOuterTransactionSnapshotPredatesWinnerCommit() throws Exception {
         String contestedEmail = "concurrent-signup-race@example.com";
+        when(emailVerificationService.isVerified(anyString())).thenReturn(true);
 
         CountDownLatch aHasReadAvailable = new CountDownLatch(1);
         CountDownLatch bHasCommitted = new CountDownLatch(1);

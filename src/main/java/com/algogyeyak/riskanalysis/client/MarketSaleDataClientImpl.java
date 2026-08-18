@@ -37,7 +37,9 @@ public class MarketSaleDataClientImpl implements MarketSaleDataClient {
         }
         return Optional.of(new MarketSalePrice(
                 BigDecimal.valueOf(response.referencePrice()),
-                response.referenceDate() != null ? LocalDate.parse(response.referenceDate()) : null
+                response.referenceDate() != null ? LocalDate.parse(response.referenceDate()) : null,
+                response.sampleCount(),
+                response.radiusMeters()
         ));
     }
 }

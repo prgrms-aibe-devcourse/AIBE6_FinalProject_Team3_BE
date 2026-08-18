@@ -56,8 +56,12 @@ public class GeminiClientImpl implements GeminiClient {
                고지 문구는 explanation에 포함하지 마세요. 해당 고지는 응답 레벨에서
                별도 필드로 항상 함께 내려가므로, explanation에는 조항 자체에 대한
                설명만 담으세요.
-            7. explanation/question/suggestedText에는 마크다운 문법(**볼드**, -/* 목록,
+            7. explanation/question/suggestedText/summary에는 마크다운 문법(**볼드**, -/* 목록,
                # 제목 등)을 쓰지 말고 일반 텍스트로만 답하세요.
+            8. 입력된 텍스트가 부동산 임대차 계약서의 조항으로 보이지 않는다면, clauses를
+               빈 배열로 반환하고 summary에 "입력하신 내용이 계약 조항으로 보이지 않습니다.
+               특약사항이 포함된 계약 문구를 입력해주세요"라고 안내하세요. 그 외의 경우
+               summary는 빈 문자열로 두세요.
             """;
 
     private static final String CHAT_SYSTEM_INSTRUCTION_TEMPLATE = """
@@ -79,6 +83,12 @@ public class GeminiClientImpl implements GeminiClient {
     private static final Map<String, Object> RESPONSE_SCHEMA = Map.of(
             "type", "OBJECT",
             "properties", Map.of(
+                    "summary", Map.of(
+                            "type", "STRING",
+                            "description",
+                            "입력이 임대차 계약 조항으로 보이지 않을 때만 사용자 안내 문구를 담는 필드. "
+                                    + "그 외의 경우 빈 문자열로 둔다."
+                    ),
                     "clauses", Map.of(
                             "type", "ARRAY",
                             "items", Map.of(
@@ -100,7 +110,7 @@ public class GeminiClientImpl implements GeminiClient {
                             )
                     )
             ),
-            "required", List.of("clauses")
+            "required", List.of("summary", "clauses")
     );
 
     private final RestTemplate restTemplate;

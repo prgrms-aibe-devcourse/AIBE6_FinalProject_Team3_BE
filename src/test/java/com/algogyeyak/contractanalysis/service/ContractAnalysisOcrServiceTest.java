@@ -101,4 +101,20 @@ class ContractAnalysisOcrServiceTest {
 
         assertEquals(ErrorCode.CONTRACT_ANALYSIS_OCR_EMPTY_RESULT, exception.getErrorCode());
     }
+
+    @Test
+    void recognizeThrowsUnsupportedFileTypeInsteadOfNpeWhenContentTypeMissing() {
+        // multipart 파트에 Content-Type 헤더가 없으면 getContentType()이 null을 반환할 수 있다.
+        // Map.of(...).get(null)은 NPE를 던지므로, 이 케이스는 500이 아니라 400으로 처리돼야 한다.
+        MultipartFile imageWithoutContentType = mock(MultipartFile.class);
+        when(imageWithoutContentType.isEmpty()).thenReturn(false);
+        when(imageWithoutContentType.getContentType()).thenReturn(null);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.recognize(imageWithoutContentType)
+        );
+
+        assertEquals(ErrorCode.CONTRACT_ANALYSIS_UNSUPPORTED_FILE_TYPE, exception.getErrorCode());
+    }
 }

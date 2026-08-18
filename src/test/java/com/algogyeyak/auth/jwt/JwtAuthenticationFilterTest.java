@@ -17,6 +17,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
@@ -230,6 +232,44 @@ class JwtAuthenticationFilterTest {
         // 예외를 삼키고 필터 체인은 계속 진행해야 SecurityConfig의 authenticationEntryPoint가
         // 이 속성을 읽어 503 응답을 만들 수 있다 - 여기서 예외가 그대로 전파되면 그 기회조차 없다.
         verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    void doesNotSetAuthenticationWhenTokenWasIssuedBeforePasswordChanged() throws Exception {
+        // 회귀 테스트 - 비밀번호가 바뀐(재설정 또는 본인 변경) 뒤에는, 서명/만료가 아직 유효한
+        // access token이라도 그 변경 이전에 발급된 것이면 거부해야 한다. 그러지 않으면 탈취됐거나
+        // 다른 기기에 열려 있던 access token이 만료 전까지 계속 유효한 상태로 남는다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        User user = activeUser(1L, "test@example.com", Role.USER);
+        ReflectionTestUtils.setField(user, "passwordChangedAt", LocalDateTime.now().plusSeconds(5));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, mock(FilterChain.class));
+
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(ErrorCode.AUTH_TOKEN_INVALID, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
+    }
+
+    @Test
+    void setsAuthenticationWhenTokenWasIssuedAfterPasswordChanged() throws Exception {
+        User user = activeUser(1L, "test@example.com", Role.USER);
+        ReflectionTestUtils.setField(user, "passwordChangedAt", LocalDateTime.now().minusSeconds(5));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, mock(FilterChain.class));
+
+        JwtUserPrincipal principal =
+                (JwtUserPrincipal) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        assertEquals(1L, principal.userId());
     }
 
     @Test

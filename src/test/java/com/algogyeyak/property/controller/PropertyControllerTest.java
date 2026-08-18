@@ -68,7 +68,7 @@ class PropertyControllerTest {
     private PropertyService propertyService;
 
     private RequestPostProcessor asUser(Long userId) {
-        JwtUserPrincipal principal = new JwtUserPrincipal(userId, "test@example.com", Role.USER);
+        JwtUserPrincipal principal = new JwtUserPrincipal(userId, "test@example.com", Role.USER, "테스트유저", null);
         Authentication auth = new UsernamePasswordAuthenticationToken(principal, null, List.of());
         return authentication(auth);
     }
@@ -181,7 +181,8 @@ class PropertyControllerTest {
                 null,
                 2,
                 "시세 대비 높은 가격, 전세가율 확인 필요",
-                85
+                85,
+                "https://example.com/property-image.jpg"
         );
 
         Pageable pageable = PageRequest.of(0, 20);
@@ -201,6 +202,7 @@ class PropertyControllerTest {
                 .andExpect(jsonPath("$.data.content[0].signalSummary").value("시세 대비 높은 가격, 전세가율 확인 필요"))
                 .andExpect(jsonPath("$.data.content[0].jeonseRatio").value(85))
                 .andExpect(jsonPath("$.data.content[0].maintenanceFee").value(100_000))
+                .andExpect(jsonPath("$.data.content[0].representativeImageUrl").value("https://example.com/property-image.jpg"))
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.hasNext").value(false));
     }

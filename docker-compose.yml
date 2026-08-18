@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     command: >
       redis-server
-      --requirepass ${REDIS_PASSWORD}
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD를 .env에 설정해야 합니다 - 비워두면 인증 없는 Redis가 뜹니다}
       --appendonly yes
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
@@ -15,7 +15,7 @@ services:
     networks:
       - algogyeyak-network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD를 .env에 설정해야 합니다 - 비워두면 인증 없는 Redis가 뜹니다}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -32,11 +32,11 @@ services:
       # Redis
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD를 .env에 설정해야 합니다 - 비워두면 인증 없는 Redis가 뜹니다}
       # RDS (MySQL)
       SPRING_DATASOURCE_URL: jdbc:mysql://${RDS_ENDPOINT}:3306/${DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD를 .env에 설정해야 합니다}
     depends_on:
       redis:
         condition: service_healthy

@@ -14,6 +14,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -26,13 +27,15 @@ class LocalAuthServiceTest {
 
     private final UserRepository userRepository = mock(UserRepository.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
-    private final LocalAuthService localAuthService =
-            new LocalAuthService(userRepository, passwordEncoder, mock(PlatformTransactionManager.class));
+    private final EmailVerificationService emailVerificationService = mock(EmailVerificationService.class);
+    private final LocalAuthService localAuthService = new LocalAuthService(
+            userRepository, passwordEncoder, emailVerificationService, mock(PlatformTransactionManager.class));
 
     @Test
     void signupCreatesLocalUserWithEncodedPassword() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
         when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         when(passwordEncoder.encode("password1")).thenReturn("encoded-hash");
         when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -42,12 +45,14 @@ class LocalAuthServiceTest {
         assertEquals("테스트유저", user.getNickname());
         assertEquals("encoded-hash", user.getPasswordHash());
         verify(userRepository).saveAndFlush(any(User.class));
+        verify(emailVerificationService).consumeVerified("test@example.com");
     }
 
     @Test
     void signupNormalizesEmailToLowercaseAndTrimmed() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
         when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         User user = localAuthService.signup("  Test@Example.COM  ", "password1", "테스트유저");
@@ -80,11 +85,40 @@ class LocalAuthServiceTest {
     }
 
     @Test
+    void signupThrowsWhenEmailNotVerified() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(false);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        assertEquals(ErrorCode.AUTH_EMAIL_NOT_VERIFIED, exception.getErrorCode());
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void signupKeepsVerifiedTicketWhenAccountCreationFailsSoUserCanRetry() {
+        // 인증까지는 성공했는데(예: 이메일 인증 완료 후) 닉네임 중복 등으로 계정 생성이 실패하면,
+        // 사용자가 이메일 인증부터 다시 하지 않고 나머지 폼만 고쳐 재시도할 수 있어야 한다 - 티켓을
+        // 소비하면 안 된다.
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("테스트유저")).thenReturn(true);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
+
+        assertThrows(BusinessException.class,
+                () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
+
+        verify(emailVerificationService, never()).consumeVerified(any());
+    }
+
+    @Test
     void signupRecoversAsEmailDuplicateWhenConcurrentSignupHitsUniqueConstraint() {
         when(userRepository.existsByEmail("test@example.com"))
                 .thenReturn(false) // 최초 체크 시점
                 .thenReturn(true); // INSERT 실패 후 재확인
         when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class)))
                 .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
 
@@ -100,6 +134,7 @@ class LocalAuthServiceTest {
         when(userRepository.existsByNickname("테스트유저"))
                 .thenReturn(false) // 최초 체크 시점
                 .thenReturn(true); // INSERT 실패 후 재확인
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class)))
                 .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
 
@@ -115,6 +150,7 @@ class LocalAuthServiceTest {
         // 원래 예외를 그대로 던져야 한다 (예: 다른 유니크 제약이 추가되거나, 일시적 DB 문제).
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
         when(userRepository.existsByNickname("테스트유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("test@example.com")).thenReturn(true);
         DataIntegrityViolationException original = new DataIntegrityViolationException("unknown constraint violation");
         when(userRepository.saveAndFlush(any(User.class))).thenThrow(original);
 
@@ -213,6 +249,23 @@ class LocalAuthServiceTest {
     }
 
     @Test
+    void loginThrowsForSuspendedAccountWithoutRevealingItExists() {
+        // (2026-08-12 추가) 정지된 계정도 존재하지 않는 이메일과 동일한 AUTH_INVALID_CREDENTIALS로
+        // 응답해야 한다 — 이번 세션에서 OAuth 로그인(CustomOAuth2UserService.rejectIfBlocked)의
+        // account_blocked 노출을 oauth_login_failed로 통일한 것과 같은 "계정 존재/정지 여부
+        // 비노출" 원칙을 로컬 로그인 경로에서도 회귀 테스트로 고정해둔다 - 지금까지 이 경로엔
+        // withdrawn 계정 테스트만 있었고 suspended 계정 테스트 자체가 없었다.
+        User user = User.createLocalUser("suspended@example.com", "encoded-hash", "정지유저");
+        user.suspend();
+        when(userRepository.findByEmail("suspended@example.com")).thenReturn(Optional.of(user));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.login("suspended@example.com", "password1"));
+
+        assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
+    }
+
+    @Test
     void setPasswordSucceedsForOAuthOnlyAccountWithoutCurrentPassword() {
         User user = User.createOAuthUser("social@example.com", "소셜유저", null);
         ReflectionTestUtils.setField(user, "id", 1L);
@@ -282,6 +335,15 @@ class LocalAuthServiceTest {
         localAuthService.setPassword(1L, "oldPassword1", "newPassword1");
 
         assertEquals("new-encoded-hash", user.getPasswordHash());
+        // 회귀 테스트 - 본인이 자발적으로 비밀번호를 바꾼 경우도 JwtAuthenticationFilter가 기존
+        // access token을 무효화할 수 있도록 passwordChangedAt이 찍혀야 한다(비밀번호 재설정
+        // 경로만 찍고 이 경로를 빠뜨리면, 탈취된 이전 access token이 계속 유효하게 남는다).
+        assertNotNull(user.getPasswordChangedAt());
+        // 회귀 테스트 - JWT의 iat(NumericDate)는 초 단위 정수라 나노초가 항상 0인데,
+        // passwordChangedAt에 나노초까지 있는 값을 그대로 저장하면 같은 초 안에서 발급된 정상
+        // 토큰이 "변경 이전"으로 잘못 비교돼 거부될 수 있다(JwtAuthenticationFilter 참고) -
+        // 저장 시점에 초 단위로 truncate되어야 한다.
+        assertEquals(0, user.getPasswordChangedAt().getNano());
     }
 
     @Test

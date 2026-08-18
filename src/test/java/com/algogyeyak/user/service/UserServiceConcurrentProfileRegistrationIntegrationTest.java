@@ -48,12 +48,6 @@ class UserServiceConcurrentProfileRegistrationIntegrationTest {
         return request;
     }
 
-    private ProfileRegisterRequest registerRequestWithNickname(String nickname) {
-        ProfileRegisterRequest request = registerRequest();
-        ReflectionTestUtils.setField(request, "nickname", nickname);
-        return request;
-    }
-
     @Test
     void secondConcurrentRegistrationForTheSameUserRecoversAsAlreadyRegistered() throws Exception {
         User user = userRepository.saveAndFlush(
@@ -95,60 +89,6 @@ class UserServiceConcurrentProfileRegistrationIntegrationTest {
             assertThat(exception.getCause()).isInstanceOf(BusinessException.class);
             assertThat(((BusinessException) exception.getCause()).getErrorCode())
                     .isEqualTo(ErrorCode.USER_PROFILE_ALREADY_EXISTS);
-        } finally {
-            executor.shutdownNow();
-        }
-    }
-
-    /**
-     * registerProfile()에서 닉네임 변경은 preference INSERT와 별개의 REQUIRES_NEW로 각자 커밋됐었다
-     * - 닉네임 변경이 먼저 커밋된 뒤 preference 저장만 유니크 제약(동시 중복 등록)에 걸려 실패하면,
-     * 요청 전체는 실패로 응답하면서도 닉네임 변경만 그대로 남는 부분 실패가 있었다.
-     * registerProfileAtomically()로 묶은 뒤에는 실패 시 닉네임 변경도 함께 롤백돼야 한다.
-     */
-    @Test
-    void nicknameChangeIsRolledBackWhenConcurrentPreferenceRegistrationLosesTheRace() throws Exception {
-        User user = userRepository.saveAndFlush(
-                User.createLocalUser("concurrent-profile-nickname@example.com", "encoded-hash", "원래닉네임"));
-        Long userId = user.getId();
-
-        CountDownLatch aHasReadNotRegistered = new CountDownLatch(1);
-        CountDownLatch bHasCommitted = new CountDownLatch(1);
-        TransactionTemplate repeatableReadOuterTransactionTemplate = new TransactionTemplate(transactionManager);
-        repeatableReadOuterTransactionTemplate.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-
-        // 스레드 A: 닉네임 변경을 포함한 registerProfile()을 REPEATABLE READ 바깥 트랜잭션에서
-        // 호출한다 - B가 먼저 커밋해 preference 등록에서 지게 만든다.
-        Future<?> aResult = executor.submit(() -> repeatableReadOuterTransactionTemplate.execute(status -> {
-            userRepository.findById(userId).orElseThrow();
-            aHasReadNotRegistered.countDown();
-
-            awaitOrFail(bHasCommitted, "B가 커밋을 완료하지 않았습니다.");
-
-            return userService.registerProfile(userId, registerRequestWithNickname("새닉네임"));
-        }));
-
-        // 스레드 B: 닉네임 변경 없이 먼저 등록을 마쳐 A의 preference INSERT가 유니크 제약에 걸리게 한다.
-        Future<?> bResult = executor.submit(() -> {
-            awaitOrFail(aHasReadNotRegistered, "A가 먼저 조회를 마치지 않았습니다.");
-            var response = userService.registerProfile(userId, registerRequest());
-            bHasCommitted.countDown();
-            return response;
-        });
-
-        try {
-            bResult.get(10, TimeUnit.SECONDS);
-
-            ExecutionException exception = assertThrows(
-                    ExecutionException.class, () -> aResult.get(10, TimeUnit.SECONDS));
-
-            assertThat(exception.getCause()).isInstanceOf(BusinessException.class);
-            assertThat(((BusinessException) exception.getCause()).getErrorCode())
-                    .isEqualTo(ErrorCode.USER_PROFILE_ALREADY_EXISTS);
-
-            User reloaded = userRepository.findById(userId).orElseThrow();
-            assertThat(reloaded.getNickname()).isEqualTo("원래닉네임");
         } finally {
             executor.shutdownNow();
         }

@@ -27,6 +27,7 @@ public class LocalAuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final EmailVerificationService emailVerificationService;
     private final TransactionTemplate requiresNewTransactionTemplate;
 
     @Value("${app.dev-login.email}")
@@ -35,9 +36,11 @@ public class LocalAuthService {
     public LocalAuthService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
+            EmailVerificationService emailVerificationService,
             PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.emailVerificationService = emailVerificationService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -52,6 +55,12 @@ public class LocalAuthService {
         if (userRepository.existsByNickname(nickname)) {
             throw new BusinessException(ErrorCode.AUTH_NICKNAME_ALREADY_EXISTS);
         }
+        // 이메일 인증(POST /auth/email-verification/{request,confirm})을 먼저 마쳐야 한다 - 인증
+        // 없이 바로 가입을 시도했거나, 인증 완료 후 유효시간(30분)이 지난 뒤 뒤늦게 가입을 완료하려는
+        // 경우 모두 여기서 막는다.
+        if (!emailVerificationService.isVerified(normalizedEmail)) {
+            throw new BusinessException(ErrorCode.AUTH_EMAIL_NOT_VERIFIED);
+        }
 
         User newUser = User.createLocalUser(normalizedEmail, passwordEncoder.encode(rawPassword), nickname);
 
@@ -61,6 +70,10 @@ public class LocalAuthService {
             // saveAndFlush가 실패해도, 폐기되는 세션이 이 임시 트랜잭션뿐이도록 격리해
             // 바깥(signup()) 트랜잭션의 세션은 항상 정상 상태로 남는다.
             requiresNewTransactionTemplate.executeWithoutResult(status -> userRepository.saveAndFlush(newUser));
+            // 인증 완료 티켓은 이 계정 생성이 실제로 성공했을 때만 소비한다 - 위에서 닉네임 중복 등으로
+            // 실패하면 티켓을 남겨둬 사용자가 이메일 인증부터 다시 하지 않고 나머지 폼만 고쳐 재시도할
+            // 수 있게 한다.
+            emailVerificationService.consumeVerified(normalizedEmail);
             return newUser;
         } catch (DataIntegrityViolationException e) {
             // 이메일이 원인이 아니면 무조건 닉네임이 원인이라고 단정하지 않는다 - 실제로

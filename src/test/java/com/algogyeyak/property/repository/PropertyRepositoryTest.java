@@ -3,7 +3,6 @@ package com.algogyeyak.property.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.algogyeyak.property.entity.Property;
-import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import java.time.LocalDateTime;
@@ -65,8 +64,13 @@ class PropertyRepositoryTest {
 
     // createdAt은 @CreatedDate + updatable=false라 저장 시점의 실제 시각으로만 채워진다 - 기간
     // 경계를 테스트할 때는 저장 전후로 now() 기준 여유를 둔 범위를 만들어 감싼다.
+    //
+    // 회귀 테스트 - AdminStatsService.summary()의 newProperties 카드는 findCreatedAtBetween(추이
+    // 차트)과 항상 합이 맞아야 한다(둘 다 "등록 발생" 자체를 센다). 예전엔 이 카운트만 ACTIVE로
+    // 필터링해서, 기간 내 등록 후 삭제된 매물이 있으면 추이 차트 합계보다 이 카드가 더 작게 나와
+    // 같은 화면에서 숫자가 어긋났다.
     @Test
-    void 신규_등록_매물수는_기간과_활성_상태를_모두_만족해야_집계된다() {
+    void 신규_등록_매물수는_기간_내_등록되었으면_이후_삭제되어도_집계된다() {
         LocalDateTime rangeStart = LocalDateTime.now().minusMinutes(1);
         save(1L);
         Property deleted = save(2L);
@@ -74,7 +78,6 @@ class PropertyRepositoryTest {
         propertyRepository.save(deleted);
         LocalDateTime rangeEnd = LocalDateTime.now().plusMinutes(1);
 
-        assertThat(propertyRepository.countByStatusAndCreatedAtBetween(PropertyStatus.ACTIVE, rangeStart, rangeEnd))
-                .isEqualTo(1);
+        assertThat(propertyRepository.countByCreatedAtBetween(rangeStart, rangeEnd)).isEqualTo(2);
     }
 }

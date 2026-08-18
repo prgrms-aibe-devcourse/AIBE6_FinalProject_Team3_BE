@@ -20,6 +20,7 @@ import com.algogyeyak.riskanalysis.signal.SignalDetector;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -142,6 +143,18 @@ class FakeListingSignalServiceTest {
     }
 
     @Test
+    @DisplayName("보증금 안전성 체크가 예외를 던져도 이미 판정된 신호 개수는 그대로 반환하고 예외를 전파하지 않는다")
+    void checkAndSaveAbsorbsDepositSafetyCheckFailure() {
+        Property property = property(10L, 1L);
+        org.mockito.Mockito.doThrow(new RuntimeException("지오코딩 클라이언트 실패"))
+                .when(depositSafetyCheckService).checkAndSave(property);
+
+        int signalCount = service.checkAndSave(property);
+
+        assertThat(signalCount).isEqualTo(0);
+    }
+
+    @Test
     @DisplayName("PropertyRiskCheck 동시 insert로 유니크 제약을 위반하면 재조회해서 덮어쓰는 방식으로 복구한다")
     void upsertCheckRecoversFromConcurrentInsertRace() {
         Property property = property(10L, 1L);
@@ -199,6 +212,62 @@ class FakeListingSignalServiceTest {
         serviceWithDetector.checkAndSave(property);
 
         verify(riskRepository, times(2)).saveAndFlush(any(PropertyRisk.class));
+    }
+
+    @Test
+    @DisplayName("PropertyRiskCheck 기존 행을 덮어쓰다 낙관적 락 충돌(동시 갱신)이 나면 예외를 흡수하고 조용히 넘어간다")
+    void upsertCheckAbsorbsOptimisticLockConflictOnExistingRow() {
+        Property property = property(10L, 1L);
+        com.algogyeyak.riskanalysis.signal.SignalDetector detector = mock(com.algogyeyak.riskanalysis.signal.SignalDetector.class);
+        when(detector.isEnabled()).thenReturn(true);
+        when(detector.type()).thenReturn(RiskSignalType.PRICE_ANOMALY);
+        when(detector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.undeterminable(com.algogyeyak.riskanalysis.enums.RiskCheckReason.NO_COMPARABLE_TRANSACTION));
+
+        FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
+                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        PropertyRiskCheck existing = mock(PropertyRiskCheck.class);
+        when(riskCheckRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.PRICE_ANOMALY))
+                .thenReturn(Optional.of(existing));
+        when(riskCheckRepository.saveAndFlush(existing))
+                .thenThrow(new ObjectOptimisticLockingFailureException(PropertyRiskCheck.class, 1L));
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> serviceWithDetector.checkAndSave(property))
+                .doesNotThrowAnyException();
+
+        verify(existing).overwrite(any(), any(), any());
+        verify(riskCheckRepository).saveAndFlush(existing);
+    }
+
+    @Test
+    @DisplayName("PropertyRisk 기존 행을 덮어쓰다 낙관적 락 충돌(동시 갱신)이 나면 예외를 흡수하고 조용히 넘어간다")
+    void upsertRiskAbsorbsOptimisticLockConflictOnExistingRow() {
+        Property property = property(10L, 1L);
+        com.algogyeyak.riskanalysis.signal.SignalDetector detector = mock(com.algogyeyak.riskanalysis.signal.SignalDetector.class);
+        when(detector.isEnabled()).thenReturn(true);
+        when(detector.type()).thenReturn(RiskSignalType.DUPLICATE_LISTING);
+        when(detector.detect(any(), any())).thenReturn(
+                com.algogyeyak.riskanalysis.dto.SignalCheckResult.success("동일 주소로 등록된 다른 매물이 있어요"));
+
+        FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
+                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+
+        when(riskCheckRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.DUPLICATE_LISTING))
+                .thenReturn(Optional.empty());
+        PropertyRisk existing = mock(PropertyRisk.class);
+        when(riskRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.DUPLICATE_LISTING))
+                .thenReturn(Optional.of(existing));
+        when(riskRepository.saveAndFlush(existing))
+                .thenThrow(new ObjectOptimisticLockingFailureException(PropertyRisk.class, 1L));
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> serviceWithDetector.checkAndSave(property))
+                .doesNotThrowAnyException();
+
+        verify(existing).overwrite(any());
+        verify(riskRepository).saveAndFlush(existing);
     }
 
     @Test

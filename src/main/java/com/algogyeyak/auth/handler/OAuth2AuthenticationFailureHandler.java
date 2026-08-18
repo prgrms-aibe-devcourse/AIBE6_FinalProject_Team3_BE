@@ -33,11 +33,13 @@ public class OAuth2AuthenticationFailureHandler extends SimpleUrlAuthenticationF
 
         authorizationRequestRepository.removeAuthorizationRequest(request, response);
 
-        // CustomOAuth2UserService가 account_blocked/email_conflict처럼 구체적인 OAuth2Error 코드를
-        // 이미 만들어서 던지는데, 여기서 항상 GENERIC_ERROR_CODE로 덮어써버리면 정지된 계정이나
-        // 닉네임/이메일 충돌이나 진짜 알 수 없는 오류나 프론트에서 전부 똑같은 문구로 보였다.
-        // 실제 코드가 있으면 그대로 전달하고, Spring Security 자체 오류(제공자 응답 거부 등
-        // OAuth2AuthenticationException이 아닌 경우) 등 코드가 없을 때만 일반 코드로 대체한다.
+        // CustomOAuth2UserService가 email_conflict/social_account_conflict처럼 구체적인 OAuth2Error
+        // 코드를 이미 만들어서 던지는데, 여기서 항상 GENERIC_ERROR_CODE로 덮어써버리면 닉네임/이메일
+        // 충돌이나 진짜 알 수 없는 오류나 프론트에서 전부 똑같은 문구로 보였다. 실제 코드가 있으면
+        // 그대로 전달하고, Spring Security 자체 오류(제공자 응답 거부 등 OAuth2AuthenticationException이
+        // 아닌 경우) 등 코드가 없을 때만 일반 코드로 대체한다. (참고: 정지/탈퇴 계정은 예외로,
+        // CustomOAuth2UserService.rejectIfBlocked()가 계정 존재 비노출을 위해 이 GENERIC_ERROR_CODE와
+        // 같은 값("oauth_login_failed")을 의도적으로 던진다 - 코드가 있어도 구분되지 않는 유일한 케이스)
         String errorCode = exception instanceof OAuth2AuthenticationException oauth2Exception
                 ? oauth2Exception.getError().getErrorCode()
                 : GENERIC_ERROR_CODE;

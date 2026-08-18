@@ -3,6 +3,8 @@ package com.algogyeyak.auth.controller;
 import com.algogyeyak.auth.dto.PasswordPolicy;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
+import com.algogyeyak.auth.service.EmailVerificationService;
+import com.algogyeyak.auth.service.PasswordResetService;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -39,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -86,6 +89,12 @@ class AuthControllerTest {
     @MockitoBean
     private PasswordEncoder passwordEncoder;
 
+    @MockitoBean
+    private EmailVerificationService emailVerificationService;
+
+    @MockitoBean
+    private PasswordResetService passwordResetService;
+
     @Test
     void passwordPolicyReturnsPatternWithoutSurroundingAnchorsAndMessage() throws Exception {
         // 인증 토큰(쿠키/헤더) 없이 호출해도 통과해야 한다 — 로그인 전 회원가입 폼에서도 필요하다.
@@ -100,6 +109,7 @@ class AuthControllerTest {
     void signupCreatesUserAndIssuesAuthCookies() throws Exception {
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(userRepository.existsByNickname("새유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("new@example.com")).thenReturn(true);
         when(passwordEncoder.encode("password1")).thenReturn("encoded-hash");
         when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> {
             User user = invocation.getArgument(0);
@@ -131,6 +141,7 @@ class AuthControllerTest {
         // 하기 어려워지던 문제의 회귀 테스트 - 방금 만든 계정을 함께 삭제해 재시도를 가능하게 해야 한다.
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(userRepository.existsByNickname("새유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("new@example.com")).thenReturn(true);
         when(passwordEncoder.encode("password1")).thenReturn("encoded-hash");
         when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> {
             User user = invocation.getArgument(0);
@@ -202,6 +213,114 @@ class AuthControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"))
                 .andExpect(jsonPath("$.error.fieldErrors[*].field").value(hasItem("nickname")));
+    }
+
+    @Test
+    void signupRejectsWhenEmailNotVerified() throws Exception {
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(userRepository.existsByNickname("새유저")).thenReturn(false);
+        when(emailVerificationService.isVerified("new@example.com")).thenReturn(false);
+
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"new@example.com","password":"password1","nickname":"새유저"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("AUTH_EMAIL_NOT_VERIFIED"));
+
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void requestEmailVerificationDelegatesToService() throws Exception {
+        mockMvc.perform(post("/auth/email-verification/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"new@example.com"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(emailVerificationService).requestCode("new@example.com");
+    }
+
+    @Test
+    void requestEmailVerificationPropagatesServiceFailure() throws Exception {
+        doThrow(new BusinessException(ErrorCode.AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS))
+                .when(emailVerificationService).requestCode("new@example.com");
+
+        mockMvc.perform(post("/auth/email-verification/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"new@example.com"}
+                                """))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS"));
+    }
+
+    @Test
+    void confirmEmailVerificationDelegatesToService() throws Exception {
+        mockMvc.perform(post("/auth/email-verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"new@example.com","code":"123456"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(emailVerificationService).confirmCode("new@example.com", "123456");
+    }
+
+    @Test
+    void confirmEmailVerificationRejectsMalformedCode() throws Exception {
+        mockMvc.perform(post("/auth/email-verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"new@example.com","code":"12"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void requestPasswordResetAlwaysRespondsSuccessRegardlessOfAccountExistence() throws Exception {
+        mockMvc.perform(post("/auth/password-reset/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"unknown@example.com"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(passwordResetService).requestReset("unknown@example.com");
+    }
+
+    @Test
+    void confirmPasswordResetDelegatesToService() throws Exception {
+        mockMvc.perform(post("/auth/password-reset/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"some-token","newPassword":"newPassword1"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(passwordResetService).confirmReset("some-token", "newPassword1");
+    }
+
+    @Test
+    void confirmPasswordResetRejectsInvalidToken() throws Exception {
+        doThrow(new BusinessException(ErrorCode.AUTH_PASSWORD_RESET_TOKEN_INVALID))
+                .when(passwordResetService).confirmReset("bad-token", "newPassword1");
+
+        mockMvc.perform(post("/auth/password-reset/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"bad-token","newPassword":"newPassword1"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("AUTH_PASSWORD_RESET_TOKEN_INVALID"));
     }
 
     @Test

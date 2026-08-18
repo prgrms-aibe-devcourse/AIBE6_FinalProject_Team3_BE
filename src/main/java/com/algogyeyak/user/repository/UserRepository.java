@@ -11,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -73,4 +74,26 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // 유저들의 id만 뽑아 PropertyRepository.countDistinctUserIdIn에 넘긴다.
     @Query("SELECT u.id FROM User u WHERE u.createdAt >= :start AND u.createdAt < :end")
     List<Long> findIdsByCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * 관리자 권한 변경(AdminUserService.updateRole)을 조건부 UPDATE로 처리한다. 기존 방식(엔티티를
+     * 읽어 User.changeRole()로 필드만 바꾸고, 커밋 시점에 Hibernate dirty-checking이 UPDATE를
+     * 내보내는 방식)은 "관리자가 읽은 시점엔 활성 상태였지만, 실제 커밋 시점엔 이미 본인 탈퇴가
+     * 먼저 커밋된" 레이스에서 그 탈퇴를 무시하고 role을 덮어써 WITHDRAWN 상태의 계정이 ADMIN
+     * 권한을 갖게 만들 수 있었다(UserWithdrawFieldOverwriteIntegrationTest 참고).
+     * 이 UPDATE는 WHERE의 status 조건을 실행 시점의 최신 커밋 데이터로 평가한다(락을 잡는 쓰기
+     * 문이라 findAllByRoleAndStatusForUpdate와 동일하게 REPEATABLE READ 스냅샷이 아니라 current
+     * read) - 그 사이 탈퇴가 먼저 커밋됐다면 영향받은 row가 0건이 되어 안전하게 감지된다.
+     */
+    @Modifying
+    @Query("UPDATE User u SET u.role = :role WHERE u.id = :id AND u.status <> :excludedStatus")
+    int updateRoleIfNotWithdrawn(@Param("id") Long id, @Param("role") Role role, @Param("excludedStatus") UserStatus excludedStatus);
+
+    /**
+     * updateRoleIfNotWithdrawn과 동일한 이유로, 정지/활성화(AdminUserService.updateStatus)도
+     * 조건부 UPDATE로 처리한다.
+     */
+    @Modifying
+    @Query("UPDATE User u SET u.status = :status WHERE u.id = :id AND u.status <> :excludedStatus")
+    int updateStatusIfNotWithdrawn(@Param("id") Long id, @Param("status") UserStatus status, @Param("excludedStatus") UserStatus excludedStatus);
 }

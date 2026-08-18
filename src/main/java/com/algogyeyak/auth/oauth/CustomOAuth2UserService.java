@@ -91,10 +91,15 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
     // 로컬 로그인(LocalAuthService.login)/refresh(RefreshTokenService.rotate)는 이미 탈퇴·정지 계정을
     // 거부하는데, 소셜 로그인만 이 검사가 빠져 있으면 정지된 계정도 새 토큰을 계속 발급받을 수 있다.
+    //
+    // 에러 코드는 일반 실패("oauth_login_failed")와 동일하게 둔다 - 로컬 로그인/토큰 필터는
+    // "탈퇴/정지된 계정" 사유를 노출하지 않고 전부 같은 실패로 응답하는데(AUTH_INVALID_CREDENTIALS 등,
+    // 계정 존재 여부 비노출 원칙), 소셜 로그인만 "account_blocked"로 구체적인 사유를 알려주면
+    // 그 계정이 실제로 존재하고 정지 상태라는 것이 새어나가 정책이 어긋난다.
     private void rejectIfBlocked(User user) {
         if (user.isWithdrawn() || user.isSuspended()) {
             throw new OAuth2AuthenticationException(
-                    new OAuth2Error("account_blocked", "로그인할 수 없는 계정입니다.", null));
+                    new OAuth2Error("oauth_login_failed", "로그인할 수 없는 계정입니다.", null));
         }
     }
 
@@ -266,7 +271,17 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                     requiresNewTransactionTemplate.execute(status -> userRepository.existsByNickname(nickname)));
             if (nicknameConflict) {
                 String fallbackNickname = provider.name().toLowerCase() + "_" + userInfo.getProviderId();
-                return createUser(provider, userInfo, fallbackNickname, false);
+                // provider가 닉네임을 안 줘서(getNickname() == null) processOAuth2User()가 애초에
+                // 이 fallback 형식을 nickname으로 썼던 경우, fallbackNickname은 지금 막 충돌한
+                // nickname과 완전히 같은 문자열이다 - 재귀 호출해도 똑같은 값으로 다시 시도할 뿐이라
+                // 재귀 자체가 무의미하고(재시도해도 반드시 다시 같은 유니크 제약에 걸림), 결국 아래
+                // email_conflict로 떨어져 실제 원인(닉네임 충돌)과 다른 에러가 노출된다. 이 경우만
+                // 재시도를 건너뛰고 정확한 원인으로 바로 실패시킨다.
+                if (!fallbackNickname.equals(nickname)) {
+                    return createUser(provider, userInfo, fallbackNickname, false);
+                }
+                throw new OAuth2AuthenticationException(
+                        new OAuth2Error("oauth_nickname_conflict", "닉네임이 이미 사용 중입니다.", null), e);
             }
 
             // 그마저도 아니면(검증 안 된 이메일이라 위 조회가 애초에 empty를 준 경우 포함) 이 예외를

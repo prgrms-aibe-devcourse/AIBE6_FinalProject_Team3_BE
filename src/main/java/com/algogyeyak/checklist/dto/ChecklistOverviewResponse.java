@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 public record ChecklistOverviewResponse(
         Long propertyId,
         Long checklistId,
+        String title,
         String roadAddress,
         String jibunAddress,
         String propertyType,
@@ -28,6 +29,7 @@ public record ChecklistOverviewResponse(
         return new ChecklistOverviewResponse(
                 property.getId(),
                 checklist != null ? checklist.getId() : null,
+                property.getTitle(),
                 address != null ? address.getRoadAddress() : null,
                 address != null ? address.getJibunAddress() : null,
                 property.getPropertyType().name(),

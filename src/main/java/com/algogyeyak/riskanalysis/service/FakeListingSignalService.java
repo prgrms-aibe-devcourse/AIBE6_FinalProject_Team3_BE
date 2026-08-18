@@ -21,6 +21,7 @@ import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import com.algogyeyak.riskanalysis.signal.SignalDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -148,7 +149,16 @@ public class FakeListingSignalService {
                 .filter(detector -> checkAndSaveSignal(property, comparison, detector))
                 .count();
 
-        depositSafetyCheckService.checkAndSave(property);
+        // 신호 4종 중 신규 insert된 결과는 이미 REQUIRES_NEW로 별도 커밋됐으므로, 이 호출이 예외를
+        // 던져 바깥 트랜잭션이 롤백돼도 그 결과는 그대로 남는다 - 여기서 예외를 그대로 전파하면
+        // "기존 행이라 dirty-check만 해둔" 결과만 롤백되고 신규 insert 결과는 남아, 신호별로 반영
+        // 여부가 갈리는 불일치 상태가 생긴다. RiskRecalculationService와 같은 원칙(재계산 실패가
+        // 다른 처리에 영향을 주면 안 됨)으로 예외를 흡수하고 로그만 남긴다.
+        try {
+            depositSafetyCheckService.checkAndSave(property);
+        } catch (RuntimeException e) {
+            log.error("보증금 안전성 체크 실패 - propertyId={}", property.getId(), e);
+        }
         return foundSignalCount;
     }
 
@@ -174,7 +184,7 @@ public class FakeListingSignalService {
     private void upsertCheck(Property property, RiskSignalType signalType, RiskCheckStatus status, RiskCheckReason reason) {
         Optional<PropertyRiskCheck> existing = riskCheckRepository.findByPropertyIdAndSignalType(property.getId(), signalType);
         if (existing.isPresent()) {
-            existing.get().overwrite(status, reason, policyConfig.getVersion());
+            updateCheckAbsorbingConflict(property.getId(), signalType, status, reason);
             return;
         }
 
@@ -196,7 +206,15 @@ public class FakeListingSignalService {
                     riskCheckRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
                             .map(winner -> {
                                 winner.overwrite(status, reason, policyConfig.getVersion());
-                                riskCheckRepository.saveAndFlush(winner);
+                                // 복구 재조회 자체도 세 번째 요청과 @Version 충돌할 수 있다 - 그마저도
+                                // 이미 유효한 값으로 반영된 상태이므로 흡수한다(saveCheckAbsorbingConflict와
+                                // 동일 이유).
+                                try {
+                                    riskCheckRepository.saveAndFlush(winner);
+                                } catch (ObjectOptimisticLockingFailureException ex) {
+                                    log.warn("PropertyRiskCheck 복구 중 동시 갱신 경쟁 감지 - 나중에 커밋된 값만 반영됨. propertyId={}, signalType={}",
+                                            property.getId(), signalType);
+                                }
                                 return true;
                             })
                             .orElse(false)));
@@ -219,7 +237,7 @@ public class FakeListingSignalService {
 
         Optional<PropertyRisk> existing = riskRepository.findByPropertyIdAndSignalType(property.getId(), signalType);
         if (existing.isPresent()) {
-            existing.get().overwrite(result.description());
+            updateRiskAbsorbingConflict(property.getId(), signalType, result.description());
             return;
         }
 
@@ -232,7 +250,15 @@ public class FakeListingSignalService {
                     riskRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
                             .map(winner -> {
                                 winner.overwrite(result.description());
-                                riskRepository.saveAndFlush(winner);
+                                // 복구 재조회 자체도 세 번째 요청과 @Version 충돌할 수 있다 - 그마저도
+                                // 이미 유효한 값으로 반영된 상태이므로 흡수한다(saveRiskAbsorbingConflict와
+                                // 동일 이유).
+                                try {
+                                    riskRepository.saveAndFlush(winner);
+                                } catch (ObjectOptimisticLockingFailureException ex) {
+                                    log.warn("PropertyRisk 복구 중 동시 갱신 경쟁 감지 - 나중에 커밋된 값만 반영됨. propertyId={}, signalType={}",
+                                            property.getId(), signalType);
+                                }
                                 return true;
                             })
                             .orElse(false)));
@@ -241,6 +267,42 @@ public class FakeListingSignalService {
                         property.getId(), signalType, e);
                 throw e;
             }
+        }
+    }
+
+    // @Version 낙관적 락 충돌(동시 갱신 경쟁) 흡수 - 조회·수정·flush를 전부 REQUIRES_NEW 트랜잭션
+    // 안에서 끝낸다. 바깥 트랜잭션에서 읽은 엔티티를 여기서 mutate만 하고 별도 트랜잭션에서 flush하면,
+    // 바깥 세션은 그 엔티티가 이미 다른 세션에서 저장된 걸 몰라 여전히 dirty 상태로 남아있다가 다음
+    // signalType 조회 시 Hibernate의 auto-flush가 낡은 버전으로 다시 flush를 시도해 충돌한다(실제
+    // FakeListingSignalServiceConcurrencyTest로 재현·확인함) - 그래서 재조회부터 다시 REQUIRES_NEW
+    // 안에서 하는, insert 경쟁 복구와 동일한 패턴을 쓴다. 두 판정 다 유효한 결과라 데이터 손상이
+    // 아니므로(risk-analysis-design.md 전수조사 결과 코드 품질 2번), RiskRecalculationService의
+    // fail-safe 원칙과 동일하게 로그만 남기고 조용히 흡수한다.
+    private void updateCheckAbsorbingConflict(Long propertyId, RiskSignalType signalType, RiskCheckStatus status, RiskCheckReason reason) {
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(txStatus ->
+                    riskCheckRepository.findByPropertyIdAndSignalType(propertyId, signalType)
+                            .ifPresent(found -> {
+                                found.overwrite(status, reason, policyConfig.getVersion());
+                                riskCheckRepository.saveAndFlush(found);
+                            }));
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("PropertyRiskCheck 동시 갱신 경쟁 감지 - 나중에 커밋된 값만 반영됨. propertyId={}, signalType={}",
+                    propertyId, signalType);
+        }
+    }
+
+    private void updateRiskAbsorbingConflict(Long propertyId, RiskSignalType signalType, String description) {
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(txStatus ->
+                    riskRepository.findByPropertyIdAndSignalType(propertyId, signalType)
+                            .ifPresent(found -> {
+                                found.overwrite(description);
+                                riskRepository.saveAndFlush(found);
+                            }));
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("PropertyRisk 동시 갱신 경쟁 감지 - 나중에 커밋된 값만 반영됨. propertyId={}, signalType={}",
+                    propertyId, signalType);
         }
     }
 }

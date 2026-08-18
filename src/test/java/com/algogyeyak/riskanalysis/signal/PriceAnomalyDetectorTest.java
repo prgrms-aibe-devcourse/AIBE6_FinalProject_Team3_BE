@@ -89,6 +89,27 @@ class PriceAnomalyDetectorTest {
     }
 
     @Test
+    @DisplayName("시세비교가 매물유형(단독/다가구) 미지원으로 판정불가면 PROPERTY_TYPE_UNSUPPORTED로 매핑한다")
+    void detectMapsPropertyTypeUnsupported() {
+        SignalCheckResult result = detector.detect(property(), undeterminable(MarketUnavailableReason.PROPERTY_TYPE_UNSUPPORTED));
+
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.UNDETERMINABLE);
+        assertThat(result.reason()).isEqualTo(RiskCheckReason.PROPERTY_TYPE_UNSUPPORTED);
+    }
+
+    // 회귀 테스트 - 예전에는 이 사유도 PROPERTY_TYPE_UNSUPPORTED로 뭉뚱그려져서, 월세 매물인데
+    // "매물 유형을 지원하지 않는다"는 부정확한 안내가 나갔다(risk-analysis-design.md 전수조사 결과
+    // 버그 2번). 거래유형 미지원 전용 사유를 분리해 정확한 원인이 내려가는지 확인한다.
+    @Test
+    @DisplayName("시세비교가 거래유형(월세) 미지원으로 판정불가면 TRANSACTION_TYPE_UNSUPPORTED로 매핑한다")
+    void detectMapsTransactionTypeUnsupported() {
+        SignalCheckResult result = detector.detect(property(), undeterminable(MarketUnavailableReason.TRANSACTION_TYPE_UNSUPPORTED));
+
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.UNDETERMINABLE);
+        assertThat(result.reason()).isEqualTo(RiskCheckReason.TRANSACTION_TYPE_UNSUPPORTED);
+    }
+
+    @Test
     @DisplayName("시세비교가 실패(FAILED)면 DATA_FETCH_FAILURE로 매핑해 FAILED를 반환한다")
     void detectMapsFailedComparisonToDataFetchFailure() {
         SignalCheckResult result = detector.detect(property(), failed(MarketUnavailableReason.EXTERNAL_API_FAILURE));

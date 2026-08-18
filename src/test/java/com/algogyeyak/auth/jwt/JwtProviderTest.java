@@ -2,11 +2,11 @@ package com.algogyeyak.auth.jwt;
 
 import com.algogyeyak.user.enums.Role;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JwtProviderTest {
 
@@ -16,8 +16,6 @@ class JwtProviderTest {
     @Test
     void createsAndParsesValidToken() {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
-
-        assertTrue(jwtProvider.validateToken(token));
 
         Claims claims = jwtProvider.parseClaims(token);
         assertEquals("1", claims.getSubject());
@@ -31,7 +29,7 @@ class JwtProviderTest {
                 new JwtProvider("another-secret-key-that-is-also-at-least-32-bytes", 3600);
         String token = otherProvider.createAccessToken(1L, "test@example.com", Role.USER);
 
-        assertFalse(jwtProvider.validateToken(token));
+        assertThrows(JwtException.class, () -> jwtProvider.parseClaims(token));
     }
 
     @Test
@@ -42,11 +40,11 @@ class JwtProviderTest {
 
         Thread.sleep(1100);
 
-        assertFalse(jwtProvider.validateToken(token));
+        assertThrows(JwtException.class, () -> jwtProvider.parseClaims(token));
     }
 
     @Test
     void rejectsGarbageToken() {
-        assertFalse(jwtProvider.validateToken("not-a-real-jwt"));
+        assertThrows(JwtException.class, () -> jwtProvider.parseClaims("not-a-real-jwt"));
     }
 }

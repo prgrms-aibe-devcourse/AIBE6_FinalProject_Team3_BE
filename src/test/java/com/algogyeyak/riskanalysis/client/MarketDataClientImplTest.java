@@ -94,11 +94,28 @@ class MarketDataClientImplTest {
         Property property = property(10L, 200_000_000L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(property)).thenReturn(
-                MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.TRANSACTION_TYPE_UNSUPPORTED, "월세")
+                MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.PROPERTY_TYPE_UNSUPPORTED, "단독/다가구")
         );
 
         MarketComparison result = client.getComparison(10L).orElseThrow();
 
         assertThat(result.reason()).isEqualTo(MarketUnavailableReason.PROPERTY_TYPE_UNSUPPORTED);
+    }
+
+    // 회귀 테스트 - 예전에는 이 사유도 PROPERTY_TYPE_UNSUPPORTED로 뭉뚱그려 매핑해서, 월세라 시세비교가
+    // 안 되는 것뿐인데 "매물 유형 미지원"이라는 부정확한 사유가 내려갔다(risk-analysis-design.md
+    // 전수조사 결과 버그 2번). 거래유형 미지원은 별도 사유로 분리해서 매핑해야 한다.
+    @Test
+    @DisplayName("시세비교가 거래유형(월세) 미지원으로 판정불가면 매물유형 미지원과 구분해서 매핑한다")
+    void getComparisonMapsTransactionTypeUnsupportedSeparately() {
+        Property property = property(10L, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        when(marketComparisonService.compare(property)).thenReturn(
+                MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.TRANSACTION_TYPE_UNSUPPORTED, "월세")
+        );
+
+        MarketComparison result = client.getComparison(10L).orElseThrow();
+
+        assertThat(result.reason()).isEqualTo(MarketUnavailableReason.TRANSACTION_TYPE_UNSUPPORTED);
     }
 }

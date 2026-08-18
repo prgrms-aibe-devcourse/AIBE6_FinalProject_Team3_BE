@@ -2,7 +2,9 @@ package com.algogyeyak.auth.controller;
 
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.oauth.CookieUtils;
+import com.algogyeyak.auth.service.EmailVerificationService;
 import com.algogyeyak.auth.service.LocalAuthService;
+import com.algogyeyak.auth.service.PasswordResetService;
 import com.algogyeyak.auth.service.SessionLogoutService;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.user.repository.UserRepository;
@@ -30,7 +32,9 @@ class AuthControllerDevLoginStartupTest {
                     mock(JwtProvider.class),
                     mock(RefreshTokenService.class),
                     mock(LocalAuthService.class),
-                    mock(SessionLogoutService.class)));
+                    mock(SessionLogoutService.class),
+                    mock(EmailVerificationService.class),
+                    mock(PasswordResetService.class)));
 
     @Test
     void failsToStartWhenDevLoginEnabledWithoutSecret() {

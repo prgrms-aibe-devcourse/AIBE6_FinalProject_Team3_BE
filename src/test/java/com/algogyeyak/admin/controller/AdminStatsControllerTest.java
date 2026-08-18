@@ -13,7 +13,6 @@ import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.property.entity.PropertyReportStatus;
-import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
@@ -102,7 +101,7 @@ class AdminStatsControllerTest {
 
         when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(10L);
         when(userRepository.findIdsByCreatedAtBetween(any(), any())).thenReturn(userIdsJoinedInRange);
-        when(propertyRepository.countByStatusAndCreatedAtBetween(eq(PropertyStatus.ACTIVE), any(), any())).thenReturn(5L);
+        when(propertyRepository.countByCreatedAtBetween(any(), any())).thenReturn(5L);
         when(propertyReportRepository.countByStatusAndCreatedAtBetween(eq(PropertyReportStatus.RECEIVED), any(), any()))
                 .thenReturn(2L);
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of(LocalDateTime.now()));
@@ -112,9 +111,9 @@ class AdminStatsControllerTest {
 
         mockMvc.perform(get("/admin/stats/dashboard").cookie(adminCookie()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.summary.totalUsers").value(10))
-                .andExpect(jsonPath("$.data.summary.totalProperties").value(5))
-                .andExpect(jsonPath("$.data.summary.pendingReports").value(2))
+                .andExpect(jsonPath("$.data.summary.newUsers").value(10))
+                .andExpect(jsonPath("$.data.summary.newProperties").value(5))
+                .andExpect(jsonPath("$.data.summary.newPendingReports").value(2))
                 .andExpect(jsonPath("$.data.trends.signups.length()").value(14))
                 .andExpect(jsonPath("$.data.distributions.byPropertyRegistration.length()").value(2))
                 .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[0].registered").value(true))
@@ -127,7 +126,7 @@ class AdminStatsControllerTest {
     void 기간_내_가입자가_없으면_등록자_조회를_건너뛰고_0으로_집계한다() throws Exception {
         when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(10L);
         when(userRepository.findIdsByCreatedAtBetween(any(), any())).thenReturn(List.of());
-        when(propertyRepository.countByStatusAndCreatedAtBetween(eq(PropertyStatus.ACTIVE), any(), any())).thenReturn(5L);
+        when(propertyRepository.countByCreatedAtBetween(any(), any())).thenReturn(5L);
         when(propertyReportRepository.countByStatusAndCreatedAtBetween(eq(PropertyReportStatus.RECEIVED), any(), any()))
                 .thenReturn(2L);
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
@@ -146,7 +145,7 @@ class AdminStatsControllerTest {
     void 조회_기간을_직접_지정하면_해당_일수만큼_추이를_반환한다() throws Exception {
         when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(10L);
         when(userRepository.findIdsByCreatedAtBetween(any(), any())).thenReturn(List.of());
-        when(propertyRepository.countByStatusAndCreatedAtBetween(eq(PropertyStatus.ACTIVE), any(), any())).thenReturn(5L);
+        when(propertyRepository.countByCreatedAtBetween(any(), any())).thenReturn(5L);
         when(propertyReportRepository.countByStatusAndCreatedAtBetween(eq(PropertyReportStatus.RECEIVED), any(), any()))
                 .thenReturn(2L);
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
