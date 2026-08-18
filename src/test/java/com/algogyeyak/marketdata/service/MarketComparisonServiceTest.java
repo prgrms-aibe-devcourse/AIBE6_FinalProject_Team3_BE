@@ -220,6 +220,8 @@ class MarketComparisonServiceTest {
         assertThat(response.referencePrice()).isEqualTo(200_000_000L);
         assertThat(response.differenceRate()).isEqualTo(0.0);
         assertThat(response.radiusMeters()).isEqualTo(300);
+        assertThat(response.areaErrorRate()).isEqualTo(0.2);
+        assertThat(response.lookbackMonths()).isEqualTo(6);
         assertThat(response.reason()).isNull();
     }
 

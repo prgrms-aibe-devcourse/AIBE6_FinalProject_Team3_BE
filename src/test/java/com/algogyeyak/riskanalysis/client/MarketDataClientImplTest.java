@@ -57,7 +57,7 @@ class MarketDataClientImplTest {
         Property property = property(10L, 200_000_000L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(property)).thenReturn(
-                MarketComparisonResponse.available(190_000_000L, -0.05, 3, "2026-06-15", 300)
+                MarketComparisonResponse.available(190_000_000L, -0.05, 3, "2026-06-15", 300, 0.2, 6)
         );
 
         MarketComparison result = client.getComparison(10L).orElseThrow();
