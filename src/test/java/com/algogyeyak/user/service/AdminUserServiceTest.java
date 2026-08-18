@@ -6,6 +6,7 @@ import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.dto.AdminUserDetailResponse;
+import com.algogyeyak.user.dto.UserSearchCondition;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
@@ -14,6 +15,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,6 +60,42 @@ class AdminUserServiceTest {
         User user = User.createOAuthUser("user" + id + "@example.com", "유저" + id, "http://img");
         ReflectionTestUtils.setField(user, "id", id);
         return user;
+    }
+
+    // 회귀 테스트 - "자기 자신 변경 금지" 가드가 예전엔 컨트롤러(AdminUserController.rejectSelf)에만
+    // 있어서, 이 서비스를 직접 호출하는 다른 경로가 생기면 조용히 우회될 수 있었다. 지금은
+    // updateRole()/updateStatus() 자신이 강제하므로, 컨트롤러를 거치지 않고 직접 호출해도 막혀야
+    // 한다.
+    @Test
+    void updateRoleRejectsSelfEvenWhenCalledDirectly() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> adminUserService.updateRole(ACTOR_ID, ACTOR_ID, Role.USER));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        verify(userRepository, never()).findById(any());
+    }
+
+    @Test
+    void updateStatusRejectsSelfEvenWhenCalledDirectly() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> adminUserService.updateStatus(ACTOR_ID, ACTOR_ID, UserStatus.SUSPENDED));
+
+        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        verify(userRepository, never()).findById(any());
+    }
+
+    // 회귀 테스트 - email/nickname 검색어에 리터럴 %나 _가 들어있으면 UserRepository.search()의
+    // LIKE 절에서 SQL 와일드카드로 해석돼 관리자가 의도한 것보다 넓게 매칭된다(실제 LIKE 동작
+    // 자체는 UserRepositoryTest가 real H2로 검증) - 여기서는 서비스가 리포지토리 호출 전에 실제로
+    // 이스케이프하는지만 확인한다.
+    @Test
+    void listEscapesLikeWildcardsInEmailAndNicknameBeforeSearching() {
+        when(userRepository.search(any(), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        adminUserService.list(PageRequest.of(0, 20), new UserSearchCondition("100%_off", "na_me", null, null));
+
+        verify(userRepository).search(eq("100\\%\\_off"), eq("na\\_me"), eq(null), eq(null), any());
     }
 
     @Test
@@ -220,6 +260,30 @@ class AdminUserServiceTest {
         assertEquals(List.of(2L), result.succeededIds());
         assertEquals(1, result.failures().size());
         assertEquals(1L, result.failures().get(0).id());
+        assertTrue(result.failures().get(0).message() != null && !result.failures().get(0).message().isBlank());
+    }
+
+    // 회귀 테스트 - BusinessException이 아닌 예외(예: 비관적 락 대기 타임아웃)가 배치 중간 항목에서
+    // 나면, 이 예외가 잡히지 않고 트랜잭션 프록시 경계를 벗어나 전체 트랜잭션이 롤백되며 이미 처리된
+    // 앞 항목(1L)까지 함께 취소되던 버그가 있었다. 지금은 이런 예외도 흡수해 해당 항목만 실패로
+    // 기록하고, 앞서 성공한 항목은 succeededIds에 그대로 남아야 한다(예외 자체가 밖으로 전파되지
+    // 않아야 한다).
+    @Test
+    void bulkUpdateStatus는_BusinessException이_아닌_예외도_흡수하고_앞선_성공을_유지한다() {
+        User first = normalUser(1L);
+        User second = normalUser(2L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(first));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(second));
+        when(userRepository.updateStatusIfNotWithdrawn(1L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN)).thenReturn(1);
+        when(userRepository.updateStatusIfNotWithdrawn(2L, UserStatus.SUSPENDED, UserStatus.WITHDRAWN))
+                .thenThrow(new CannotAcquireLockException("lock wait timeout"));
+
+        AdminBulkActionResponse result =
+                adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, 2L), UserStatus.SUSPENDED);
+
+        assertEquals(List.of(1L), result.succeededIds());
+        assertEquals(1, result.failures().size());
+        assertEquals(2L, result.failures().get(0).id());
         assertTrue(result.failures().get(0).message() != null && !result.failures().get(0).message().isBlank());
     }
 }

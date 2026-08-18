@@ -3,8 +3,6 @@ package com.algogyeyak.user.controller;
 import com.algogyeyak.admin.dto.AdminBulkActionResponse;
 import com.algogyeyak.admin.service.AdminActionLog;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
-import com.algogyeyak.global.error.ErrorCode;
-import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.ApiResponse;
 import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.user.dto.AdminUserBulkStatusUpdateRequest;
@@ -67,7 +65,6 @@ public class AdminUserController {
             @PathVariable Long userId,
             @Valid @RequestBody AdminUserRoleUpdateRequest request
     ) {
-        rejectSelf(principal, userId);
         AdminUserDetailResponse result = adminUserService.updateRole(principal.userId(), userId, request.role());
         // 권한 변경(특히 USER→ADMIN 승격)은 누가 언제 누구에게 했는지 추적 가능해야 한다 -
         // AdminUserService가 AdminAuditLogger로 영구 기록을 남기고, 이 로그는 실시간 관측용으로 별도 유지한다.
@@ -82,7 +79,6 @@ public class AdminUserController {
             @PathVariable Long userId,
             @Valid @RequestBody AdminUserStatusUpdateRequest request
     ) {
-        rejectSelf(principal, userId);
         AdminUserDetailResponse result = adminUserService.updateStatus(principal.userId(), userId, request.status());
         AdminActionLog.record(principal.userId(), "UPDATE_STATUS", "targetUserId", userId, "newStatus", request.status());
         return ResponseEntity.ok(ApiResponse.success(result));
@@ -105,12 +101,5 @@ public class AdminUserController {
                     "newStatus", request.status());
         }
         return ResponseEntity.ok(ApiResponse.success(result));
-    }
-
-    // 관리자가 실수로 자기 자신의 권한을 강등하거나 자기 자신을 정지시켜 스스로를 잠그는 사고를 막는다.
-    private void rejectSelf(JwtUserPrincipal principal, Long targetUserId) {
-        if (principal.userId().equals(targetUserId)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "자기 자신의 권한/상태는 변경할 수 없습니다.");
-        }
     }
 }

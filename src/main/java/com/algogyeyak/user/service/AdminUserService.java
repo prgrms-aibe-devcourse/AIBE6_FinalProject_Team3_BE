@@ -20,11 +20,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AdminUserService {
@@ -40,7 +42,8 @@ public class AdminUserService {
         PageableUtils.validateMaxSize(pageable);
 
         Page<User> page = userRepository.search(
-                condition.email(), condition.nickname(), condition.role(), condition.status(), pageable);
+                escapeLikePattern(condition.email()), escapeLikePattern(condition.nickname()),
+                condition.role(), condition.status(), pageable);
         return PageResponse.from(page, AdminUserListItemResponse::from);
     }
 
@@ -55,6 +58,7 @@ public class AdminUserService {
      */
     @Transactional
     public AdminUserDetailResponse updateRole(Long actorId, Long userId, Role role) {
+        rejectSelf(actorId, userId);
         User user = findUser(userId);
         if (role != Role.ADMIN) {
             rejectIfLastActiveAdmin(user);
@@ -76,6 +80,7 @@ public class AdminUserService {
     // 판단한다 - User.suspend()/activate()를 더 이상 호출하지 않는다(이유는 updateRole() 참고).
     @Transactional
     public AdminUserDetailResponse updateStatus(Long actorId, Long userId, UserStatus status) {
+        rejectSelf(actorId, userId);
         if (status != UserStatus.ACTIVE && status != UserStatus.SUSPENDED) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "ACTIVE/SUSPENDED로만 변경할 수 있습니다.");
         }
@@ -116,13 +121,23 @@ public class AdminUserService {
         List<AdminBulkActionResponse.Failure> failures = new ArrayList<>();
         for (Long userId : new LinkedHashSet<>(userIds)) {
             try {
-                if (actorId.equals(userId)) {
-                    throw new BusinessException(ErrorCode.BAD_REQUEST, "자기 자신의 권한/상태는 변경할 수 없습니다.");
-                }
+                // 자기 자신 제외 가드는 updateStatus() 자신이 rejectSelf()로 이미 강제한다 -
+                // 여기서 별도로 다시 확인할 필요 없다(예전엔 이 가드가 컨트롤러/이 메서드 두 곳에
+                // 손으로 복붙돼 있어, updateStatus()를 직접 호출하는 미래의 다른 호출부가 생기면
+                // 조용히 건너뛸 위험이 있었다).
                 updateStatus(actorId, userId, status);
                 succeededIds.add(userId);
             } catch (BusinessException e) {
                 failures.add(new AdminBulkActionResponse.Failure(userId, e.getMessage()));
+            } catch (RuntimeException e) {
+                // rejectIfLastActiveAdmin()의 비관적 락 대기 타임아웃, updateStatusIfNotWithdrawn()의
+                // @Modifying UPDATE 등에서 BusinessException이 아닌 예외(DataAccessException 계열)가
+                // 날 수 있다. 여기서 잡지 않으면 이 예외가 트랜잭션 프록시 경계(bulkUpdateStatus 자신)를
+                // 벗어나 전체 트랜잭션이 롤백되고, 이미 처리된 앞 항목들까지 함께 취소된다 - 항목별
+                // 성공/실패가 갈리는 배치라는 이 메서드의 설계 의도(위 클래스 주석 참고)를 예상 못한
+                // 예외 타입 때문에 잃지 않도록 여기서 흡수하고 일반화된 메시지로 실패 처리한다.
+                log.warn("일괄 상태 변경 중 예상치 못한 오류 (userId={})", userId, e);
+                failures.add(new AdminBulkActionResponse.Failure(userId, "처리 중 오류가 발생했습니다."));
             }
         }
         return new AdminBulkActionResponse(succeededIds, failures);
@@ -140,6 +155,16 @@ public class AdminUserService {
      * 이미 @Transactional이라 이 락은 메서드가 리턴할 때(실제 강등/정지 UPDATE까지 커밋된 뒤)
      * 풀린다.
      */
+    // 관리자가 실수로 자기 자신의 권한을 강등하거나 자기 자신을 정지시켜 스스로를 잠그는 사고를
+    // 막는다. updateRole()/updateStatus() 자신에 있어야 한다 - 컨트롤러에만 있으면 이 서비스를
+    // 직접 호출하는 다른 호출부(다른 컨트롤러, 내부 도구, 스케줄 작업 등)가 생겼을 때 조용히
+    // 우회될 수 있다.
+    private void rejectSelf(Long actorId, Long targetUserId) {
+        if (actorId.equals(targetUserId)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "자기 자신의 권한/상태는 변경할 수 없습니다.");
+        }
+    }
+
     private void rejectIfLastActiveAdmin(User user) {
         if (user.getRole() != Role.ADMIN || user.getStatus() != UserStatus.ACTIVE) {
             return;
@@ -147,6 +172,19 @@ public class AdminUserService {
         if (userRepository.findAllByRoleAndStatusForUpdate(Role.ADMIN, UserStatus.ACTIVE).size() <= 1) {
             throw new BusinessException(ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT);
         }
+    }
+
+    // UserRepository.search()의 LIKE 검색은 파라미터를 그대로 CONCAT('%', :x, '%')에 넣는다 -
+    // 완전히 파라미터화돼 있어 SQL 인젝션 위험은 없지만, 검색어에 리터럴 %나 _가 들어있으면 그
+    // 문자 자체가 SQL LIKE 와일드카드로 해석돼 관리자가 의도한 것보다 훨씬 넓게 매칭된다(예:
+    // "test_user"로 검색하면 "_"가 임의의 한 글자와 매칭돼 "testXuser" 같은 계정도 걸린다).
+    // 역슬래시 자신부터 먼저 이스케이프해야 한다 - 순서를 바꾸면 방금 넣은 이스케이프용 역슬래시가
+    // 다시 이스케이프된다.
+    private static String escapeLikePattern(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     private User findUser(Long userId) {

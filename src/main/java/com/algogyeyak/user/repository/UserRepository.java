@@ -29,11 +29,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /**
      * 관리자 페이지 유저 목록 조회. email/nickname은 부분일치(LIKE), role/status는 정확 매칭이며
      * 전부 선택 조건이다(null이면 필터링하지 않음) - PropertyRepository.search와 동일한 패턴.
+     * email/nickname 파라미터는 호출부(AdminUserService.list)가 LIKE 와일드카드(%, _)를 이스케이프한
+     * 뒤 넘긴다는 전제다 - ESCAPE '\'로 그 이스케이프를 실제로 해석한다.
      */
     @Query("""
             SELECT u FROM User u
-            WHERE (:email IS NULL OR u.email LIKE CONCAT('%', :email, '%'))
-              AND (:nickname IS NULL OR u.nickname LIKE CONCAT('%', :nickname, '%'))
+            WHERE (:email IS NULL OR u.email LIKE CONCAT('%', :email, '%') ESCAPE '\\')
+              AND (:nickname IS NULL OR u.nickname LIKE CONCAT('%', :nickname, '%') ESCAPE '\\')
               AND (:role IS NULL OR u.role = :role)
               AND (:status IS NULL OR u.status = :status)
             """)

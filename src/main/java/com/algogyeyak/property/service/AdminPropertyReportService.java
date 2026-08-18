@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 연결되어 있다(PropertyReport 엔티티 주석 참고 - risk-analysis 도메인과 의도적으로 분리된 설계).
  * 그래서 목록/상세 조회 시 이 서비스가 직접 배치 조회해 응답에 필요한 정보를 합성한다.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AdminPropertyReportService {
@@ -121,6 +123,13 @@ public class AdminPropertyReportService {
                 succeededIds.add(reportId);
             } catch (BusinessException e) {
                 failures.add(new AdminBulkActionResponse.Failure(reportId, e.getMessage()));
+            } catch (RuntimeException e) {
+                // BusinessException이 아닌 예외(예: DB 접근 오류)를 여기서 잡지 않으면 트랜잭션 프록시
+                // 경계(bulkReview 자신)를 벗어나 전체 트랜잭션이 롤백되고, 이미 처리된 앞 항목들까지
+                // 함께 취소된다 - 항목별 성공/실패가 갈리는 배치라는 이 메서드의 설계 의도(위 클래스
+                // 주석 참고)를 예상 못한 예외 타입 때문에 잃지 않도록 여기서 흡수한다.
+                log.warn("일괄 신고 검토 중 예상치 못한 오류 (reportId={})", reportId, e);
+                failures.add(new AdminBulkActionResponse.Failure(reportId, "처리 중 오류가 발생했습니다."));
             }
         }
         return new AdminBulkActionResponse(succeededIds, failures);
