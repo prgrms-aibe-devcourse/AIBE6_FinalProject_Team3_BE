@@ -18,7 +18,11 @@ import org.springframework.stereotype.Component;
 public class CookieAuthorizationRequestRepository implements AuthorizationRequestRepository<OAuth2AuthorizationRequest> {
 
     public static final String OAUTH2_AUTHORIZATION_REQUEST_COOKIE_NAME = "oauth2_auth_request";
-    private static final int COOKIE_EXPIRE_SECONDS = 180;
+    // 카카오톡 앱으로 전환해 로그인을 확인하고 돌아오거나, 구글이 보안키/2단계 인증을 요구하는
+    // 경우 등 실사용자의 IdP 인증 왕복은 3분을 넘기기 쉽다 - 그 시간을 넘기면 이 쿠키가 조용히
+    // 만료돼 로그인을 처음부터 다시 시작해야 한다. 쿠키가 HttpOnly+HMAC 서명돼 있어 유효시간을
+    // 늘려도 노출 위험이 커지지 않으므로, 넉넉하게 10분으로 늘린다.
+    private static final int COOKIE_EXPIRE_SECONDS = 600;
 
     private final CookieUtils cookieUtils;
 
