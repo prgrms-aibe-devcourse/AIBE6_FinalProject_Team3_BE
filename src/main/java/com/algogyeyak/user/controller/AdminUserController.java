@@ -16,6 +16,8 @@ import com.algogyeyak.user.dto.UserSearchCondition;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.user.service.AdminUserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -40,10 +42,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/admin/users")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN')")
+@Tag(name = "Admin - User", description = "관리자 전용 유저 관리 API")
 public class AdminUserController {
 
     private final AdminUserService adminUserService;
 
+    @Operation(summary = "유저 목록 조회", description = "이메일/닉네임/권한/상태로 검색·페이지네이션이 가능한 유저 목록을 반환한다.")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<AdminUserListItemResponse>>> list(
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
@@ -56,11 +60,7 @@ public class AdminUserController {
         return ResponseEntity.ok(ApiResponse.success(adminUserService.list(pageable, condition)));
     }
 
-    @GetMapping("/{userId}")
-    public ResponseEntity<ApiResponse<AdminUserDetailResponse>> detail(@PathVariable Long userId) {
-        return ResponseEntity.ok(ApiResponse.success(adminUserService.getDetail(userId)));
-    }
-
+    @Operation(summary = "유저 권한 변경", description = "대상 유저의 Role(USER/ADMIN)을 변경한다. 자기 자신은 대상으로 지정할 수 없다.")
     @PatchMapping("/{userId}/role")
     public ResponseEntity<ApiResponse<AdminUserDetailResponse>> updateRole(
             @AuthenticationPrincipal JwtUserPrincipal principal,
@@ -75,6 +75,7 @@ public class AdminUserController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Operation(summary = "유저 상태 변경", description = "대상 유저의 상태(정지/활성 등)를 변경한다. 자기 자신은 대상으로 지정할 수 없다.")
     @PatchMapping("/{userId}/status")
     public ResponseEntity<ApiResponse<AdminUserDetailResponse>> updateStatus(
             @AuthenticationPrincipal JwtUserPrincipal principal,
@@ -87,6 +88,7 @@ public class AdminUserController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Operation(summary = "유저 상태 일괄 변경", description = "여러 유저의 상태를 한 번에 변경한다. 항목별로 성공/실패가 갈릴 수 있으며(마지막 활성 관리자 보호 등), 응답에 성공/실패 id가 나뉘어 담긴다.")
     @PatchMapping("/bulk-status")
     public ResponseEntity<ApiResponse<AdminBulkActionResponse>> bulkUpdateStatus(
             @AuthenticationPrincipal JwtUserPrincipal principal,

@@ -120,7 +120,7 @@ public class AdminPropertyReportService {
                 review(reviewerId, reportId, status, memo);
                 succeededIds.add(reportId);
             } catch (BusinessException e) {
-                failures.add(new AdminBulkActionResponse.Failure(reportId, e.getErrorCode().name(), e.getMessage()));
+                failures.add(new AdminBulkActionResponse.Failure(reportId, e.getMessage()));
             }
         }
         return new AdminBulkActionResponse(succeededIds, failures);

@@ -182,7 +182,6 @@ class AdminUserServiceTest {
         assertEquals(List.of(1L), result.succeededIds());
         assertEquals(1, result.failures().size());
         assertEquals(ACTOR_ID, result.failures().get(0).id());
-        assertEquals(ErrorCode.BAD_REQUEST.name(), result.failures().get(0).errorCode());
     }
 
     // 회귀 테스트 - 중복 제거 전에는 같은 id를 두 번 처리해 첫 시도는 성공(succeededIds)하고
@@ -221,7 +220,6 @@ class AdminUserServiceTest {
         assertEquals(List.of(2L), result.succeededIds());
         assertEquals(1, result.failures().size());
         assertEquals(1L, result.failures().get(0).id());
-        assertEquals(ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT.name(), result.failures().get(0).errorCode());
         assertTrue(result.failures().get(0).message() != null && !result.failures().get(0).message().isBlank());
     }
 }

@@ -446,8 +446,7 @@ class AdminUserControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.succeededIds[0]").value(TARGET_ID))
                 .andExpect(jsonPath("$.data.succeededIds.length()").value(1))
-                .andExpect(jsonPath("$.data.failures[0].id").value(ADMIN_ID))
-                .andExpect(jsonPath("$.data.failures[0].errorCode").value("BAD_REQUEST"));
+                .andExpect(jsonPath("$.data.failures[0].id").value(ADMIN_ID));
     }
 
     @Test
@@ -515,35 +514,4 @@ class AdminUserControllerTest {
                 .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
-    @Test
-    void 유저_상세조회에_성공한다() throws Exception {
-        User target = buildUser(TARGET_ID, "target@example.com", "타겟유저", Role.USER);
-        when(userRepository.findById(TARGET_ID)).thenReturn(Optional.of(target));
-
-        mockMvc.perform(get("/admin/users/{userId}", TARGET_ID).cookie(adminCookie()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.nickname").value("타겟유저"));
-    }
-
-    @Test
-    void 존재하지_않는_유저_상세조회는_404이다() throws Exception {
-        when(userRepository.findById(999L)).thenReturn(Optional.empty());
-
-        mockMvc.perform(get("/admin/users/{userId}", 999L).cookie(adminCookie()))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error.code").value("ADMIN_USER_NOT_FOUND"));
-    }
-
-    @Test
-    void 상세조회는_토큰_없이_호출하면_401이다() throws Exception {
-        mockMvc.perform(get("/admin/users/{userId}", TARGET_ID))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void 상세조회는_비관리자면_403이다() throws Exception {
-        mockMvc.perform(get("/admin/users/{userId}", TARGET_ID).cookie(userCookie()))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
-    }
 }

@@ -71,6 +71,13 @@ public class AuthController {
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
 
+    // @Operation/@ApiResponse의 description은 어노테이션 속성이라 컴파일타임 상수만 허용된다 -
+    // EmailVerificationService/PasswordResetService처럼 @Value로 런타임 주입할 수 없어, 아래 값은
+    // application.yml의 실제 설정값과 별도로 수동 동기화해야 한다(설정을 바꾸면 이 상수도 같이 바꿀 것).
+    private static final int EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60; // app.email-verification.resend-cooldown-seconds
+    private static final int EMAIL_VERIFICATION_TICKET_VALIDITY_MINUTES = 30; // app.email-verification.verified-ticket-validity-seconds
+    private static final int PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS = 60; // app.password-reset.request-cooldown-seconds
+
     // 운영에서도 devLoginEnabled를 켤 수 있게 되면서(스위치 하나만으로는 "아무나" 이 엔드포인트를
     // 호출해 admin이 될 수 있다) 추가한 공유 비밀 값 — 이 값을 아는 사람만 dev-login을 쓸 수 있다.
     @Value("${app.dev-login.secret:}")
@@ -134,10 +141,11 @@ public class AuthController {
 
     // 계정이 아직 없는 상태(회원가입 폼에서 이메일만 입력한 시점)에서 호출한다 - 이미 가입된 이메일이면
     // 인증번호를 보내지 않고 바로 실패시켜, 사용자가 로그인 화면으로 가야 함을 즉시 알 수 있게 한다.
-    @Operation(summary = "이메일 인증번호 발송(회원가입)", description = "회원가입 전 이메일 소유권 확인용 6자리 인증번호를 발송한다. 이미 가입된 이메일이면 발송하지 않고 실패로 응답한다. 재발송은 60초 쿨다운이 있다.")
+    @Operation(summary = "이메일 인증번호 발송(회원가입)", description = "회원가입 전 이메일 소유권 확인용 6자리 인증번호를 발송한다. 이미 가입된 이메일이면 발송하지 않고 실패로 응답한다. 재발송은 "
+            + EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS + "초 쿨다운이 있다.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "발송 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 가입된 이메일 (AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS)")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재발송 쿨다운(60초) 이내 재요청 (AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재발송 쿨다운(" + EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS + "초) 이내 재요청 (AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS)")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "메일 발송 실패 (EMAIL_SEND_FAILED)")
     @PostMapping("/email-verification/request")
     public ResponseEntity<ApiResponse<Void>> requestEmailVerification(
@@ -146,9 +154,11 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.successWithoutData());
     }
 
-    // 확인에 성공하면 이 이메일에 대해 30분간 유효한 인증 완료 기록만 남긴다 - 계정은 아직 만들지
-    // 않는다(실제 계정 생성은 이어지는 /auth/signup 호출에서 이 기록을 확인한다).
-    @Operation(summary = "이메일 인증번호 확인(회원가입)", description = "발송된 6자리 인증번호를 확인한다. 성공 시 이 이메일로 30분 이내에 /auth/signup을 완료할 수 있다.")
+    // 확인에 성공하면 이 이메일에 대해 EMAIL_VERIFICATION_TICKET_VALIDITY_MINUTES(아래)만큼 유효한
+    // 인증 완료 기록만 남긴다 - 계정은 아직 만들지 않는다(실제 계정 생성은 이어지는 /auth/signup
+    // 호출에서 이 기록을 확인한다).
+    @Operation(summary = "이메일 인증번호 확인(회원가입)", description = "발송된 6자리 인증번호를 확인한다. 성공 시 이 이메일로 "
+            + EMAIL_VERIFICATION_TICKET_VALIDITY_MINUTES + "분 이내에 /auth/signup을 완료할 수 있다.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "인증 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "인증번호가 올바르지 않거나 만료됨/시도 횟수 초과 (AUTH_EMAIL_VERIFICATION_CODE_INVALID)")
     @PostMapping("/email-verification/confirm")
@@ -162,9 +172,10 @@ public class AuthController {
     // (PasswordResetService.requestReset 참고 - 그 경우 내부적으로 아무 것도 하지 않고 조용히 리턴한다).
     // 계정이 존재하는 경우의 토큰 발급(Redis)/메일 발송 실패도 같은 이유로 로그만 남기고 200으로
     // 응답한다 - 그러지 않으면 그 실패들이 "이 계정은 실제로 존재한다"는 신호가 되어버린다.
-    @Operation(summary = "비밀번호 재설정 요청", description = "이메일을 받아 (로컬 비밀번호가 있는) 계정이면 재설정 링크를 발송한다. 계정 존재 여부를 노출하지 않기 위해 토큰 발급/메일 발송이 내부적으로 실패해도 항상 동일한 성공 응답을 반환한다. 60초 쿨다운이 있다.")
+    @Operation(summary = "비밀번호 재설정 요청", description = "이메일을 받아 (로컬 비밀번호가 있는) 계정이면 재설정 링크를 발송한다. 계정 존재 여부를 노출하지 않기 위해 토큰 발급/메일 발송이 내부적으로 실패해도 항상 동일한 성공 응답을 반환한다. "
+            + PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS + "초 쿨다운이 있다.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "요청 접수(계정 존재 여부 및 실제 발송 성공 여부는 노출하지 않음)")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재요청 쿨다운(60초) 이내 재요청 (AUTH_PASSWORD_RESET_TOO_MANY_REQUESTS)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재요청 쿨다운(" + PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS + "초) 이내 재요청 (AUTH_PASSWORD_RESET_TOO_MANY_REQUESTS)")
     @PostMapping("/password-reset/request")
     public ResponseEntity<ApiResponse<Void>> requestPasswordReset(@Valid @RequestBody PasswordResetRequest request) {
         passwordResetService.requestReset(request.getEmail());

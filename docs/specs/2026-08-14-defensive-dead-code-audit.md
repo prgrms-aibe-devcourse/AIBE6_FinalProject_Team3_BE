@@ -44,6 +44,8 @@ market-data/risk-analysis/contract-analysis/admin) + 공용(global) 코드 전�
 - 카카오 이메일 자동연동 경로(`KakaoOAuth2UserInfo.java:28-31,47-51`) — `application.yml`의 카카오 scope가 `profile_nickname`뿐이라 `account_email` 동의항목이 없어 지금은 항상 비활성. "승인되면 다시 추가할 것"이라고 명시된 대기 중인 코드라 죽은 코드로 분류하지 않음.
 - **`MeResponse.email`**(`AuthController.java:111,376`) — `/auth/me`, `/auth/signup`, `/auth/login`, `/auth/dev-login` 응답에 전부 포함되지만, frontend 소비처(`getCurrentUser()` 사용처 전부) 어디서도 `.email`을 안 읽음. → frontend 문서 "1. Auth" 항목 참고. 필드를 없애려면 이 응답을 쓰는 다른 소비자가 없는지 frontend와 함께 확인 필요.
 
+**정리 결과 (2026-08-14, `fix/auth-token-admin-dead-code-cleanup`)**: 1~4번 전부 삭제 완료(`withdrawnAt` 필드/컬럼, `validateToken()`, `getAttributes()`, `AuthProvider.LOCAL`). `JwtProviderTest`는 `validateToken()` 대신 `parseClaims()` + `assertThrows`로 재작성.
+
 ---
 
 ## 2. User 도메인
@@ -128,6 +130,10 @@ market-data/risk-analysis/contract-analysis/admin) + 공용(global) 코드 전�
 - `AdminChecklistItemTemplateResponse.version` — frontend 화면엔 안 보이지만, 백엔드 내부 `currentActiveMaxVersion()`(`AdminChecklistTemplateService.java:136-141`) 로직에서 실제로 쓰여 완전한 dead code는 아님.
 - `@PreAuthorize("hasRole('ADMIN')")`(4개 컨트롤러) — `SecurityConfig`의 URL 레벨 매처(`/admin/**`)로 이미 이중 방어라, 이 메서드 레벨 어노테이션이 단독으로 403을 발생시킨 사례가 테스트/실사용에서 확인된 적 없음. 의도된 defense-in-depth라 죽은 코드로 보긴 어려움.
 - `AdminPropertyReportListItemResponse.detail` — 목록 응답에 포함되지만 frontend 목록 테이블엔 안 씀(상세는 별도 API로 다시 받음).
+
+**정리 결과 (2026-08-14, `fix/auth-token-admin-dead-code-cleanup`)**:
+- 3/4/5번 삭제 완료 — `GET /admin/users/{userId}` 엔드포인트+`getDetail()`+관련 테스트 제거, `AdminPropertyReportDetailResponse`에서 `propertyId`/`deposit`/`monthlyRent`/`reviewerId` 제거, `AdminBulkActionResponse.Failure.errorCode` 제거(호출부 2곳 및 관련 테스트 어서션 정리).
+- **1/2번(`admin_audit_logs` 전체, `AdminAuditTargetType`)은 보류.** 조회 API가 없어도 지금부터 계속 쌓아두는 게 정상적인 보안/컴플라이언스 관행이라("확실한 죽은 코드"와 성격이 다름) 지금 지우면 나중에 조회 API를 만들 때 그 시점까지의 이력이 통째로 빈다. `AdminAuditLogger.log()` 호출부가 checklist/property 팀원 소유 서비스(`AdminChecklistTemplateService`, `AdminPropertyReportService`) 안에도 있어 제거 범위가 이 브랜치(auth/admin)를 넘어간다 — 팀 논의 후 별도로 결정할 것.
 
 ---
 

@@ -51,14 +51,35 @@
 | 기능 | 원 계획(2026-07-31 등) | 실제 구현 |
 |---|---|---|
 | 유저 관리: 조회+검색 | 이메일/닉네임/권한/상태 필터 | ✅ `GET /admin/users` — email/nickname 부분일치, role/status 정확매칭, 페이지네이션(`Pageable`, 정렬 필드 화이트리스트 `createdAt`/`nickname`/`email`) |
-| 유저 관리: 상세 | — | ✅ `GET /admin/users/{id}` |
+| 유저 관리: 상세 | — | ~~✅ `GET /admin/users/{id}`~~ **(제거됨, 2026-08-14 죽은 코드 감사)** 백엔드 엔드포인트/서비스/테스트는 있었지만 프론트 어디서도 이 API를 호출한 적이 없어 삭제됨(`2026-08-14-defensive-dead-code-audit.md` admin #3). 이 표는 기존 계획 대비 실제를 기록하는 문서라 삭제 이력만 남긴다 |
 | 유저 관리: 권한 변경 | USER↔ADMIN | ✅ `PATCH /admin/users/{id}/role` — 자기 자신 대상 차단(컨트롤러), 마지막 활성 관리자 강등 차단(`rejectIfLastActiveAdmin`, 2026-08-10부터 `PESSIMISTIC_WRITE`로 원자화), 탈퇴 유저 대상 차단(**2026-08-14부터** `updateRoleIfNotWithdrawn` 조건부 UPDATE — 아래 "전수조사 결과" 참고) |
 | 유저 관리: 정지/활성화 | — | ✅ `PATCH /admin/users/{id}/status` — ACTIVE/SUSPENDED만 허용(WITHDRAWN은 본인 탈퇴 전용이라 제외), 자기 자신/마지막 활성 관리자/탈퇴 유저 차단 |
+| 유저 관리: 상태 일괄 변경 | *(2026-08-13 멘토링 피드백으로 신규 추가)* | ✅ `PATCH /admin/users/bulk-status` — 아래 "유저 상태 일괄 변경" 섹션 참고 |
 | 매물 신고 검토: 목록/상세 | status/reason 필터 | ✅ `GET /admin/property-reports`, `GET /admin/property-reports/{id}` — propertyId/reporterId가 순수 FK라 서비스가 배치 조회해 주소·신고자 닉네임 합성 |
 | 매물 신고 검토: 처리 | RECEIVED→RESOLVED/REJECTED | ✅ `PATCH /admin/property-reports/{id}/review` — RECEIVED 상태에서만 전이 가능, 신고자 본인이 검토자인 경우 차단(`ADMIN_PROPERTY_REPORT_SELF_REVIEW`) |
 | 통계 대시보드 | *(계획엔 "핵심 지표 카드 + 추이 + 분포", 기간은 최근 14일 고정 예정)* | ✅ `GET /admin/stats/dashboard` 단일 엔드포인트. **(2026-08-03 확장)** `startDate`/`endDate` 쿼리로 기간 직접 선택 가능(생략 시 최근 14일, 최대 90일) — 계획보다 넓은 기능으로 구현됨 |
 | 체크리스트 문항 템플릿 관리 | *(2026-07-31 계획엔 없었음, 2026-08-04에 신규 요청으로 추가)* | ✅ `GET/POST/PATCH/DELETE /admin/checklist-templates` — 전체 목록(비활성 포함), 생성/수정/삭제. 스냅샷 방식(`ChecklistItemTemplate`)이라 여기서의 변경은 이미 만들어진 유저 체크리스트에는 영향 없음 |
 | 감사로그 | *(2026-07-31 계획엔 텍스트 로그(`log.info`)만 존재, DB 테이블화는 2026-08-10에 추가 결정)* | ✅ 아래 "감사로그" 섹션 참고 |
+
+## 유저 상태 일괄 변경 — (2026-08-13 멘토링 피드백, 2026-08-17 후속 감사로 문서 반영)
+
+`PATCH /admin/users/bulk-status`(`AdminUserController.bulkUpdateStatus`) — 여러 유저의 상태를 한
+요청으로 변경한다. 단건 변경(`PATCH /admin/users/{id}/status`)과 달리 **원자적 전체성공-전체실패가
+아니다** — `AdminBulkActionResponse`(`succeededIds`/`failures`, 각 `Failure`는 `id`+`message`) 구조로
+항목별 성공/실패를 그대로 클라이언트에 내려준다. 기존에 있던 가드(자기 자신 변경 금지, 마지막 활성
+관리자 보호)가 단건 처리 때와 동일하게 배치의 각 항목에도 개별 적용된다 — 예를 들어 마지막 활성
+관리자가 요청 목록에 섞여 있으면 그 항목만 실패로 처리되고 나머지는 정상 처리된다.
+
+- 영구 감사로그(`AdminAuditLog`, 아래 섹션)에는 **별도의 `BULK_UPDATE_STATUS` 액션이 없다** —
+  `bulkUpdateStatus()`가 성공한 항목마다 `updateStatus()`를 self-invocation으로 그대로 호출하므로,
+  성공한 유저 수만큼 기존 `UPDATE_STATUS` 항목이 개별적으로 쌓인다(실패한 항목은 남지 않는다).
+  반면 실시간 관측용 텍스트 로그(`AdminActionLog.record`, 컨트롤러에서 호출)는 배치 전체를
+  `BULK_UPDATE_STATUS` 하나로 요약해 남기되, **요청받은 id 전체가 아니라 실제로 성공한 id만**
+  기록한다 — 안 그러면 배치가 전부 실패해도 "처리함"으로 로그가 남아 실제 변경이 없었는데도
+  있었던 것처럼 보인다.
+- 프론트엔드는 이 응답을 그대로 쓰지 않고 `onMutated?.()`로 목록을 재조회하는 방식으로 화면을
+  갱신한다 — 단건 변경(`updateRole`/`updateStatus`)의 응답(`AdminUserDetailResponse`)도 동일한
+  패턴이다.
 
 ## 감사로그(AdminAuditLog) — 실제 구현
 
