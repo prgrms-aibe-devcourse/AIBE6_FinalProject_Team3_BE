@@ -14,7 +14,7 @@
 | `property` | 부분 구현, 명세보다 크게 좁음 | 시세·위험신호·체크리스트 연동 전무. **(2026-08-06 정정)** "검색/페이지네이션 없음"은 더 이상 사실이 아님 — `GET /properties`가 지역/면적/가격 등 검색 조건 + `Pageable` 기반 페이지네이션(`PropertyRepository.search()`, `PageResponse`)을 이미 지원함 |
 | `contract-analysis` | ~~부분 구현(진행 중) — 핵심 단계인 AI 분석(`/analyze`) 자체가 없음~~ | **(2026-08-12 정정)** 이미 사실이 아님 — `/analyze`는 `GeminiClientImpl` 연동, 환각 검증, `aiGeneratedNotice`/`disclaimer` 필드까지 구현 완료된 상태(`contract-analysis-design.md` 전수조사 결과 참고). 남은 건 그 문서의 "남은 이슈" 목록 참고 |
 | `market-data` | 거의 완전 구현 | 반경 기반 실거래가 비교 로직 동작, `property`에 실제 연결됨. ~~남은 건 FE 연동, 실시간재계산→캐싱 전환 여부 등 4개~~ **(2026-08-12 정정)** FE 연동은 이미 완료됨(`market-data-design.md` 전수조사 결과 참고) — 남은 건 실시간재계산→캐싱 전환 여부 등 나머지 항목 |
-| `risk-analysis` | 완전 구현 | **(2026-08-04 완료)** 신호 탐지기 4종, API 4개(`POST /risk-analysis`, `GET /risk-signals`, `GET /deposit-safety`, `POST /deposit-safety/recalculate`), market-data 어댑터(전세+매매), `DepositSafetyCheckService`(전세가율), checklist 연계 보조 신호, 매물 수정 시 자동 재계산 트리거(이벤트 기반)까지 전부 구현 완료. ~~완전 미해결 이슈 없음 — 남은 건 "동일 계정 다수 등록" 활성화 여부·선순위보증금 입력 화면 배치 등 팀/FE 결정 2건뿐~~ — **(2026-08-12 정정)** 요구사항 기능 자체는 전부 구현됐지만, 같은 날 진행된 코드 전수조사에서 새로운 버그/코드품질 이슈 5건이 발견됨(트랜잭션 경계 불일치, 판정불가 사유 오분류, 죽은 설정값, 역방향 의존, `@Version` 부재) — `risk-analysis-design.md` 전수조사 결과 섹션 참고, 팀/FE 결정 대기 2건과는 별개 |
+| `risk-analysis` | 완전 구현 | **(2026-08-04 완료)** 신호 탐지기 4종, API 4개(`POST /risk-analysis`, `GET /risk-signals`, `GET /deposit-safety`, `POST /deposit-safety/recalculate`), market-data 어댑터(전세+매매), `DepositSafetyCheckService`(전세가율), checklist 연계 보조 신호, 매물 수정 시 자동 재계산 트리거(이벤트 기반)까지 전부 구현 완료. ~~완전 미해결 이슈 없음 — 남은 건 "동일 계정 다수 등록" 활성화 여부·선순위보증금 입력 화면 배치 등 팀/FE 결정 2건뿐~~ — **(2026-08-12 정정)** 요구사항 기능 자체는 전부 구현됐지만, 같은 날 진행된 코드 전수조사에서 새로운 버그/코드품질 이슈 5건이 발견됨(트랜잭션 경계 불일치, 판정불가 사유 오분류, 죽은 설정값, 역방향 의존, `@Version` 부재) — `risk-analysis-design.md` 전수조사 결과 섹션 참고, 팀/FE 결정 대기 2건과는 별개. ✅ **(2026-08-18 전부 해결)** 5건 모두 코드 수정 완료 — 트랜잭션 경계 불일치는 fail-safe 흡수, 사유코드는 거래유형/매물유형 분리, 죽은 설정값은 제거, `PropertyService`↔risk-analysis 역방향 의존은 `PropertyRiskSummaryProvider` 어댑터로 정리, 3개 엔티티에 `@Version` 추가. |
 
 ## 반복적으로 나타난 패턴
 
@@ -79,7 +79,7 @@
 | market-data | 4개 |
 | checklist | 1개 (8개 중 7개 처리 완료, **(2026-08-14 추가)** 이미지 관리자 API 부재도 같은 날 오후 해결. 남은 건 거래유형별 분기 여부뿐 — `checklist-design.md` 참고) |
 | contract-analysis | 8개 |
-| risk-analysis | ~~0개 (2026-08-04 완료, 원본 9개 전부 해결 + 신규 발견 1개도 해결. 남은 건 팀/FE 결정 대기 2건뿐)~~ — **(2026-08-12 정정)** 이 개수는 요구사항 대비 "확인 필요" 항목 기준이라 여전히 유효하나, 같은 날 진행된 코드 전수조사(품질/버그 관점)에서 별도로 5건이 새로 발견됨 — `risk-analysis-design.md` 전수조사 결과 섹션 참고 |
+| risk-analysis | ~~0개 (2026-08-04 완료, 원본 9개 전부 해결 + 신규 발견 1개도 해결. 남은 건 팀/FE 결정 대기 2건뿐)~~ — **(2026-08-12 정정)** 이 개수는 요구사항 대비 "확인 필요" 항목 기준이라 여전히 유효하나, 같은 날 진행된 코드 전수조사(품질/버그 관점)에서 별도로 5건이 새로 발견됨 — `risk-analysis-design.md` 전수조사 결과 섹션 참고. ✅ **(2026-08-18 정정)** 이 5건도 전부 해결 완료 — 요구사항 기준·전수조사 기준 모두 열려있는 항목 0개 |
 
 ## 공통/인프라 코드 전수조사 결과 (2026-08-12)
 

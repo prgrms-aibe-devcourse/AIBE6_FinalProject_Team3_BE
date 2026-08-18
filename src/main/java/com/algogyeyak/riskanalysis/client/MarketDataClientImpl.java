@@ -61,7 +61,10 @@ public class MarketDataClientImpl implements MarketDataClient {
             return null;
         }
         return switch (reason) {
-            case TRANSACTION_TYPE_UNSUPPORTED, PROPERTY_TYPE_UNSUPPORTED -> MarketUnavailableReason.PROPERTY_TYPE_UNSUPPORTED;
+            // (2026-08-14) 예전엔 이 둘을 PROPERTY_TYPE_UNSUPPORTED 하나로 뭉뚱그려 매핑했었다 -
+            // risk-analysis-design.md 전수조사 결과 버그 2번 참고.
+            case TRANSACTION_TYPE_UNSUPPORTED -> MarketUnavailableReason.TRANSACTION_TYPE_UNSUPPORTED;
+            case PROPERTY_TYPE_UNSUPPORTED -> MarketUnavailableReason.PROPERTY_TYPE_UNSUPPORTED;
             case ADDRESS_INFO_MISSING -> MarketUnavailableReason.ADDRESS_INFO_MISSING;
             case INSUFFICIENT_SAMPLE -> MarketUnavailableReason.INSUFFICIENT_SAMPLE;
         };
