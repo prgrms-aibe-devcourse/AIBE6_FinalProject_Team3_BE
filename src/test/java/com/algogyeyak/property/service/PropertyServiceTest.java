@@ -448,7 +448,7 @@ class PropertyServiceTest {
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
         MarketComparisonResponse comparison = MarketComparisonResponse.available(
-                28_000_000L, 0.07, 5, "2026-06-20", 300
+                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6
         );
         when(marketComparisonService.compare(property)).thenReturn(comparison);
 
