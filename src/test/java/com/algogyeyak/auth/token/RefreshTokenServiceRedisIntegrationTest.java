@@ -224,6 +224,26 @@ class RefreshTokenServiceRedisIntegrationTest {
     }
 
     @Test
+    void revokeAllForUserDeletesTheCurrentSessionsBothKeys() throws Exception {
+        User user = saveUser("revoke-all@example.com");
+        String rawToken = refreshTokenService.issue(user);
+        String userIdString = String.valueOf(user.getId());
+
+        refreshTokenService.revokeAllForUser(user.getId());
+
+        assertEquals(null, redisTemplate.opsForValue().get("auth:refresh-token:by-user:" + userIdString));
+        assertEquals(null, redisTemplate.opsForValue().get("auth:refresh-token:by-hash:" + hash(rawToken)));
+        assertThrows(BusinessException.class, () -> refreshTokenService.rotate(rawToken));
+    }
+
+    @Test
+    void revokeAllForUserIsNoOpWhenNoActiveSession() {
+        User user = saveUser("revoke-all-noop@example.com");
+
+        refreshTokenService.revokeAllForUser(user.getId());
+    }
+
+    @Test
     void revokeThenRotateWithSameTokenFails() {
         User user = saveUser("revoke@example.com");
         String rawToken = refreshTokenService.issue(user);

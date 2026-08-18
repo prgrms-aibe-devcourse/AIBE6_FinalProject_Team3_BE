@@ -139,10 +139,13 @@ public class LocalAuthService {
         // 높지 않다는 판단).
         String attemptsKeyName = loginAttemptsKey(normalizedEmail);
         try {
+            // increment() 후 attempts == 1일 때만 expire()를 별도 호출하면, increment는 성공하고
+            // expire만 실패하는 경우(네트워크 순간 장애 등) 그 키가 TTL 없이 영구히 남아 이후
+            // 시도 때마다 만료 없이 계속 증가해, 이 이메일이 사실상 영구 잠금될 수 있다.
+            // setIfAbsent로 키 생성과 동시에 TTL을 확정해두면, increment가 그 뒤에 실패하더라도
+            // 이미 설정된 TTL로 자연 정리되므로 이 경합이 생기지 않는다.
+            redisTemplate.opsForValue().setIfAbsent(attemptsKeyName, "0", Duration.ofSeconds(loginLockoutWindowSeconds));
             Long attempts = redisTemplate.opsForValue().increment(attemptsKeyName);
-            if (attempts != null && attempts == 1L) {
-                redisTemplate.expire(attemptsKeyName, Duration.ofSeconds(loginLockoutWindowSeconds));
-            }
             if (attempts != null && attempts > loginMaxAttempts) {
                 throw new BusinessException(ErrorCode.AUTH_TOO_MANY_LOGIN_ATTEMPTS);
             }

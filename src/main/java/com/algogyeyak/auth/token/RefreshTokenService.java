@@ -114,6 +114,22 @@ public class RefreshTokenService {
             return 1
             """, Long.class);
 
+    // KEYS[1] = by-user:{userId}.
+    // by-user를 읽는 것과 그 결과로 by-user/by-hash를 지우는 것을 하나의 원자적 스크립트로
+    // 묶는다 - Java 쪽에서 GET과 DELETE를 별도 호출로 나누면, 그 사이에 동시 로그인/rotate가
+    // 끼어들어 by-user가 이미 새 세션을 가리키도록 바뀐 뒤에도 무조건 지워버려 방금 발급된 최신
+    // 세션의 back-pointer까지 revokeAllForUser()가 지워버리는 경합이 있었다. Lua 스크립트 안의
+    // GET은 그 뒤 이어지는 DEL과 함께 원자적으로 실행되므로 이 경합이 아예 생기지 않는다.
+    private static final RedisScript<String> REVOKE_ALL_FOR_USER_SCRIPT = new DefaultRedisScript<>("""
+            local currentHash = redis.call('GET', KEYS[1])
+            if not currentHash then
+              return nil
+            end
+            redis.call('DEL', KEYS[1])
+            redis.call('DEL', '%s' .. currentHash)
+            return currentHash
+            """.formatted(BY_HASH_KEY_PREFIX), String.class);
+
     private final StringRedisTemplate redisTemplate;
     private final UserRepository userRepository;
 
@@ -235,10 +251,7 @@ public class RefreshTokenService {
     public void revokeAllForUser(Long userId) {
         String userIdString = String.valueOf(userId);
         try {
-            String currentHash = redisTemplate.opsForValue().get(byUserKey(userIdString));
-            if (currentHash != null) {
-                redisTemplate.delete(List.of(byUserKey(userIdString), byHashKey(currentHash)));
-            }
+            redisTemplate.execute(REVOKE_ALL_FOR_USER_SCRIPT, List.of(byUserKey(userIdString)));
         } catch (DataAccessException e) {
             throw redisUnavailable(e);
         }

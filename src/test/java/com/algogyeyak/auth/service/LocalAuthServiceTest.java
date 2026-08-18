@@ -331,6 +331,24 @@ class LocalAuthServiceTest {
         verify(redisTemplate).delete("auth:login:attempts:test@example.com");
     }
 
+    // 회귀 테스트 - increment() 성공 후 expire()만 별도로 실패하면 카운터 키가 TTL 없이 영구히
+    // 남아 이후 그 이메일이 사실상 영구 잠금될 수 있었던 문제(setIfAbsent로 키 생성과 동시에
+    // TTL을 먼저 확정해두는 방식으로 수정) - increment 이전에 항상 setIfAbsent가 호출되는지 고정.
+    @Test
+    void loginEstablishesAttemptCounterTtlBeforeIncrementing() {
+        ReflectionTestUtils.setField(localAuthService, "loginMaxAttempts", 10);
+        ReflectionTestUtils.setField(localAuthService, "loginLockoutWindowSeconds", 300L);
+        when(valueOps.increment(anyString())).thenReturn(3L);
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+
+        localAuthService.login("test@example.com", "password1");
+
+        verify(valueOps).setIfAbsent(
+                "auth:login:attempts:test@example.com", "0", java.time.Duration.ofSeconds(300L));
+    }
+
     // 회귀 테스트 - Redis 장애 시에는 가용성을 우선해 로그인 자체를 막지 않아야 한다(다른
     // Redis 기반 카운터들의 fail-open/기존 로그인 가용성 우선 정책과 동일).
     @Test
