@@ -14,27 +14,47 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.enums.UserStatus;
 import com.algogyeyak.user.repository.UserRepository;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class AdminUserService {
 
     private static final Set<String> ALLOWED_SORT_PROPERTIES = Set.of("createdAt", "nickname", "email");
 
     private final UserRepository userRepository;
     private final AdminAuditLogger adminAuditLogger;
+    // bulkUpdateStatus()가 항목별로 이 템플릿을 통해 updateStatus()를 REQUIRES_NEW로 감싼다 -
+    // self-invocation(this.updateStatus(...))은 @Transactional 프록시를 우회하므로, 그냥
+    // 호출하면 전부 bulkUpdateStatus() 자신의 트랜잭션 하나를 공유하게 된다. 그 상태에서
+    // updateStatus() 도중(특히 AdminAuditLogger.log() 이후) 예외가 나면, 이미 실행된
+    // UPDATE는 (예외가 이 메서드 밖으로 전파되지 않는 한) 그대로 커밋되면서도 응답에는 실패로
+    // 기록되는 모순이 생긴다 - AdminAuditLogger의 "감사 로그 실패 시 실제 변경도 함께 롤백"
+    // 정책이 벌크 경로에서만 조용히 깨지는 것이다. TransactionTemplate으로 항목마다 진짜 새
+    // 물리 트랜잭션을 열면, 그 항목에서 어떤 예외가 나든 그 항목의 변경만 롤백되고 이미
+    // 커밋된 앞 항목들은 그대로 남는다.
+    private final TransactionTemplate requiresNewTransactionTemplate;
+
+    public AdminUserService(
+            UserRepository userRepository, AdminAuditLogger adminAuditLogger, PlatformTransactionManager transactionManager) {
+        this.userRepository = userRepository;
+        this.adminAuditLogger = adminAuditLogger;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     @Transactional(readOnly = true)
     public PageResponse<AdminUserListItemResponse> list(Pageable pageable, UserSearchCondition condition) {
@@ -65,14 +85,17 @@ public class AdminUserService {
         }
         Role previousRole = user.getRole();
 
-        int updated = userRepository.updateRoleIfNotWithdrawn(userId, role, UserStatus.WITHDRAWN);
+        // JPQL bulk UPDATE라 @LastModifiedDate가 관여하지 않는다 - UPDATE 쿼리와 응답이 같은
+        // 값을 보도록 여기서 한 번만 계산해 그대로 넘긴다(AdminUserDetailResponse.from 참고).
+        LocalDateTime updatedAt = LocalDateTime.now();
+        int updated = userRepository.updateRoleIfNotWithdrawn(userId, role, UserStatus.WITHDRAWN, updatedAt);
         if (updated == 0) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_ROLE_TRANSITION, "탈퇴한 사용자는 권한을 변경할 수 없습니다.");
         }
 
         adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_ROLE, userId,
                 Map.of("beforeRole", previousRole, "afterRole", role));
-        return AdminUserDetailResponse.from(user, role);
+        return AdminUserDetailResponse.from(user, role, updatedAt);
     }
 
     // status는 컨트롤러 DTO 단계에서 이미 ACTIVE/SUSPENDED로 제한되어 있다. 탈퇴 유저에 대한 거부는
@@ -91,7 +114,10 @@ public class AdminUserService {
             rejectIfLastActiveAdmin(user);
         }
 
-        int updated = userRepository.updateStatusIfNotWithdrawn(userId, status, UserStatus.WITHDRAWN);
+        // updateRole()과 동일한 이유로, UPDATE 쿼리와 응답이 같은 updatedAt 값을 보도록 한 번만
+        // 계산해 그대로 넘긴다.
+        LocalDateTime updatedAt = LocalDateTime.now();
+        int updated = userRepository.updateStatusIfNotWithdrawn(userId, status, UserStatus.WITHDRAWN, updatedAt);
         if (updated == 0) {
             String message = status == UserStatus.SUSPENDED
                     ? "탈퇴한 사용자는 정지할 수 없습니다."
@@ -101,21 +127,29 @@ public class AdminUserService {
 
         adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_STATUS, userId,
                 Map.of("beforeStatus", previousStatus, "afterStatus", status));
-        return AdminUserDetailResponse.from(user, status);
+        return AdminUserDetailResponse.from(user, status, updatedAt);
     }
 
     /**
      * 여러 유저를 한 번에 정지/정지해제한다. 대상 하나하나가 이미 updateStatus()의 가드(자기 자신
      * 변경 금지, 마지막 활성 관리자 보호, 탈퇴 유저 제외)를 그대로 적용받으므로, 이건 원자적
      * 전체성공-전체실패가 아니라 항목별 성공/실패가 갈리는 배치 처리다 - 하나가 가드에 막혀도
-     * 나머지는 계속 처리하고, 실패한 항목과 사유를 그대로 응답에 담아 돌려준다. updateStatus() 호출은
-     * 같은 인스턴스 안에서의 일반 메서드 호출(self-invocation)이라 별도 트랜잭션을 열지 않고 이
-     * 메서드의 트랜잭션 안에서 실행되며, 여기서 잡아낸 예외는 그 트랜잭션을 롤백시키지 않는다.
-     * 입력에 같은 id가 중복되면(프론트는 Set이라 안 만들지만 API 호출로는 가능) 먼저 처리된 id가
+     * 나머지는 계속 처리하고, 실패한 항목과 사유를 그대로 응답에 담아 돌려준다.
+     *
+     * <p>updateStatus() 호출은 requiresNewTransactionTemplate으로 항목마다 독립된 REQUIRES_NEW
+     * 트랜잭션 안에서 실행한다 - self-invocation(this.updateStatus(...))은 @Transactional
+     * 프록시를 우회하므로, 그냥 호출하면 이 메서드의 트랜잭션 하나를 모든 항목이 공유하게 된다.
+     * 그 상태에서 항목 처리 도중(특히 AdminAuditLogger.log() 호출 이후) 예외가 나면, 그 항목의
+     * UPDATE는 이미 실행된 채로 예외가 여기 catch에서 흡수돼 밖으로 전파되지 않으므로 결국 정상
+     * 커밋되는데, 응답에는 그 항목이 실패로 기록되는 모순이 생긴다(AdminAuditLogger가 명시하는
+     * "감사 로그 실패 시 실제 변경도 함께 롤백" 정책이 벌크 경로에서만 조용히 깨지는 것과 같다).
+     * 항목마다 진짜 새 물리 트랜잭션을 열면 그 항목의 변경(+감사 로그)만 원자적으로 롤백되고,
+     * 이미 커밋된 앞 항목들은 그대로 남는다.
+     *
+     * <p>입력에 같은 id가 중복되면(프론트는 Set이라 안 만들지만 API 호출로는 가능) 먼저 처리된 id가
      * 두 번째 시도에서 상태 전이 실패로 다시 걸려 같은 id가 성공/실패 양쪽에 나타날 수 있다 -
      * 순서를 보존한 채 중복만 제거해 이 문제를 없앤다.
      */
-    @Transactional
     public AdminBulkActionResponse bulkUpdateStatus(Long actorId, List<Long> userIds, UserStatus status) {
         List<Long> succeededIds = new ArrayList<>();
         List<AdminBulkActionResponse.Failure> failures = new ArrayList<>();
@@ -125,17 +159,17 @@ public class AdminUserService {
                 // 여기서 별도로 다시 확인할 필요 없다(예전엔 이 가드가 컨트롤러/이 메서드 두 곳에
                 // 손으로 복붙돼 있어, updateStatus()를 직접 호출하는 미래의 다른 호출부가 생기면
                 // 조용히 건너뛸 위험이 있었다).
-                updateStatus(actorId, userId, status);
+                requiresNewTransactionTemplate.executeWithoutResult(status_ -> updateStatus(actorId, userId, status));
                 succeededIds.add(userId);
             } catch (BusinessException e) {
                 failures.add(new AdminBulkActionResponse.Failure(userId, e.getMessage()));
             } catch (RuntimeException e) {
                 // rejectIfLastActiveAdmin()의 비관적 락 대기 타임아웃, updateStatusIfNotWithdrawn()의
-                // @Modifying UPDATE 등에서 BusinessException이 아닌 예외(DataAccessException 계열)가
-                // 날 수 있다. 여기서 잡지 않으면 이 예외가 트랜잭션 프록시 경계(bulkUpdateStatus 자신)를
-                // 벗어나 전체 트랜잭션이 롤백되고, 이미 처리된 앞 항목들까지 함께 취소된다 - 항목별
-                // 성공/실패가 갈리는 배치라는 이 메서드의 설계 의도(위 클래스 주석 참고)를 예상 못한
-                // 예외 타입 때문에 잃지 않도록 여기서 흡수하고 일반화된 메시지로 실패 처리한다.
+                // @Modifying UPDATE, adminAuditLogger.log() 등에서 BusinessException이 아닌 예외
+                // (DataAccessException 계열)가 날 수 있다. 여기서 잡지 않으면 이 예외가 전파되면서
+                // 항목별 성공/실패가 갈리는 배치라는 이 메서드의 설계 의도(위 클래스 주석 참고)를
+                // 예상 못한 예외 타입 때문에 잃게 되므로, 여기서 흡수하고 일반화된 메시지로 실패
+                // 처리한다 - 위 REQUIRES_NEW 덕분에 이 항목의 변경은 이미 롤백된 뒤이므로 안전하다.
                 log.warn("일괄 상태 변경 중 예상치 못한 오류 (userId={})", userId, e);
                 failures.add(new AdminBulkActionResponse.Failure(userId, "처리 중 오류가 발생했습니다."));
             }
