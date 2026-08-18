@@ -156,6 +156,13 @@ aws:
     access-key: ${AWS_ACCESS_KEY:dummy-access-key-for-local}
     secret-key: ${AWS_SECRET_KEY:dummy-secret-key-for-local}
 
+# 매물 이미지 고아 객체 정리 배치(PropertyImageOrphanCleanupJob, #214) 정책값. 새벽 시간대(실사용자
+# 트래픽이 적은 시간)에 하루 한 번 돌도록 기본값을 잡았다.
+property:
+  image-cleanup:
+    cron: 0 0 4 * * *
+    grace-period-hours: 24
+
 # Prometheus
 management:
   endpoints:
