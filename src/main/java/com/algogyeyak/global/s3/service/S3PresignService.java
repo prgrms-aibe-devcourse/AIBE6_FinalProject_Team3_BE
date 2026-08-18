@@ -2,6 +2,7 @@ package com.algogyeyak.global.s3.service;
 
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.global.s3.dto.S3ObjectSummary;
 import com.algogyeyak.global.s3.util.S3ImagePurpose;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,12 +10,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.paginators.ListObjectsV2Iterable;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -162,6 +165,19 @@ public class S3PresignService {
                 .build();
 
         return s3Presigner.presignGetObject(presignRequest).url().toString();
+    }
+
+    // purpose prefix 하위 전체 객체를 나열한다 - PropertyImageOrphanCleanupJob처럼 "DB에 참조가
+    // 없는 객체를 찾아 정리"하는 배치용. ListObjectsV2Paginator가 1000개 단위 페이지네이션을 내부에서
+    // 알아서 처리해주므로 호출부는 페이지를 신경 쓸 필요가 없다.
+    public List<S3ObjectSummary> listObjects(S3ImagePurpose purpose) {
+        ListObjectsV2Iterable pages = s3Client.listObjectsV2Paginator(
+                ListObjectsV2Request.builder().bucket(bucket).prefix(purpose.prefix()).build()
+        );
+
+        return pages.contents().stream()
+                .map(object -> new S3ObjectSummary(object.key(), object.lastModified()))
+                .toList();
     }
 
     // 계약서 이미지는 OCR 처리 후 즉시 삭제용으로, 프로필/매물 이미지는 새 이미지로 교체된 이전
