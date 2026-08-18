@@ -28,11 +28,8 @@ import com.algogyeyak.property.event.PropertyUpdatedEvent;
 import com.algogyeyak.property.repository.PropertyImageRepository;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
-import com.algogyeyak.riskanalysis.entity.PropertyRisk;
-import com.algogyeyak.riskanalysis.enums.DepositSafetyStatus;
-import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
-import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
-import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
+import com.algogyeyak.riskanalysis.client.PropertyRiskSummaryProvider;
+import com.algogyeyak.riskanalysis.dto.PropertyRiskSummary;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -56,9 +53,7 @@ public class PropertyService {
     private final ChecklistItemRepository checklistItemRepository;
     private final PropertyReportRepository propertyReportRepository;
     private final PropertyImageRepository propertyImageRepository;
-    private final PropertyRiskRepository propertyRiskRepository;
-    private final PropertyRiskCheckRepository propertyRiskCheckRepository;
-    private final DepositSafetyCheckRepository depositSafetyCheckRepository;
+    private final PropertyRiskSummaryProvider propertyRiskSummaryProvider;
     private final ApplicationEventPublisher eventPublisher;
 
     // 목록 조회 정렬 허용 필드 - PageableUtils.validateSort가 이 밖의 필드는 INVALID_SORT_FIELD로 막는다.
@@ -158,25 +153,11 @@ public class PropertyService {
                         PropertyService::toProgressPercent
                 ));
 
-        // risk-analysis를 한 번도 안 돌린 매물(checkSignalCount=null)과 돌렸는데 신호가 0건인
-        // 매물(checkSignalCount=0)을 구분하기 위해, "실행 여부"는 PropertyRiskCheck 쪽으로 판단하고
-        // "실제 발견된 신호"는 PropertyRisk 쪽으로 집계한다 (FakeListingSignalService 참고).
-        Set<Long> riskCheckedPropertyIds = propertyRiskCheckRepository.findAllByProperty_UserId(userId)
-                .stream()
-                .map(check -> check.getProperty().getId())
-                .collect(Collectors.toSet());
-
-        Map<Long, List<PropertyRisk>> risksByPropertyId = propertyRiskRepository.findAllByProperty_UserId(userId)
-                .stream()
-                .collect(Collectors.groupingBy(risk -> risk.getProperty().getId()));
-
-        Map<Long, Integer> jeonseRatioByPropertyId = depositSafetyCheckRepository.findAllByProperty_UserId(userId)
-                .stream()
-                .filter(check -> check.getStatus() == DepositSafetyStatus.CALCULATED)
-                .collect(Collectors.toMap(
-                        check -> check.getProperty().getId(),
-                        check -> check.getJeonseRatio().intValue()
-                ));
+        // 위험신호 개수·전세가율 배지는 risk-analysis가 유지하는 데이터라 property는 그 내부(리포지토리·
+        // 엔티티)를 직접 알지 못하고, 조회 전용 어댑터(PropertyRiskSummaryProvider)를 통해서만 받는다
+        // (risk-analysis-design.md 전수조사 결과 코드 품질 1번 - 매물 수정 시 재계산 트리거는 이벤트로
+        // 이미 분리돼 있었는데, 이 목록 조회 경로만 반대 방향으로 직접 결합돼 있던 걸 정리함).
+        Map<Long, PropertyRiskSummary> riskSummaryByPropertyId = propertyRiskSummaryProvider.getSummariesByUserId(userId);
 
         // 대표 이미지는 다른 필드들과 달리 "유저 전체 매물" 스코프가 아니라 "현재 페이지 매물"
         // 스코프로만 배치 조회한다 - 이미지는 매물당 여러 장(최대 10장)이라 유저 전체로 긁으면
@@ -197,22 +178,15 @@ public class PropertyService {
                 properties,
                 property -> {
                     Long propertyId = property.getId();
-                    Integer checkSignalCount = riskCheckedPropertyIds.contains(propertyId)
-                            ? risksByPropertyId.getOrDefault(propertyId, List.of()).size()
-                            : null;
-                    String signalSummary = checkSignalCount != null && checkSignalCount > 0
-                            ? risksByPropertyId.get(propertyId).stream()
-                                    .map(PropertyRisk::getDescription)
-                                    .collect(Collectors.joining(", "))
-                            : null;
+                    PropertyRiskSummary riskSummary = riskSummaryByPropertyId.get(propertyId);
 
                     return PropertyListResponse.from(
                             property,
                             checklistProgressByPropertyId.get(propertyId),
                             marketComparisonService.compare(property),
-                            checkSignalCount,
-                            signalSummary,
-                            jeonseRatioByPropertyId.get(propertyId),
+                            riskSummary != null ? riskSummary.checkSignalCount() : null,
+                            riskSummary != null ? riskSummary.signalSummary() : null,
+                            riskSummary != null ? riskSummary.jeonseRatio() : null,
                             representativeImageUrlByPropertyId.get(propertyId)
                     );
                 }

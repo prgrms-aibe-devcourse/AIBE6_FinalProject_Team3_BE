@@ -37,10 +37,10 @@ import com.algogyeyak.property.event.PropertyUpdatedEvent;
 import com.algogyeyak.property.repository.PropertyImageRepository;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
-import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
-import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
-import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
+import com.algogyeyak.riskanalysis.client.PropertyRiskSummaryProvider;
+import com.algogyeyak.riskanalysis.dto.PropertyRiskSummary;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,13 +80,7 @@ class PropertyServiceTest {
     private PropertyImageRepository propertyImageRepository;
 
     @Mock
-    private PropertyRiskRepository propertyRiskRepository;
-
-    @Mock
-    private PropertyRiskCheckRepository propertyRiskCheckRepository;
-
-    @Mock
-    private DepositSafetyCheckRepository depositSafetyCheckRepository;
+    private PropertyRiskSummaryProvider propertyRiskSummaryProvider;
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
@@ -100,8 +94,7 @@ class PropertyServiceTest {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
                 checklistRepository, checklistItemRepository, propertyReportRepository,
-                propertyImageRepository, propertyRiskRepository, propertyRiskCheckRepository,
-                depositSafetyCheckRepository, eventPublisher
+                propertyImageRepository, propertyRiskSummaryProvider, eventPublisher
         );
     }
 
@@ -537,18 +530,11 @@ class PropertyServiceTest {
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(checkedWithRisks, checkedClean, neverChecked), pageable, 3));
 
-        // checkedWithRisks/checkedClean은 4종 신호 판정이 이미 돌았다는 것만 표시하면 되므로 신호 하나씩만 둔다.
-        when(propertyRiskCheckRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
-                com.algogyeyak.riskanalysis.entity.PropertyRiskCheck.success(
-                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "v1.0"),
-                com.algogyeyak.riskanalysis.entity.PropertyRiskCheck.success(
-                        checkedClean, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "v1.0")
-        ));
-        when(propertyRiskRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
-                com.algogyeyak.riskanalysis.entity.PropertyRisk.of(
-                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "시세 대비 높은 가격"),
-                com.algogyeyak.riskanalysis.entity.PropertyRisk.of(
-                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.DUPLICATE_LISTING, "유사 주소 중복")
+        // checkedWithRisks/checkedClean은 4종 신호 판정이 이미 돌았다는 것만 표시하면 되므로, 이제는
+        // PropertyRiskSummaryProvider가 돌려주는 요약 맵으로 표현한다(neverChecked는 맵에 아예 없음).
+        when(propertyRiskSummaryProvider.getSummariesByUserId(USER_ID)).thenReturn(Map.of(
+                1L, new PropertyRiskSummary(2, "시세 대비 높은 가격, 유사 주소 중복", null),
+                2L, new PropertyRiskSummary(0, null, null)
         ));
 
         PageResponse<PropertyListResponse> result =
@@ -582,13 +568,10 @@ class PropertyServiceTest {
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(calculated, unavailable), pageable, 2));
 
-        when(depositSafetyCheckRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
-                com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.calculated(
-                        calculated, new java.math.BigDecimal("85.00"), null, null,
-                        java.time.LocalDate.of(2026, 6, 20), "설명", 5, 300, "v1.0"),
-                com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.unavailable(
-                        unavailable, null, null,
-                        com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason.TRANSACTION_TYPE_UNSUPPORTED, "v1.0")
+        // unavailable(판정불가)은 요약 맵에 아예 안 나타난다(PropertyRiskSummaryProviderImpl이
+        // CALCULATED 상태인 것만 jeonseRatio 키를 채움).
+        when(propertyRiskSummaryProvider.getSummariesByUserId(USER_ID)).thenReturn(Map.of(
+                1L, new PropertyRiskSummary(null, null, 85)
         ));
 
         PageResponse<PropertyListResponse> result =
