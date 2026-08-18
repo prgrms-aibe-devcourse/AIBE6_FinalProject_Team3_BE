@@ -13,7 +13,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -188,14 +188,15 @@ class RefreshTokenServiceTest {
     }
 
     // ROTATE_SCRIPT가 이미 새 by-hash/by-user를 써버린 뒤 사용자 상태 확인에서 거부되는 경우,
-    // by-user만 지우면 새로 만든 by-hash가 TTL까지 고아로 남는다 - 둘 다 지우는지 검증한다.
+    // by-user만 지우면 새로 만든 by-hash가 TTL까지 고아로 남는다 - 정리 스크립트가 두 키 모두를
+    // 대상으로 실행되는지 검증한다(조건부 삭제 자체의 동시성 안전성은 통합 테스트에서 검증).
     @SuppressWarnings("unchecked")
     private void assertCleansUpBothOrphanedKeysFor(String userId) {
-        ArgumentCaptor<Collection<String>> keysCaptor = ArgumentCaptor.forClass(Collection.class);
-        verify(redisTemplate).delete(keysCaptor.capture());
-        Collection<String> deletedKeys = keysCaptor.getValue();
-        assertTrue(deletedKeys.contains("auth:refresh-token:by-user:" + userId));
-        assertTrue(deletedKeys.stream().anyMatch(key -> key.startsWith("auth:refresh-token:by-hash:")));
+        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
+        verify(redisTemplate).execute(any(RedisScript.class), keysCaptor.capture(), anyString());
+        List<String> keys = keysCaptor.getValue();
+        assertTrue(keys.contains("auth:refresh-token:by-user:" + userId));
+        assertTrue(keys.stream().anyMatch(key -> key.startsWith("auth:refresh-token:by-hash:")));
     }
 
     @Test
@@ -237,23 +238,28 @@ class RefreshTokenServiceTest {
         assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
     }
 
+    // 회귀 테스트 - revokeAllForUser()가 get()과 delete()를 별도 호출로 나누면, 그 사이에 동시
+    // 로그인이 끼어들어 by-user가 이미 새 세션을 가리키게 된 뒤에도 무조건 지워버려 방금 발급된
+    // 최신 세션의 back-pointer까지 지우는 경합이 있었다. 지금은 get+delete를 하나의 원자적 Lua
+    // 스크립트(REVOKE_ALL_FOR_USER_SCRIPT)로 묶어 이 경합 자체가 생기지 않는다 - get()/delete()를
+    // 더 이상 별도로 호출하지 않고 execute() 한 번으로 처리하는지가 이 수정의 핵심이므로, 그
+    // 실제 원자성은 {@link RefreshTokenServiceRedisIntegrationTest}에서 real Redis로 검증한다.
     @Test
-    void revokeAllForUserDeletesBothKeysWhenSessionExists() {
-        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get("auth:refresh-token:by-user:1")).thenReturn("current-hash");
+    void revokeAllForUserInvokesRevokeAllScriptWithTheUsersKeyOnly() {
+        doReturn("current-hash").when(redisTemplate).execute(any(RedisScript.class), anyList());
 
         refreshTokenService.revokeAllForUser(1L);
 
-        verify(redisTemplate).delete(java.util.List.of(
-                "auth:refresh-token:by-user:1", "auth:refresh-token:by-hash:current-hash"));
+        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
+        verify(redisTemplate).execute(any(RedisScript.class), keysCaptor.capture());
+        assertEquals(List.of("auth:refresh-token:by-user:1"), keysCaptor.getValue());
+        verify(redisTemplate, never()).opsForValue();
+        verify(redisTemplate, never()).delete(anyList());
     }
 
     @Test
     void revokeAllForUserIsNoOpWhenNoActiveSession() {
-        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get("auth:refresh-token:by-user:1")).thenReturn(null);
+        doReturn(null).when(redisTemplate).execute(any(RedisScript.class), anyList());
 
         refreshTokenService.revokeAllForUser(1L);
 
@@ -262,9 +268,8 @@ class RefreshTokenServiceTest {
 
     @Test
     void revokeAllForUserThrowsServiceUnavailableWhenRedisFails() {
-        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get("auth:refresh-token:by-user:1")).thenThrow(new QueryTimeoutException("redis down"));
+        doThrow(new QueryTimeoutException("redis down"))
+                .when(redisTemplate).execute(any(RedisScript.class), anyList());
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> refreshTokenService.revokeAllForUser(1L));

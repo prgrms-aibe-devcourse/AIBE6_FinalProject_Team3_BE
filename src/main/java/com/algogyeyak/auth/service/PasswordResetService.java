@@ -155,6 +155,19 @@ public class PasswordResetService {
             emailService.sendPasswordResetLink(normalizedEmail, resetLink);
         } catch (MailException e) {
             log.error("비밀번호 재설정 메일 발송 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
+            // 쿨다운은 실제 발송 성공을 전제로 한 제한이다 - 응답 자체는 계정 존재 여부 비노출을
+            // 위해 항상 동일한 성공으로 유지하지만(여기서 쿨다운을 풀어도 외부에서 관찰 가능한
+            // 차이는 없다), 발송이 서버 쪽 이유로 실패했는데 쿨다운만 남으면 사용자가 링크를
+            // 받지도 못한 채 서버 잘못으로 60초를 그냥 기다려야 한다.
+            releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+        }
+    }
+
+    private void releaseCooldownBestEffort(String cooldownKey, String normalizedEmail) {
+        try {
+            redisTemplate.delete(cooldownKey);
+        } catch (DataAccessException e) {
+            log.warn("메일 발송 실패 후 쿨다운 해제 실패(TTL로 자연 정리됨) email={}", normalizedEmail, e);
         }
     }
 
@@ -180,7 +193,18 @@ public class PasswordResetService {
         user.updatePasswordHash(passwordEncoder.encode(newPassword));
 
         // 재설정 성공 - 탈취된 세션이 있었을 수 있으므로 기존 refresh token(전체 세션)을 끊어낸다.
-        refreshTokenService.revokeAllForUser(user.getId());
+        // 이 호출은 반드시 best-effort여야 한다 - CONSUME_SCRIPT로 재설정 토큰을 이미 돌이킬 수 없이
+        // 소각한 뒤라(Redis에서 즉시 삭제, 트랜잭션 롤백으로 복구 불가), revokeAllForUser()의
+        // BusinessException(AUTH_TOKEN_STORE_UNAVAILABLE)이 여기서 그대로 전파되면 비밀번호 변경
+        // 자체가 롤백되면서도 토큰은 이미 없어져 사용자가 완전히 새 재설정 이메일을 다시 받아야
+        // 하는 상황이 된다(핵심 동작인 비밀번호 변경보다 부가적인 세션 정리가 우선순위가 높아지는
+        // 역전). RefreshTokenService.deleteOrphanedSession()과 동일하게 실패해도 로그만 남긴다 -
+        // 남은 refresh token은 자체 TTL로 자연 만료된다.
+        try {
+            refreshTokenService.revokeAllForUser(user.getId());
+        } catch (BusinessException e) {
+            log.warn("비밀번호 재설정 후 기존 세션 정리 실패(TTL로 자연 만료됨) userId={}", user.getId(), e);
+        }
     }
 
     private static String byHashKey(String tokenHash) {

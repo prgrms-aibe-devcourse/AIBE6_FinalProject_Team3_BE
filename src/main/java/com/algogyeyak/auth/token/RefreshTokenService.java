@@ -99,6 +99,37 @@ public class RefreshTokenService {
             return userId
             """.formatted(BY_USER_KEY_PREFIX), String.class);
 
+    // KEYS[1] = by-user:{userId}, KEYS[2] = by-hash:{newHash}, ARGV[1] = newHash.
+    // by-user가 지금도 newHash를 가리킬 때만 지운다 - ROTATE_SCRIPT 커밋 직후~이 정리 사이에
+    // 동시 issue()(새 로그인)가 끼어들면 by-user가 이미 그 새 세션의 hash를 가리키게 되는데, 이걸
+    // 확인 없이 무조건 지우면 방금 로그인한 세션의 back-pointer가 지워져 그 세션이 이후 rotate()를
+    // 못 하게 된다(강제 재로그인). by-hash:{newHash}는 이 raw token이 클라이언트에 반환된 적 없어
+    // 악용될 수 없지만(정리 목적일 뿐), 조건 없이 지워도 된다 - 이미 동시 issue()의 ISSUE_SCRIPT가
+    // 지웠다면 DEL은 그냥 no-op이다.
+    private static final RedisScript<Long> DELETE_ORPHANED_SESSION_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+              redis.call('DEL', KEYS[1])
+            end
+            redis.call('DEL', KEYS[2])
+            return 1
+            """, Long.class);
+
+    // KEYS[1] = by-user:{userId}.
+    // by-user를 읽는 것과 그 결과로 by-user/by-hash를 지우는 것을 하나의 원자적 스크립트로
+    // 묶는다 - Java 쪽에서 GET과 DELETE를 별도 호출로 나누면, 그 사이에 동시 로그인/rotate가
+    // 끼어들어 by-user가 이미 새 세션을 가리키도록 바뀐 뒤에도 무조건 지워버려 방금 발급된 최신
+    // 세션의 back-pointer까지 revokeAllForUser()가 지워버리는 경합이 있었다. Lua 스크립트 안의
+    // GET은 그 뒤 이어지는 DEL과 함께 원자적으로 실행되므로 이 경합이 아예 생기지 않는다.
+    private static final RedisScript<String> REVOKE_ALL_FOR_USER_SCRIPT = new DefaultRedisScript<>("""
+            local currentHash = redis.call('GET', KEYS[1])
+            if not currentHash then
+              return nil
+            end
+            redis.call('DEL', KEYS[1])
+            redis.call('DEL', '%s' .. currentHash)
+            return currentHash
+            """.formatted(BY_HASH_KEY_PREFIX), String.class);
+
     private final StringRedisTemplate redisTemplate;
     private final UserRepository userRepository;
 
@@ -220,10 +251,7 @@ public class RefreshTokenService {
     public void revokeAllForUser(Long userId) {
         String userIdString = String.valueOf(userId);
         try {
-            String currentHash = redisTemplate.opsForValue().get(byUserKey(userIdString));
-            if (currentHash != null) {
-                redisTemplate.delete(List.of(byUserKey(userIdString), byHashKey(currentHash)));
-            }
+            redisTemplate.execute(REVOKE_ALL_FOR_USER_SCRIPT, List.of(byUserKey(userIdString)));
         } catch (DataAccessException e) {
             throw redisUnavailable(e);
         }
@@ -231,7 +259,8 @@ public class RefreshTokenService {
 
     private void deleteOrphanedSession(String userId, String newHash) {
         try {
-            redisTemplate.delete(List.of(byUserKey(userId), byHashKey(newHash)));
+            redisTemplate.execute(DELETE_ORPHANED_SESSION_SCRIPT,
+                    List.of(byUserKey(userId), byHashKey(newHash)), newHash);
         } catch (DataAccessException e) {
             log.warn("탈퇴/미존재 사용자의 refresh token 정리 실패 (TTL로 자연 정리됨) userId={}", userId, e);
         }

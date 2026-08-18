@@ -16,6 +16,10 @@ public enum ErrorCode {
     AUTH_EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "AUTH_EMAIL_ALREADY_EXISTS", "이미 가입된 이메일입니다."),
     AUTH_NICKNAME_ALREADY_EXISTS(HttpStatus.CONFLICT, "AUTH_NICKNAME_ALREADY_EXISTS", "이미 사용 중인 닉네임입니다."),
     AUTH_INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "AUTH_INVALID_CREDENTIALS", "이메일 또는 비밀번호가 올바르지 않습니다."),
+    // login()에 무차별대입 방지 장치가 전혀 없어(EmailVerificationService.confirmCode()의
+    // maxAttempts와 달리) 알려진 이메일에 대해 무제한 로그인 시도가 가능했던 문제를 막는다 - 이메일
+    // 존재 여부와 무관하게 항상 같은 방식으로 카운트한다(계정 존재 여부 비노출 원칙 유지).
+    AUTH_TOO_MANY_LOGIN_ATTEMPTS(HttpStatus.TOO_MANY_REQUESTS, "AUTH_TOO_MANY_LOGIN_ATTEMPTS", "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요."),
     AUTH_TOKEN_MISSING(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_MISSING", "인증 토큰이 없습니다."),
     AUTH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "유효하지 않은 토큰입니다."),
     AUTH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_EXPIRED", "토큰이 만료되었습니다."),

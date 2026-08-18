@@ -47,11 +47,30 @@ class EmailVerificationServiceTest {
     @Test
     void requestCodeThrowsWhenEmailAlreadyRegistered() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(true);
+        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), eq("1"), any(Duration.class)))
+                .thenReturn(true);
 
         BusinessException exception = assertThrows(BusinessException.class, () -> service.requestCode("test@example.com"));
 
         assertEquals(ErrorCode.AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS, exception.getErrorCode());
         verify(emailService, never()).sendVerificationCode(anyString(), anyString());
+    }
+
+    // 회귀 테스트 - existsByEmail 체크가 쿨다운 확인보다 먼저 실행되면, 이미 가입된 이메일에 대해
+    // 무제한 속도로 이 엔드포인트를 호출해 이메일 존재 여부를 빠르게 열거할 수 있었다. 지금은
+    // 쿨다운이 먼저 걸려야 한다 - 같은 이메일로 쿨다운 내에 재요청하면 존재 여부와 무관하게
+    // AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS로 막혀야 한다.
+    @Test
+    void requestCodeAppliesCooldownEvenWhenEmailAlreadyRegistered() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(true);
+        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), eq("1"), any(Duration.class)))
+                .thenReturn(false);
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.requestCode("test@example.com"));
+
+        assertEquals(ErrorCode.AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS, exception.getErrorCode());
+        // 쿨다운에 막혔으므로 계정 존재 확인까지 갈 필요가 없다.
+        verify(userRepository, never()).existsByEmail(anyString());
     }
 
     @Test
@@ -87,6 +106,10 @@ class EmailVerificationServiceTest {
         BusinessException exception = assertThrows(BusinessException.class, () -> service.requestCode("test@example.com"));
 
         assertEquals(ErrorCode.EMAIL_SEND_FAILED, exception.getErrorCode());
+        // 회귀 테스트 - 메일 발송이 서버 쪽 이유로 실패했는데 쿨다운만 남으면, 사용자가 코드를
+        // 받지도 못한 채 60초를 그냥 기다려야 한다. 발송 실패는 쿨다운을 풀어 즉시 재시도를
+        // 허용해야 한다.
+        verify(redisTemplate).delete("auth:email-verify:cooldown:test@example.com");
     }
 
     @Test
