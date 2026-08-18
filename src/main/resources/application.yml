@@ -141,7 +141,6 @@ risk-policy:
   jeonse-ratio-caution-from: 80
   jeonse-ratio-warn-from: 100
   jeonse-ratio-warn-to: 150
-  jeonse-ratio-alert-over: 150
   multi-account-detection-enabled: false
   same-account-threshold-count: 3
   same-account-window-days: 7
