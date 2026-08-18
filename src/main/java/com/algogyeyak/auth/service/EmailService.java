@@ -45,8 +45,8 @@ public class EmailService {
 
                 인증번호: %s
 
-                인증번호는 발급 후 %d분간 유효합니다. 본인이 요청하지 않았다면 이 메일을 무시해주세요.
-                """.formatted(code, codeValiditySeconds / 60));
+                인증번호는 발급 후 %s간 유효합니다. 본인이 요청하지 않았다면 이 메일을 무시해주세요.
+                """.formatted(code, formatValidity(codeValiditySeconds)));
         send(message);
     }
 
@@ -60,10 +60,24 @@ public class EmailService {
 
                 %s
 
-                이 링크는 발급 후 %d분간 유효하며, 1회만 사용할 수 있습니다. 본인이 요청하지 않았다면
+                이 링크는 발급 후 %s간 유효하며, 1회만 사용할 수 있습니다. 본인이 요청하지 않았다면
                 이 메일을 무시해주세요 - 링크를 클릭하지 않으면 비밀번호는 변경되지 않습니다.
-                """.formatted(resetLink, resetTokenValiditySeconds / 60));
+                """.formatted(resetLink, formatValidity(resetTokenValiditySeconds)));
         send(message);
+    }
+
+    // seconds/60 정수 나눗셈만 쓰면 60의 배수가 아닌 설정값(예: 90초→"1분", 30초→"0분")에서 문구가
+    // 다시 부정확해진다 - 분/초로 나눠 표현해 어떤 TTL 설정값이 와도 정확하게 안내한다.
+    private static String formatValidity(long totalSeconds) {
+        long minutes = totalSeconds / 60;
+        long seconds = totalSeconds % 60;
+        if (minutes == 0) {
+            return seconds + "초";
+        }
+        if (seconds == 0) {
+            return minutes + "분";
+        }
+        return minutes + "분 " + seconds + "초";
     }
 
     private void send(SimpleMailMessage message) {
