@@ -3,6 +3,7 @@ package com.algogyeyak.property.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import java.time.LocalDateTime;
@@ -10,6 +11,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 @DataJpaTest
 class PropertyRepositoryTest {
@@ -79,5 +83,58 @@ class PropertyRepositoryTest {
         LocalDateTime rangeEnd = LocalDateTime.now().plusMinutes(1);
 
         assertThat(propertyRepository.countByCreatedAtBetween(rangeStart, rangeEnd)).isEqualTo(2);
+    }
+
+    // #233 - hasSignal 필터용 signalPropertyIds 파라미터가 다른 조건들과 동일한
+    // "(:param IS NULL OR ...)" 패턴으로 동작하는지 실제 쿼리로 검증한다. 다른 조건들은 전부 단일
+    // 값(Long/String/enum) 기준으로 이미 검증돼 있었는데, 컬렉션 파라미터에 대한 null 체크는
+    // Hibernate/DB 조합에 따라 동작이 갈릴 수 있어 별도로 확인이 필요했다.
+    private Pageable defaultPageable() {
+        return PageRequest.of(0, 20);
+    }
+
+    @Test
+    void signalPropertyIds가_null이면_필터링_없이_전체_매물을_반환한다() {
+        Property property1 = save(1L);
+        Property property2 = save(1L);
+
+        Page<Property> result = propertyRepository.search(
+                1L, PropertyStatus.ACTIVE,
+                null, null, null, null, null, null, null, null, null,
+                null,
+                defaultPageable()
+        );
+
+        assertThat(result.getContent()).extracting(Property::getId)
+                .containsExactlyInAnyOrder(property1.getId(), property2.getId());
+    }
+
+    @Test
+    void signalPropertyIds에_담긴_id의_매물만_반환한다() {
+        Property signaled = save(1L);
+        save(1L);
+
+        Page<Property> result = propertyRepository.search(
+                1L, PropertyStatus.ACTIVE,
+                null, null, null, null, null, null, null, null, null,
+                List.of(signaled.getId()),
+                defaultPageable()
+        );
+
+        assertThat(result.getContent()).extracting(Property::getId).containsExactly(signaled.getId());
+    }
+
+    @Test
+    void signalPropertyIds가_빈_리스트면_결과가_없다() {
+        save(1L);
+
+        Page<Property> result = propertyRepository.search(
+                1L, PropertyStatus.ACTIVE,
+                null, null, null, null, null, null, null, null, null,
+                List.of(),
+                defaultPageable()
+        );
+
+        assertThat(result.getContent()).isEmpty();
     }
 }

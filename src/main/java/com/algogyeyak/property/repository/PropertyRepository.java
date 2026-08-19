@@ -92,6 +92,9 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
      * 자연히 결과에서 제외된다(별도 분기 불필요).
      * 정렬은 메서드명이 아니라 Pageable의 Sort로 받는다 - 정렬 기준을 여러 개 허용하기 위함
      * (PageableUtils.validateSort로 허용된 필드인지 Service에서 먼저 검증한다).
+     * signalPropertyIds는 hasSignal=true 필터(#233)를 위한 것 - property는 위험신호 데이터를
+     * 직접 모르므로(risk-analysis 소관), Service가 PropertyRiskSummaryProvider로 미리 구한 id
+     * 목록을 여기 넘겨서 다른 조건들과 동일한 "(:param IS NULL OR ...)" 패턴으로 필터링한다.
      */
     @Query("""
             SELECT p FROM Property p
@@ -108,6 +111,7 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
               AND (:maxDeposit IS NULL OR p.deposit <= :maxDeposit)
               AND (:minMonthlyRent IS NULL OR p.monthlyRent >= :minMonthlyRent)
               AND (:maxMonthlyRent IS NULL OR p.monthlyRent <= :maxMonthlyRent)
+              AND (:signalPropertyIds IS NULL OR p.id IN :signalPropertyIds)
             """)
     Page<Property> search(
             @Param("userId") Long userId,
@@ -121,6 +125,7 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
             @Param("maxDeposit") Long maxDeposit,
             @Param("minMonthlyRent") Long minMonthlyRent,
             @Param("maxMonthlyRent") Long maxMonthlyRent,
+            @Param("signalPropertyIds") List<Long> signalPropertyIds,
             Pageable pageable
     );
 
