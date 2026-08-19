@@ -1,10 +1,14 @@
 package com.algogyeyak.user.controller;
 
 import com.algogyeyak.auth.service.SessionLogoutService;
+import com.algogyeyak.contractanalysis.dto.ContractHistoryDetailResponse;
+import com.algogyeyak.contractanalysis.dto.ContractHistoryResponse;
+import com.algogyeyak.contractanalysis.service.ContractAnalysisHistoryService;
 import com.algogyeyak.user.dto.NicknameCheckResponse;
 import com.algogyeyak.user.dto.NicknamePolicy;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.global.response.PageResponse;
 import com.algogyeyak.global.s3.dto.PresignedUploadRequest;
 import com.algogyeyak.global.s3.dto.PresignedUploadResponse;
 import com.algogyeyak.user.dto.ProfileImageConfirmRequest;
@@ -19,6 +23,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -32,6 +38,7 @@ public class UserController {
 
     private final UserService userService;
     private final SessionLogoutService sessionLogoutService;
+    private final ContractAnalysisHistoryService contractAnalysisHistoryService;
 
     @GetMapping("/me")
     public ApiResponse<UserProfileResponse> getMyProfile(
@@ -115,5 +122,25 @@ public class UserController {
         }
 
         return ApiResponse.successWithoutData();
+    }
+
+    // 정렬(최신순)은 항상 고정이라 sort 쿼리 파라미터는 받지 않는다(보내도 서비스에서 무시함) -
+    // page/size만 다른 목록 API와 동일한 기본값(20, 최대 100)으로 받는다.
+    @GetMapping("/me/contract-history")
+    public ApiResponse<PageResponse<ContractHistoryResponse>> getMyContractHistory(
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
+            @PageableDefault(size = 20) Pageable pageable
+    ) {
+        return ApiResponse.success(contractAnalysisHistoryService.listMyContractHistory(userDetails.userId(), pageable));
+    }
+
+    // 목록(/me/contract-history)은 clauses를 포함하지 않아 가볍게 유지하고, 항목 클릭 시에만
+    // 이 엔드포인트로 riskFlag/explanation/question/suggestedText를 조회한다.
+    @GetMapping("/me/contract-history/{id}")
+    public ApiResponse<ContractHistoryDetailResponse> getMyContractHistoryDetail(
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
+            @PathVariable Long id
+    ) {
+        return ApiResponse.success(contractAnalysisHistoryService.getMyContractHistoryDetail(userDetails.userId(), id));
     }
 }
