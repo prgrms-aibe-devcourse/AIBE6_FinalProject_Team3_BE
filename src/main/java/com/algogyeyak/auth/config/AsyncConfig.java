@@ -33,6 +33,14 @@ public class AsyncConfig {
         executor.setMaxPoolSize(8);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("email-async-");
+        // 기본값(waitForTasksToCompleteOnShutdown=false)이면 재배포/재시작 시 shutdownNow()가 큐에
+        // 남은 발송 작업을 실행조차 안 하고 그냥 버린다 - 클라이언트는 이미 200(발송됨)을 받았는데
+        // 실제로는 아무 메일도 안 나가고, exceptionally() 콜백도 안 불려 쿨다운 해제조차 안 되며
+        // 로그도 안 남는(관측 불가) 조용한 유실이 생긴다. 큐에 남은 작업은 끝까지 실행되도록 대기하되,
+        // 무한정 붙잡지 않도록 상한을 둔다(SMTP 타임아웃이 아직 설정돼 있지 않아 개별 발송 자체가
+        // 오래 걸릴 수 있음 - 별도로 확인 필요한 사항).
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(20);
         executor.initialize();
         return executor;
     }
