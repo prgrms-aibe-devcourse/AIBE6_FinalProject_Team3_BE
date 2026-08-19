@@ -10,11 +10,6 @@ services:
       - '--web.enable-remote-write-receiver'
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      # monitoring/metrics_scrape_token은 git엔 로컬 기본값만 커밋돼 있고, 배포 시 deploy.yml이
-      # .env의 실제 METRICS_SCRAPE_TOKEN 값으로 덮어써서 맞춘다(Prometheus가 파일 내용을 그대로
-      # 토큰으로 읽으므로 이 파일 자체엔 주석을 넣을 수 없음 - 설명은 monitoring/prometheus.yml
-      # 참고).
-      - ./monitoring/metrics_scrape_token:/etc/prometheus/secrets/metrics_scrape_token:ro
       - prometheus-data:/prometheus
     networks:
       - algogyeyak-network

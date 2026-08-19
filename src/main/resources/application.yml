@@ -119,11 +119,6 @@ app:
     enabled: ${DEV_LOGIN_ENABLED:false}
     email: ${DEV_LOGIN_EMAIL:admin@algogyeyak.local}
     secret: ${DEV_LOGIN_SECRET:local-dev-secret}
-  # /actuator/prometheus 전용 공유 비밀(MetricsScrapeTokenFilter) - Prometheus의 bearer_token
-  # 스크래핑 옵션과 짝을 맞춘다(monitoring/prometheus.yml 참고). 로컬은 팀 전체가 같은 더미 값을
-  # 쓰도록 기본값을 둔다(운영은 application-prod.yml에서 기본값 없이 강제).
-  metrics:
-    scrape-token: ${METRICS_SCRAPE_TOKEN:local-dev-only-scrape-token-please-override}
 
 kakao:
   rest-api-key: ${KAKAO_REST_API_KEY:dummy-key-for-local}

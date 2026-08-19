@@ -47,11 +47,6 @@ public enum ErrorCode {
     AUTH_TOKEN_STORE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AUTH_TOKEN_STORE_UNAVAILABLE", "인증 저장소에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해주세요."),
     // CookieUtils.SameSite=None 전환(크로스오리진 배포) 이후 최소 CSRF 방어로 추가 - CsrfHeaderFilter 참고.
     CSRF_HEADER_MISSING(HttpStatus.FORBIDDEN, "CSRF_HEADER_MISSING", "잘못된 요청입니다."),
-    // /actuator/prometheus는 인증 없이 permitAll이라 리버스 프록시(nginx-proxy-manager, 이
-    // 저장소 밖에서 설정됨) 설정 실수만으로도 외부에 그대로 노출될 수 있었다 - MetricsScrapeTokenFilter
-    // 참고. health와 달리 이 엔드포인트는 내부 지표(JVM/DB 커넥션 풀 등)를 담고 있어 별도 공유 비밀로
-    // 한 번 더 막는다(defense in depth).
-    METRICS_SCRAPE_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "METRICS_SCRAPE_TOKEN_INVALID", "메트릭 조회 인증에 실패했습니다."),
 
     // 이메일 인증(회원가입) - EmailVerificationService
     // 인증번호 발송 대상 이메일이 이미 가입되어 있는 경우 - AUTH_EMAIL_ALREADY_EXISTS와 별개 코드로
