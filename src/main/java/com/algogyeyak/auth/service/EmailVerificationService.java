@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.mail.MailException;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -93,17 +92,18 @@ public class EmailVerificationService {
             throw redisUnavailable(e);
         }
 
-        try {
-            emailService.sendVerificationCode(normalizedEmail, code);
-        } catch (MailException e) {
-            log.error("이메일 인증번호 발송 실패 email={}", normalizedEmail, e);
-            // 쿨다운은 실제 발송 성공을 전제로 한 제한이다 - 발송 자체가 서버 쪽 이유(SMTP 일시
-            // 장애 등)로 실패했는데 쿨다운만 그대로 남으면, 사용자는 코드/링크를 받지도 못한 채
-            // 서버 잘못으로 60초를 그냥 기다려야 한다. 발송 실패는 사용자 잘못이 아니므로 쿨다운을
-            // 풀어 즉시 재시도할 수 있게 한다.
-            releaseCooldownBestEffort(cooldownKey, normalizedEmail);
-            throw new BusinessException(ErrorCode.EMAIL_SEND_FAILED);
-        }
+        // 발송은 EmailService에서 비동기로 처리된다(SMTP 왕복 동안 이 요청 스레드를 붙잡아두지
+        // 않기 위함, com.algogyeyak.auth.config.AsyncConfig 참고) - 그래서 발송 성공/실패를 이
+        // 자리에서 동기로 알 수 없고, 응답은 항상 (쿨다운/계정 중복 등 위 검사를 통과했다는 뜻의)
+        // 성공으로 나간다. 다만 쿨다운은 실제 발송 성공을 전제로 한 제한이므로, 발송이 서버 쪽
+        // 이유(SMTP 일시 장애 등)로 실패하면 콜백에서 쿨다운을 풀어 사용자가 즉시 재시도할 수 있게
+        // 한다 - 그러지 않으면 코드/링크를 받지도 못한 채 서버 잘못으로 60초를 그냥 기다려야 한다.
+        emailService.sendVerificationCode(normalizedEmail, code)
+                .exceptionally(e -> {
+                    log.error("이메일 인증번호 발송 실패 email={}", normalizedEmail, e);
+                    releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+                    return null;
+                });
     }
 
     private void releaseCooldownBestEffort(String cooldownKey, String normalizedEmail) {

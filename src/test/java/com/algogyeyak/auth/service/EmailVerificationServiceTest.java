@@ -8,18 +8,17 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-import org.springframework.mail.MailException;
 import org.springframework.mail.MailSendException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -42,6 +41,11 @@ class EmailVerificationServiceTest {
         ReflectionTestUtils.setField(service, "resendCooldownSeconds", 60L);
         ReflectionTestUtils.setField(service, "maxAttempts", 5);
         ReflectionTestUtils.setField(service, "verifiedTicketValiditySeconds", 1800L);
+        // EmailService.sendVerificationCode()는 이제 @Async라 CompletableFuture<Void>를
+        // 반환한다(이 목은 Spring 프록시 없이 직접 호출되므로 항상 이미 완료된 future를 반환하게
+        // 스텁한다) - 개별 테스트가 실패 시나리오를 검증할 때만 이 기본값을 덮어쓴다.
+        when(emailService.sendVerificationCode(anyString(), anyString()))
+                .thenReturn(CompletableFuture.completedFuture(null));
     }
 
     @Test
@@ -97,18 +101,21 @@ class EmailVerificationServiceTest {
         verify(valueOps).set(eq("auth:email-verify:code-hash:test@example.com"), anyString(), any(Duration.class));
     }
 
+    // 발송이 비동기(EmailService의 @Async)로 바뀌면서, 발송 실패는 더 이상 requestCode() 호출
+    // 스레드에서 동기 예외로 관측되지 않는다(응답은 이미 나간 뒤 콜백에서 처리됨) - 그래서 이제는
+    // BusinessException을 던지는 대신 예외 없이 정상 종료되어야 한다. 다만 회귀 테스트로 지키던
+    // 핵심 동작(발송 실패 시 쿨다운 해제)은 그대로 유지된다: 쿨다운은 실제 발송 성공을 전제로 한
+    // 제한이므로, 발송이 서버 쪽 이유로 실패했는데 쿨다운만 남으면 사용자가 코드를 받지도 못한 채
+    // 60초를 그냥 기다려야 한다.
     @Test
-    void requestCodeWrapsMailFailureAsBusinessException() {
+    void requestCodeReleasesCooldownWhenMailSendFails() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
         when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
-        doThrow(new MailSendException("smtp down")).when(emailService).sendVerificationCode(anyString(), anyString());
+        when(emailService.sendVerificationCode(anyString(), anyString()))
+                .thenReturn(CompletableFuture.failedFuture(new MailSendException("smtp down")));
 
-        BusinessException exception = assertThrows(BusinessException.class, () -> service.requestCode("test@example.com"));
+        service.requestCode("test@example.com");
 
-        assertEquals(ErrorCode.EMAIL_SEND_FAILED, exception.getErrorCode());
-        // 회귀 테스트 - 메일 발송이 서버 쪽 이유로 실패했는데 쿨다운만 남으면, 사용자가 코드를
-        // 받지도 못한 채 60초를 그냥 기다려야 한다. 발송 실패는 쿨다운을 풀어 즉시 재시도를
-        // 허용해야 한다.
         verify(redisTemplate).delete("auth:email-verify:cooldown:test@example.com");
     }
 

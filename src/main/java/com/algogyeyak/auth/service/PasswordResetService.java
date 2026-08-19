@@ -13,7 +13,6 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.mail.MailException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -150,17 +149,20 @@ public class PasswordResetService {
             return;
         }
 
+        // 발송은 EmailService에서 비동기로 처리된다(SMTP 왕복 동안 이 요청 스레드를 붙잡아두지
+        // 않기 위함, com.algogyeyak.auth.config.AsyncConfig 참고) - 응답 자체는 원래도 계정 존재
+        // 여부 비노출을 위해 발송 성공 여부와 무관하게 항상 동일한 성공으로 나가므로, 발송이
+        // 비동기라는 사실이 응답에 영향을 주지는 않는다. 다만 쿨다운은 실제 발송 성공을 전제로 한
+        // 제한이므로(여기서 쿨다운을 풀어도 외부에서 관찰 가능한 응답 차이는 없다), 발송이 서버 쪽
+        // 이유(SMTP 일시 장애 등)로 실패하면 콜백에서 쿨다운을 풀어 사용자가 링크를 받지도 못한 채
+        // 서버 잘못으로 60초를 그냥 기다리는 일이 없게 한다.
         String resetLink = frontendBaseUrl + "/reset-password?token=" + rawToken;
-        try {
-            emailService.sendPasswordResetLink(normalizedEmail, resetLink);
-        } catch (MailException e) {
-            log.error("비밀번호 재설정 메일 발송 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
-            // 쿨다운은 실제 발송 성공을 전제로 한 제한이다 - 응답 자체는 계정 존재 여부 비노출을
-            // 위해 항상 동일한 성공으로 유지하지만(여기서 쿨다운을 풀어도 외부에서 관찰 가능한
-            // 차이는 없다), 발송이 서버 쪽 이유로 실패했는데 쿨다운만 남으면 사용자가 링크를
-            // 받지도 못한 채 서버 잘못으로 60초를 그냥 기다려야 한다.
-            releaseCooldownBestEffort(cooldownKey, normalizedEmail);
-        }
+        emailService.sendPasswordResetLink(normalizedEmail, resetLink)
+                .exceptionally(e -> {
+                    log.error("비밀번호 재설정 메일 발송 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
+                    releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+                    return null;
+                });
     }
 
     private void releaseCooldownBestEffort(String cooldownKey, String normalizedEmail) {
