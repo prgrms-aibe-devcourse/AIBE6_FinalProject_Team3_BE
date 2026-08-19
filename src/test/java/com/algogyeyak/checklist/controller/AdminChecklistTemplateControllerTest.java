@@ -449,4 +449,107 @@ class AdminChecklistTemplateControllerTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
+
+    @MockitoBean
+    private com.algogyeyak.checklist.repository.ChecklistItemTemplateImageRepository checklistItemTemplateImageRepository;
+
+    private com.algogyeyak.checklist.entity.ChecklistItemTemplateImage image(Long id, ChecklistItemTemplate template, int displayOrder) {
+        com.algogyeyak.checklist.entity.ChecklistItemTemplateImage image =
+                com.algogyeyak.checklist.entity.ChecklistItemTemplateImage.builder()
+                        .template(template)
+                        .imageUrl("https://example.com/%d.jpg".formatted(displayOrder))
+                        .displayOrder(displayOrder)
+                        .build();
+        ReflectionTestUtils.setField(image, "id", id);
+        return image;
+    }
+
+    @Test
+    void 관리자_토큰으로_이미지_목록조회에_성공한다() throws Exception {
+        ChecklistItemTemplate template = template(10L);
+        when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(template));
+        when(checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(10L))
+                .thenReturn(List.of(image(1L, template, 1)));
+
+        mockMvc.perform(get("/admin/checklist-templates/{id}/images", 10L).cookie(adminCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].imageUrl").value("https://example.com/1.jpg"));
+    }
+
+    @Test
+    void 관리자_토큰으로_이미지_추가에_성공한다() throws Exception {
+        ChecklistItemTemplate template = template(10L);
+        when(checklistItemTemplateRepository.findById(10L)).thenReturn(Optional.of(template));
+        when(checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(10L)).thenReturn(List.of());
+        when(checklistItemTemplateImageRepository.save(any(com.algogyeyak.checklist.entity.ChecklistItemTemplateImage.class)))
+                .thenAnswer(invocation -> {
+                    com.algogyeyak.checklist.entity.ChecklistItemTemplateImage saved = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(saved, "id", 1L);
+                    return saved;
+                });
+
+        mockMvc.perform(post("/admin/checklist-templates/{id}/images", 10L)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"imageUrl":"https://example.com/1.jpg"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.imageUrl").value("https://example.com/1.jpg"))
+                .andExpect(jsonPath("$.data.displayOrder").value(1));
+    }
+
+    @Test
+    void imageUrl이_없으면_이미지_추가가_400이다() throws Exception {
+        mockMvc.perform(post("/admin/checklist-templates/{id}/images", 10L)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void 존재하지_않는_문항에_이미지_추가는_404이다() throws Exception {
+        when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/admin/checklist-templates/{id}/images", 999L)
+                        .cookie(adminCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"imageUrl":"https://example.com/1.jpg"}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND"));
+    }
+
+    @Test
+    void 관리자_토큰으로_이미지_삭제에_성공한다() throws Exception {
+        ChecklistItemTemplate template = template(10L);
+        when(checklistItemTemplateImageRepository.findById(1L)).thenReturn(Optional.of(image(1L, template, 1)));
+
+        mockMvc.perform(delete("/admin/checklist-templates/{templateId}/images/{imageId}", 10L, 1L).cookie(adminCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void 존재하지_않는_이미지_삭제는_404이다() throws Exception {
+        when(checklistItemTemplateImageRepository.findById(999L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(delete("/admin/checklist-templates/{templateId}/images/{imageId}", 10L, 999L).cookie(adminCookie()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND"));
+    }
+
+    @Test
+    void 이미지_추가는_비관리자면_403이다() throws Exception {
+        mockMvc.perform(post("/admin/checklist-templates/{id}/images", 10L)
+                        .cookie(userCookie())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"imageUrl":"https://example.com/1.jpg"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
 }

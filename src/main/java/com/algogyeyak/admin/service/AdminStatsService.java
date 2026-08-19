@@ -8,7 +8,6 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.property.entity.PropertyReportReason;
 import com.algogyeyak.property.entity.PropertyReportStatus;
-import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.user.repository.UserRepository;
@@ -18,8 +17,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import lombok.RequiredArgsConstructor;
@@ -66,12 +63,15 @@ public class AdminStatsService {
 
     // 요약 카드 3개 전부 "선택한 기간 동안 발생한" 건수다(예: 총 회원수 → 기간 내 신규 가입자 수) -
     // 상단 요약이 아래 추이 차트와 다른 기준(전체 누적)을 쓰면 같은 화면에서 숫자가 서로 안 맞아 보인다.
+    // newProperties는 특히 trends().propertyRegistrations와 같은 기준(status 무관, 등록 "발생" 자체)을
+    // 써야 한다 - 예전엔 여기만 ACTIVE로 필터링해서, 기간 내 등록 후 삭제된 매물이 있으면 추이
+    // 차트의 합계보다 이 카드가 더 작게 나와 같은 화면에서 숫자가 어긋났다.
     private AdminStatsSummaryResponse summary(LocalDate start, LocalDate end) {
         LocalDateTime rangeStart = start.atStartOfDay();
         LocalDateTime rangeEnd = end.plusDays(1).atStartOfDay();
         return new AdminStatsSummaryResponse(
                 userRepository.countByCreatedAtBetween(rangeStart, rangeEnd),
-                propertyRepository.countByStatusAndCreatedAtBetween(PropertyStatus.ACTIVE, rangeStart, rangeEnd),
+                propertyRepository.countByCreatedAtBetween(rangeStart, rangeEnd),
                 propertyReportRepository.countByStatusAndCreatedAtBetween(PropertyReportStatus.RECEIVED, rangeStart, rangeEnd));
     }
 
@@ -113,17 +113,17 @@ public class AdminStatsService {
                 new AdminStatsDistributionResponse.PropertyRegistrationCount(true, registeredCount),
                 new AdminStatsDistributionResponse.PropertyRegistrationCount(false, unregisteredCount));
 
-        List<AdminStatsDistributionResponse.ReportReasonCount> byReportReason = mapToCounts(
-                PropertyReportReason.values(),
-                reason -> propertyReportRepository.countByReasonAndCreatedAtBetween(reason, rangeStart, rangeEnd),
-                AdminStatsDistributionResponse.ReportReasonCount::new);
+        Map<PropertyReportReason, Long> reasonCounts = propertyReportRepository
+                .countGroupedByReasonAndCreatedAtBetween(rangeStart, rangeEnd).stream()
+                .collect(Collectors.toMap(
+                        PropertyReportRepository.ReasonCount::getReason, PropertyReportRepository.ReasonCount::getCount));
+        // GROUP BY 결과에는 해당 기간에 실제로 접수된 사유만 나타나므로, 나머지 사유는 0건으로
+        // 채워야 이전과 동일하게 모든 사유가 응답에 나타난다(프론트가 이 목록을 그대로 렌더링).
+        List<AdminStatsDistributionResponse.ReportReasonCount> byReportReason = Arrays.stream(PropertyReportReason.values())
+                .map(reason -> new AdminStatsDistributionResponse.ReportReasonCount(
+                        reason, reasonCounts.getOrDefault(reason, 0L)))
+                .toList();
 
         return new AdminStatsDistributionResponse(byPropertyRegistration, byReportReason);
-    }
-
-    private <E, R> List<R> mapToCounts(E[] values, Function<E, Long> counter, BiFunction<E, Long, R> toResult) {
-        return Arrays.stream(values)
-                .map(value -> toResult.apply(value, counter.apply(value)))
-                .toList();
     }
 }

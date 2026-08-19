@@ -2,6 +2,7 @@ package com.algogyeyak.user.controller;
 
 import com.algogyeyak.auth.service.SessionLogoutService;
 import com.algogyeyak.user.dto.NicknameCheckResponse;
+import com.algogyeyak.user.dto.NicknamePolicy;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.s3.dto.PresignedUploadRequest;
@@ -36,6 +37,18 @@ public class UserController {
     public ApiResponse<UserProfileResponse> getMyProfile(
             @AuthenticationPrincipal JwtUserPrincipal userDetails) {
         return ApiResponse.success(userService.getMyProfile(userDetails.userId()));
+    }
+
+    // 닉네임 정책(정규식/안내 문구)이 frontend에 하드코딩돼 있으면 두 곳이 어긋날 때 "프론트는 통과,
+    // 서버는 거부"하는 이중 실패가 생긴다 - AuthController.passwordPolicy()와 같은 이유로, 회원가입/
+    // 프로필 폼에서 클라이언트 측 선제 검증에 쓸 값을 여기서 그대로 내려준다. 로그인 전(회원가입
+    // 폼)에도 필요해 인증 없이 열어둔다.
+    public record NicknamePolicyResponse(String pattern, String message) {
+    }
+
+    @GetMapping("/nickname-policy")
+    public ApiResponse<NicknamePolicyResponse> nicknamePolicy() {
+        return ApiResponse.success(new NicknamePolicyResponse(NicknamePolicy.HTML_INPUT_PATTERN, NicknamePolicy.MESSAGE));
     }
 
     // 회원가입 화면(로그인 전)에서도 호출되는 permitAll 경로라 userDetails가 null일 수 있다 -

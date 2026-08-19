@@ -82,7 +82,7 @@ class CookieAuthorizationRequestRepositoryTest {
 
         repository.saveAuthorizationRequest(authorizationRequest, request, response);
 
-        verify(cookieUtils).addCookie(eq(response), eq(COOKIE_NAME), eq("serialized-value"), eq(180));
+        verify(cookieUtils).addCookie(eq(response), eq(COOKIE_NAME), eq("serialized-value"), eq(600));
     }
 
     @Test

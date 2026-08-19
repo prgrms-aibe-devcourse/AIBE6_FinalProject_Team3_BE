@@ -43,13 +43,13 @@
 
 | 요구사항 항목 | 실제 상태 |
 |---|---|
-| 매매시세 계산 정책(반경/면적오차/표본기준/계산식/조회기간) | ✅ `market-data.comparison.*` 설정값으로 구현 |
+| 매매시세 계산 정책(반경/면적오차/표본기준/계산식/조회기간) | ✅ `market-data.comparison.*` 설정값으로 구현. 면적오차(`areaErrorRate`)·조회기간(`lookbackMonths`)은 응답에도 그대로 노출해(#206) FE가 "왜 이 표본으로 비교됐는지" 근거를 보여줄 수 있다 |
 | 국토부 API 호출(매물유형별 엔드포인트 분리) | ✅ 오피스텔/연립다세대/단독다가구 3종 분리 |
 | 반경 확장(300m→600m) 로직 | ✅ 구현. 응답에 `radiusMeters` 필드로 실제 사용된 단계도 노출 |
 | 중앙값 계산 | ✅ 구현 |
 | 성공/판정불가/실패 3단계 응답 구조 | ⚠️ 사실상 AVAILABLE/UNAVAILABLE 2단계 — 외부 API 실패도 예외를 던지지 않고 UNAVAILABLE로 흡수(아래 비기능요구사항 참고) |
 | 데이터 기준일·조회시각·적용 반경 단계 기록 | ⚠️ 기준일(`referenceDate`)·반경 단계(`radiusMeters`)는 응답에 포함. 조회시각 자체는 별도 기록 없음 |
-| 응답 스키마(대표시세/차이/차이율/표본수/기준일/status) | ✅ `MarketComparisonResponse(status, referencePrice, differenceRate, sampleCount, referenceDate, radiusMeters, message)` |
+| 응답 스키마(대표시세/차이/차이율/표본수/기준일/status) | ✅ `MarketComparisonResponse(status, referencePrice, differenceRate, sampleCount, referenceDate, radiusMeters, areaErrorRate, lookbackMonths, message, reason)`. `areaErrorRate`/`lookbackMonths`는 AVAILABLE일 때만 채워지고 UNAVAILABLE이면 `radiusMeters`와 동일하게 null(#206) |
 
 ## 비기능 요구사항 — 대조
 

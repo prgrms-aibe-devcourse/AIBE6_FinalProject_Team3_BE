@@ -16,6 +16,7 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 
 // @DynamicUpdate: 기본값(정적 UPDATE, 매핑된 모든 컬럼을 포함)이면 한 트랜잭션이 필드 하나만
 // 바꿔도 그 시점 스냅샷의 나머지 모든 컬럼 값을 그대로 다시 써넣는다 - 동시에 다른 트랜잭션이
@@ -52,8 +53,13 @@ public class User {
     @Column(nullable = false)
     private UserStatus status;
 
-    @Column(name = "withdrawn_at")
-    private LocalDateTime withdrawnAt;
+    // updatePasswordHash() 호출마다(setPassword()의 자기 변경, 비밀번호 재설정 confirm 둘 다) 갱신된다.
+    // JwtAuthenticationFilter가 access token의 발급 시각(iat)이 이 값보다 이전이면 그 토큰을 무효로
+    // 처리하는 데 쓴다 - 그래야 비밀번호가 바뀐 뒤 탈취됐거나 열려 있던 기존 access token이 만료
+    // 전까지(최대 30분) 계속 유효한 문제를 막을 수 있다. null이면(가입 이후 비밀번호를 바꾼 적 없음)
+    // 이 검사 자체를 건너뛴다.
+    @Column(name = "password_changed_at")
+    private LocalDateTime passwordChangedAt;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -94,9 +100,20 @@ public class User {
 
     // 소셜 전용으로 가입한 계정이 처음 비밀번호를 설정하거나 기존 비밀번호를 변경할 때 사용한다.
     // 현재 비밀번호 검증(이미 설정되어 있는 경우)은 호출 전에 서비스 레이어(LocalAuthService)에서
-    // 끝내고 온다는 전제다.
+    // 끝내고 온다는 전제다. LocalAuthService.setPassword()(로그인된 본인의 자발적 변경)와
+    // PasswordResetService.confirmReset()(비밀번호 찾기) 양쪽에서 호출되므로, 이 메서드 하나에서
+    // passwordChangedAt을 갱신해야 두 경로 모두 기존 access token을 일관되게 무효화할 수 있다 -
+    // setPassword() 쪽만 빠뜨리면 정상적으로 자기 비밀번호를 바꾼 경우엔 탈취된 이전 access
+    // token이 계속 유효한 채로 남는 비대칭이 생긴다.
     public void updatePasswordHash(String passwordHash) {
         this.passwordHash = passwordHash;
+        // JWT의 iat(NumericDate)는 스펙상 초 단위 정수라 JwtAuthenticationFilter가 비교할 때 보는
+        // issuedAt은 항상 나노초가 0이다 - 여기서 나노초까지 있는 LocalDateTime.now()를 그대로 쓰면,
+        // 예를 들어 비밀번호 변경이 12:00:00.800에 일어나고 바로 그 초(12:00:00.xxx)에 로그인해
+        // 새로 발급된 토큰의 iat가 12:00:00(나노초 0)으로 비교되어, 실제로는 변경 "이후"에 발급된
+        // 정상 토큰인데도 이전으로 오판돼 거부(401)되는 경우가 생긴다. 초 단위로 truncate해 양쪽의
+        // 정밀도를 맞춘다.
+        this.passwordChangedAt = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
     }
 
     // 개발용 admin 시드 계정(AdminAccountSeeder)에서만 사용한다. 일반 가입 경로(createOAuthUser/
@@ -153,7 +170,6 @@ public class User {
      */
     public void withdraw() {
         this.status = UserStatus.WITHDRAWN;
-        this.withdrawnAt = LocalDateTime.now();
         this.nickname = WITHDRAWN_NICKNAME_PREFIX + this.id;
         this.email = (this.email != null) ? "withdrawn_" + this.id + "@" + WITHDRAWN_EMAIL_DOMAIN : null;
         this.passwordHash = null;

@@ -99,6 +99,37 @@ public class RefreshTokenService {
             return userId
             """.formatted(BY_USER_KEY_PREFIX), String.class);
 
+    // KEYS[1] = by-user:{userId}, KEYS[2] = by-hash:{newHash}, ARGV[1] = newHash.
+    // by-user가 지금도 newHash를 가리킬 때만 지운다 - ROTATE_SCRIPT 커밋 직후~이 정리 사이에
+    // 동시 issue()(새 로그인)가 끼어들면 by-user가 이미 그 새 세션의 hash를 가리키게 되는데, 이걸
+    // 확인 없이 무조건 지우면 방금 로그인한 세션의 back-pointer가 지워져 그 세션이 이후 rotate()를
+    // 못 하게 된다(강제 재로그인). by-hash:{newHash}는 이 raw token이 클라이언트에 반환된 적 없어
+    // 악용될 수 없지만(정리 목적일 뿐), 조건 없이 지워도 된다 - 이미 동시 issue()의 ISSUE_SCRIPT가
+    // 지웠다면 DEL은 그냥 no-op이다.
+    private static final RedisScript<Long> DELETE_ORPHANED_SESSION_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+              redis.call('DEL', KEYS[1])
+            end
+            redis.call('DEL', KEYS[2])
+            return 1
+            """, Long.class);
+
+    // KEYS[1] = by-user:{userId}.
+    // by-user를 읽는 것과 그 결과로 by-user/by-hash를 지우는 것을 하나의 원자적 스크립트로
+    // 묶는다 - Java 쪽에서 GET과 DELETE를 별도 호출로 나누면, 그 사이에 동시 로그인/rotate가
+    // 끼어들어 by-user가 이미 새 세션을 가리키도록 바뀐 뒤에도 무조건 지워버려 방금 발급된 최신
+    // 세션의 back-pointer까지 revokeAllForUser()가 지워버리는 경합이 있었다. Lua 스크립트 안의
+    // GET은 그 뒤 이어지는 DEL과 함께 원자적으로 실행되므로 이 경합이 아예 생기지 않는다.
+    private static final RedisScript<String> REVOKE_ALL_FOR_USER_SCRIPT = new DefaultRedisScript<>("""
+            local currentHash = redis.call('GET', KEYS[1])
+            if not currentHash then
+              return nil
+            end
+            redis.call('DEL', KEYS[1])
+            redis.call('DEL', '%s' .. currentHash)
+            return currentHash
+            """.formatted(BY_HASH_KEY_PREFIX), String.class);
+
     private final StringRedisTemplate redisTemplate;
     private final UserRepository userRepository;
 
@@ -179,12 +210,20 @@ public class RefreshTokenService {
     // 동시 로그인(issue())이 이미 by-user를 가로챘다면, 위에서 방금 커밋한 newHash 항목은 issue()가
     // 자기 자신의 ISSUE_SCRIPT 안에서 이미 지운 뒤다 - 여기서 별도로 지울 것이 없고, 클라이언트에
     // 유효하지 않은 세션을 성공으로 돌려주지 않도록 즉시 거부하기만 하면 된다.
+    //
+    // 이 확인 자체가 Redis 장애로 실패하는 경우는 위의 실패(AUTH_TOKEN_STORE_UNAVAILABLE)와 다르게
+    // 다뤄야 한다 - ROTATE_SCRIPT는 이미 커밋되어 새 세션이 Redis에 실제로 살아있는 상태이므로, 여기서
+    // 다시 503을 던지면 "이미 죽은 이전 토큰을 들고 재시도하라"는 응답이 되어 클라이언트를 무한 재시도로
+    // 몰아넣는다(재시도해도 이전 토큰은 AUTH_REFRESH_TOKEN_INVALID로만 실패함). 이 재확인은 애초에
+    // "동시 로그인" 극히 드문 타이밍을 즉시 실패로 앞당기기 위한 부가 확인일 뿐, 실패해도 원자적 롤백이
+    // 필요한 것은 아니므로 best-effort로 스킵하고 정상 성공 처리한다.
     private void rejectIfSessionAlreadySupersededByConcurrentLogin(String userId, String newHash) {
         String currentPointer;
         try {
             currentPointer = redisTemplate.opsForValue().get(byUserKey(userId));
         } catch (DataAccessException e) {
-            throw redisUnavailable(e);
+            log.warn("동시 로그인 재확인 실패(Redis 일시 장애로 간주, rotate 자체는 이미 성공해 계속 진행) userId={}", userId, e);
+            return;
         }
         if (!newHash.equals(currentPointer)) {
             throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID,
@@ -203,9 +242,25 @@ public class RefreshTokenService {
         }
     }
 
+    /**
+     * 비밀번호 재설정 성공 시(PasswordResetService) 탈취됐을 수 있는 기존 세션을 강제로 끊어내기
+     * 위해 사용한다. revoke(rawToken)과 달리 raw token 없이 userId만으로 지운다 - by-user가
+     * 가리키는 현재 세션의 by-hash까지 함께 지워야 refresh_token 쿠키가 남아 있어도 /auth/refresh가
+     * 더 이상 성공하지 못한다.
+     */
+    public void revokeAllForUser(Long userId) {
+        String userIdString = String.valueOf(userId);
+        try {
+            redisTemplate.execute(REVOKE_ALL_FOR_USER_SCRIPT, List.of(byUserKey(userIdString)));
+        } catch (DataAccessException e) {
+            throw redisUnavailable(e);
+        }
+    }
+
     private void deleteOrphanedSession(String userId, String newHash) {
         try {
-            redisTemplate.delete(List.of(byUserKey(userId), byHashKey(newHash)));
+            redisTemplate.execute(DELETE_ORPHANED_SESSION_SCRIPT,
+                    List.of(byUserKey(userId), byHashKey(newHash)), newHash);
         } catch (DataAccessException e) {
             log.warn("탈퇴/미존재 사용자의 refresh token 정리 실패 (TTL로 자연 정리됨) userId={}", userId, e);
         }

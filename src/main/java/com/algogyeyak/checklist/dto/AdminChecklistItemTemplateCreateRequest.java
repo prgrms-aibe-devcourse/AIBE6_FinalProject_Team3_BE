@@ -22,6 +22,8 @@ public record AdminChecklistItemTemplateCreateRequest(
         String helperText,
         @NotNull ChecklistImportance importance,
         @NotNull ChecklistItemType itemType,
+        // MULTIPLE_CHOICE 타입 문항의 선택지("가스보일러,기름보일러,전기보일러,지역난방" 형식). 그 외 타입은 사용하지 않는다.
+        @Size(max = 255) String options,
         ChecklistItemCode code,
         @NotNull @Min(1) Integer displayOrder,
         @Size(max = 255) String applicablePropertyTypes

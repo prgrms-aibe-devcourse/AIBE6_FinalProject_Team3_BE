@@ -8,6 +8,9 @@ spring:
       password: ${REDIS_PASSWORD}
       connect-timeout: 2s
       timeout: 2s
+  mail:
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
   security:
     oauth2:
       client:
@@ -37,6 +40,10 @@ springdoc:
 app:
   jwt:
     secret: ${JWT_SECRET}
+  frontend:
+    base-url: ${FRONTEND_BASE_URL}
+  mail:
+    from: ${MAIL_FROM}
   oauth2:
     # application.yml의 기본값(http://localhost:3000/oauth/callback)을 여기서 없애지 않으면,
     # 운영 배포 시 OAUTH2_REDIRECT_URI를 깜빡해도 기동은 성공하고 구글/카카오 로그인 성공 후
@@ -87,5 +94,6 @@ molit:
 
 aws:
   s3:
+    bucket: ${AWS_S3_BUCKET}
     access-key: ${AWS_ACCESS_KEY}
     secret-key: ${AWS_SECRET_KEY}
