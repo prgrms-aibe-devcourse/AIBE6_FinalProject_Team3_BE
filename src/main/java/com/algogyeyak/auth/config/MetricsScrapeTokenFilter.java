@@ -10,11 +10,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * {@code /actuator/prometheus}는 SecurityConfig에서 permitAll이다 - 리버스 프록시
@@ -29,7 +32,14 @@ import java.nio.charset.StandardCharsets;
  */
 public class MetricsScrapeTokenFilter extends OncePerRequestFilter {
 
-    private static final String PROMETHEUS_PATH = "/actuator/prometheus";
+    // request.getRequestURI()를 String.equals로 직접 비교하면 안 된다 - 그건 서블릿 컨테이너가
+    // 돌려주는 원본(디코딩 전) 경로라 /actuator/prometheus;x=1 같은 matrix parameter가 붙으면 그대로
+    // 안 맞아 이 필터 자체가 "보호 대상 경로가 아니다"로 오판해 통과시켜버린다(SecurityConfig의
+    // authorizeHttpRequests도 이 경로를 permitAll로 열어두고 이 필터 하나만 믿고 있어서, 그 순간
+    // 인증이 통째로 사라진다). PathPatternRequestMatcher는 Spring Security 전체가 이미 같은 목적으로
+    // 쓰는 정규화된 매처(SecurityConfig의 /h2-console/** 매칭과 동일)라 이 필터의 "보호 대상"
+    // 판단이 SecurityConfig의 실제 매칭과 항상 같은 방식으로 어긋나지 않는다.
+    private static final RequestMatcher PROMETHEUS_MATCHER = PathPatternRequestMatcher.pathPattern("/actuator/prometheus");
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -42,7 +52,7 @@ public class MetricsScrapeTokenFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        if (!PROMETHEUS_PATH.equals(request.getRequestURI()) || hasValidToken(request)) {
+        if (!PROMETHEUS_MATCHER.matches(request) || hasValidToken(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -56,7 +66,10 @@ public class MetricsScrapeTokenFilter extends OncePerRequestFilter {
             return false;
         }
         String token = header.substring(BEARER_PREFIX.length());
-        return scrapeToken.equals(token);
+        // 타이밍 공격 방어(defense-in-depth) - 이 엔드포인트는 외부에 포트를 안 열어(docker-compose.monitoring.yml
+        // 참고) 원격 타이밍 공격 실익은 낮지만, 비교 비용이 String.equals 대비 다르지 않으니 그냥 상수시간으로 둔다.
+        return MessageDigest.isEqual(
+                scrapeToken.getBytes(StandardCharsets.UTF_8), token.getBytes(StandardCharsets.UTF_8));
     }
 
     private void writeErrorResponse(HttpServletResponse response) throws IOException {
