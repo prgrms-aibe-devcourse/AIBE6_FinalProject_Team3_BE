@@ -3,8 +3,8 @@ import { check, sleep } from 'k6';
 import { BASE_URL } from './common/config.js';
 import { login } from './common/auth.js';
 
-// 스모크 테스트 단계: VU 1명, 30초만 - 스크립트 자체가 정상 동작하는지만 확인.
-// 검증되면 stages를 늘려서(예: 0→20명 ramp-up, 5분 유지) baseline 측정으로 전환.
+// 스모크 테스트: VU 1명, 30초만 - 엔드포인트 조합이 정상 동작하는지만 빠르게 확인한다.
+// 실제 부하(정상 트래픽 기준선/한계치/지속부하/폭증)는 04~07번 스크립트가 각각 담당한다.
 export const options = {
   vus: 1,
   duration: '30s',
