@@ -8,10 +8,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.mail.MailSendException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -51,7 +53,7 @@ class EmailVerificationServiceTest {
     @Test
     void requestCodeThrowsWhenEmailAlreadyRegistered() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(true);
-        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), eq("1"), any(Duration.class)))
+        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), anyString(), any(Duration.class)))
                 .thenReturn(true);
 
         BusinessException exception = assertThrows(BusinessException.class, () -> service.requestCode("test@example.com"));
@@ -67,7 +69,7 @@ class EmailVerificationServiceTest {
     @Test
     void requestCodeAppliesCooldownEvenWhenEmailAlreadyRegistered() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(true);
-        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), eq("1"), any(Duration.class)))
+        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), anyString(), any(Duration.class)))
                 .thenReturn(false);
 
         BusinessException exception = assertThrows(BusinessException.class, () -> service.requestCode("test@example.com"));
@@ -80,7 +82,7 @@ class EmailVerificationServiceTest {
     @Test
     void requestCodeThrowsWhenCooldownActive() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
-        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), eq("1"), any(Duration.class)))
+        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), anyString(), any(Duration.class)))
                 .thenReturn(false);
 
         BusinessException exception = assertThrows(BusinessException.class, () -> service.requestCode("test@example.com"));
@@ -92,7 +94,7 @@ class EmailVerificationServiceTest {
     @Test
     void requestCodeSendsEmailAndStoresHashedCode() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
-        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), eq("1"), any(Duration.class)))
+        when(valueOps.setIfAbsent(eq("auth:email-verify:cooldown:test@example.com"), anyString(), any(Duration.class)))
                 .thenReturn(true);
 
         service.requestCode("  Test@Example.COM  ");
@@ -110,13 +112,13 @@ class EmailVerificationServiceTest {
     @Test
     void requestCodeReleasesCooldownWhenMailSendFails() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         when(emailService.sendVerificationCode(anyString(), anyString()))
                 .thenReturn(CompletableFuture.failedFuture(new MailSendException("smtp down")));
 
         service.requestCode("test@example.com");
 
-        verify(redisTemplate).delete("auth:email-verify:cooldown:test@example.com");
+        verify(redisTemplate).execute(any(RedisScript.class), eq(List.of("auth:email-verify:cooldown:test@example.com")), anyString());
     }
 
     // 회귀 테스트 - emailTaskExecutor의 큐가 가득 차면 @Async 프록시가 Future를 반환하기도 전에
@@ -126,19 +128,19 @@ class EmailVerificationServiceTest {
     @Test
     void requestCodeReleasesCooldownWhenEmailTaskSubmissionIsRejected() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         when(emailService.sendVerificationCode(anyString(), anyString()))
                 .thenThrow(new org.springframework.core.task.TaskRejectedException("queue full"));
 
         service.requestCode("test@example.com");
 
-        verify(redisTemplate).delete("auth:email-verify:cooldown:test@example.com");
+        verify(redisTemplate).execute(any(RedisScript.class), eq(List.of("auth:email-verify:cooldown:test@example.com")), anyString());
     }
 
     @Test
     void requestCodeThrowsServiceUnavailableWhenRedisFails() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class)))
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class)))
                 .thenThrow(new QueryTimeoutException("redis down"));
 
         BusinessException exception = assertThrows(BusinessException.class, () -> service.requestCode("test@example.com"));

@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 로그아웃 상태의 비밀번호 재설정("비밀번호를 잊으셨나요?"). RefreshTokenService와 동일한 패턴 —
@@ -46,6 +47,19 @@ public class PasswordResetService {
     private static final String BY_HASH_KEY_PREFIX = "auth:password-reset:by-hash:";
     private static final String BY_USER_KEY_PREFIX = "auth:password-reset:by-user:";
     private static final String COOLDOWN_KEY_PREFIX = "auth:password-reset:cooldown:";
+
+    // 쿨다운 키를 조건 없이 DEL하면 TOCTOU가 생긴다: 이 요청이 setIfAbsent로 쿨다운을 건 뒤(t=0),
+    // SMTP가 타임아웃 없이 오래 걸리다(application.yml에 mail.smtp.*.timeout이 없어 무한대) 실패하는
+    // 사이에(t=90s 등) 쿨다운이 자연 TTL(60s)로 만료되고 같은 이메일의 새 요청이 새 쿨다운을 걸 수
+    // 있다 - 그 뒤늦게 도착한 실패 콜백이 조건 없이 DEL하면 방금 건 새 쿨다운(관계없는 요청 것)이
+    // 잘못 풀려버린다. 이 요청이 실제로 세운 값(cooldownToken)과 현재 키 값이 같을 때만 지우는
+    // compare-and-delete로 막는다 - 아래 REVOKE_SCRIPT 등과 동일한 패턴.
+    private static final RedisScript<Long> RELEASE_COOLDOWN_IF_MATCHES_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+              return redis.call('DEL', KEYS[1])
+            end
+            return 0
+            """, Long.class);
 
     // RefreshTokenService.ISSUE_SCRIPT와 동일한 구조 - 이전 세션(by-user가 가리키던 hash)의 by-hash를
     // 지우고 새 by-hash/by-user를 같은 스크립트 안에서 원자적으로 갱신한다.
@@ -109,10 +123,13 @@ public class PasswordResetService {
         // 계정 존재 여부와 무관하게 동일한 쿨다운을 적용한다 - 존재하는 이메일만 쿨다운에 걸린다면
         // 그 자체로 계정 존재 여부가 새어나간다.
         String cooldownKey = COOLDOWN_KEY_PREFIX + normalizedEmail;
+        // 각 요청이 자기만의 토큰을 쿨다운 값으로 세운다 - releaseCooldownBestEffort()가 나중에
+        // "지금 이 요청이 세운 값이 아직 그대로 남아있을 때만" 지우도록(compare-and-delete) 하기 위함.
+        String cooldownToken = UUID.randomUUID().toString();
         Boolean cooldownSet;
         try {
             cooldownSet = redisTemplate.opsForValue()
-                    .setIfAbsent(cooldownKey, "1", Duration.ofSeconds(requestCooldownSeconds));
+                    .setIfAbsent(cooldownKey, cooldownToken, Duration.ofSeconds(requestCooldownSeconds));
         } catch (DataAccessException e) {
             throw redisUnavailable(e);
         }
@@ -168,18 +185,18 @@ public class PasswordResetService {
             emailService.sendPasswordResetLink(normalizedEmail, resetLink)
                     .exceptionally(e -> {
                         log.error("비밀번호 재설정 메일 발송 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
-                        releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+                        releaseCooldownBestEffort(cooldownKey, cooldownToken, normalizedEmail);
                         return null;
                     });
         } catch (TaskRejectedException e) {
             log.error("비밀번호 재설정 메일 발송 작업 제출 실패(큐 포화) - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
-            releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+            releaseCooldownBestEffort(cooldownKey, cooldownToken, normalizedEmail);
         }
     }
 
-    private void releaseCooldownBestEffort(String cooldownKey, String normalizedEmail) {
+    private void releaseCooldownBestEffort(String cooldownKey, String cooldownToken, String normalizedEmail) {
         try {
-            redisTemplate.delete(cooldownKey);
+            redisTemplate.execute(RELEASE_COOLDOWN_IF_MATCHES_SCRIPT, List.of(cooldownKey), cooldownToken);
         } catch (DataAccessException e) {
             log.warn("메일 발송 실패 후 쿨다운 해제 실패(TTL로 자연 정리됨) email={}", normalizedEmail, e);
         }

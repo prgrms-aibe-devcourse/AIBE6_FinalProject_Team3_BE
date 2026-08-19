@@ -80,7 +80,7 @@ class PasswordResetServiceTest {
 
     @Test
     void requestResetThrowsWhenCooldownActive() {
-        when(valueOps.setIfAbsent(eq("auth:password-reset:cooldown:test@example.com"), eq("1"), any(Duration.class)))
+        when(valueOps.setIfAbsent(eq("auth:password-reset:cooldown:test@example.com"), anyString(), any(Duration.class)))
                 .thenReturn(false);
 
         BusinessException exception = assertThrows(BusinessException.class, () -> service.requestReset("test@example.com"));
@@ -95,7 +95,7 @@ class PasswordResetServiceTest {
     // 단계라 실패를 삼키면 안 된다 - 그대로 AUTH_TOKEN_STORE_UNAVAILABLE로 전파돼야 한다.
     @Test
     void requestResetThrowsServiceUnavailableWhenCooldownCheckRedisFails() {
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class)))
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class)))
                 .thenThrow(new QueryTimeoutException("redis down"));
 
         BusinessException exception = assertThrows(BusinessException.class,
@@ -107,7 +107,7 @@ class PasswordResetServiceTest {
 
     @Test
     void requestResetDoesNothingWhenAccountNotFound() {
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.empty());
 
         service.requestReset("test@example.com");
@@ -119,7 +119,7 @@ class PasswordResetServiceTest {
     @Test
     void requestResetDoesNothingForSocialOnlyAccount() {
         User socialUser = User.createOAuthUser("test@example.com", "소셜유저", null);
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(socialUser));
 
         service.requestReset("test@example.com");
@@ -131,7 +131,7 @@ class PasswordResetServiceTest {
     void requestResetDoesNothingForWithdrawnAccount() {
         User user = localUser(1L);
         user.withdraw();
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         when(userRepository.findByEmail(anyString())).thenReturn(Optional.of(user));
 
         service.requestReset("test@example.com");
@@ -142,7 +142,7 @@ class PasswordResetServiceTest {
     @Test
     void requestResetIssuesTokenAndSendsEmailForEligibleAccount() throws Exception {
         User user = localUser(7L);
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
@@ -175,7 +175,7 @@ class PasswordResetServiceTest {
         // 존재하지 않는 이메일/소셜 전용 계정(둘 다 항상 200)과 응답이 갈려 계정 존재 여부가
         // 새어나간다 - 메일 발송 실패도 로그만 남기고 예외 없이 정상 종료해야 한다.
         User user = localUser(1L);
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         doReturn(1L).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
         when(emailService.sendPasswordResetLink(anyString(), anyString()))
@@ -186,7 +186,7 @@ class PasswordResetServiceTest {
         // 회귀 테스트 - 메일 발송이 서버 쪽 이유로 실패했는데 쿨다운만 남으면, 사용자가 링크를
         // 받지도 못한 채 60초를 그냥 기다려야 한다(응답 자체는 계정 존재 여부 비노출을 위해 여전히
         // 성공으로 유지되지만, 쿨다운은 풀어 즉시 재시도를 허용해야 한다).
-        verify(redisTemplate).delete("auth:password-reset:cooldown:test@example.com");
+        verify(redisTemplate).execute(any(RedisScript.class), eq(List.of("auth:password-reset:cooldown:test@example.com")), anyString());
     }
 
     // 회귀 테스트 - emailTaskExecutor의 큐가 가득 차면 @Async 프록시가 Future를 반환하기도 전에
@@ -197,7 +197,7 @@ class PasswordResetServiceTest {
     @Test
     void requestResetSwallowsEmailTaskRejectionToAvoidRevealingAccountExists() {
         User user = localUser(1L);
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         doReturn(1L).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
         when(emailService.sendPasswordResetLink(anyString(), anyString()))
@@ -205,14 +205,14 @@ class PasswordResetServiceTest {
 
         service.requestReset("test@example.com");
 
-        verify(redisTemplate).delete("auth:password-reset:cooldown:test@example.com");
+        verify(redisTemplate).execute(any(RedisScript.class), eq(List.of("auth:password-reset:cooldown:test@example.com")), anyString());
     }
 
     @Test
     void requestResetSwallowsRedisIssueFailureToAvoidRevealingAccountExists() {
         // 위와 동일한 이유 - 토큰 발급(Redis) 자체가 실패해도 503을 노출하지 않는다.
         User user = localUser(1L);
-        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         doThrow(new QueryTimeoutException("redis down"))
                 .when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
