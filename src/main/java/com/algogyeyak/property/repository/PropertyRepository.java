@@ -93,7 +93,7 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
      */
     @Query("""
             SELECT p FROM Property p
-            LEFT JOIN p.address a
+            LEFT JOIN FETCH p.address a
             WHERE p.userId = :userId
               AND p.status = :status
               AND (:region IS NULL OR a.roadAddress LIKE CONCAT('%', :region, '%')
