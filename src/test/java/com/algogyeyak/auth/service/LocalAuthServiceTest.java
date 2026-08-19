@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -174,6 +175,16 @@ class LocalAuthServiceTest {
                 () -> localAuthService.signup("test@example.com", "password1", "테스트유저"));
 
         assertEquals(original, thrown);
+    }
+
+    // signup() 직후 refresh token 발급 실패 등으로 세션을 만들지 못했을 때 AuthController가 호출하는
+    // 보상 트랜잭션 - 지금까지 AuthControllerTest의 MockMvc 레벨 테스트에서만 간접적으로 거쳐갔을 뿐,
+    // 이 서비스 메서드를 직접 호출하는 단위 테스트가 없었다.
+    @Test
+    void deleteNewlyCreatedUserAfterSessionSetupFailureDeletesTheUser() {
+        localAuthService.deleteNewlyCreatedUserAfterSessionSetupFailure(1L);
+
+        verify(userRepository).deleteById(1L);
     }
 
     @Test
@@ -354,6 +365,43 @@ class LocalAuthServiceTest {
     @Test
     void loginProceedsWhenRedisFailsDuringAttemptCounting() {
         when(valueOps.increment(anyString())).thenThrow(new QueryTimeoutException("redis down"));
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+
+        User result = localAuthService.login("test@example.com", "password1");
+
+        assertEquals(user, result);
+    }
+
+    // 위 loginProceedsWhenRedisFailsDuringAttemptCounting()의 대칭 케이스 - 로그인 자체는 이미
+    // 성공한 뒤 시도 횟수를 리셋하는 delete()만 Redis 장애로 실패해도, 로그인 결과에는 영향을 주면
+    // 안 된다(카운터는 TTL로 자연 정리되므로 무시해도 무방하다는 판단, LocalAuthService.login()의
+    // 해당 catch(DataAccessException) 주석 참고).
+    @Test
+    void loginSucceedsWhenRedisFailsDuringAttemptCounterReset() {
+        ReflectionTestUtils.setField(localAuthService, "loginMaxAttempts", 10);
+        ReflectionTestUtils.setField(localAuthService, "loginLockoutWindowSeconds", 300L);
+        when(valueOps.increment(anyString())).thenReturn(3L);
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+        doThrow(new QueryTimeoutException("redis down"))
+                .when(redisTemplate).delete("auth:login:attempts:test@example.com");
+
+        User result = localAuthService.login("test@example.com", "password1");
+
+        assertEquals(user, result);
+    }
+
+    // 경계값 테스트 - attempts가 loginMaxAttempts를 "초과"할 때만(> 비교) 잠가야 하고, 정확히
+    // 한도에 도달한 시도는 여전히 성공해야 한다(>= 비교였다면 여기서 잘못 잠겼을 것). 기존
+    // 테스트들은 attempts=11 vs loginMaxAttempts=10처럼 이미 초과한 값만 다뤘다.
+    @Test
+    void loginSucceedsWhenAttemptsExactlyAtMaxAttemptsLimit() {
+        ReflectionTestUtils.setField(localAuthService, "loginMaxAttempts", 10);
+        ReflectionTestUtils.setField(localAuthService, "loginLockoutWindowSeconds", 300L);
+        when(valueOps.increment(anyString())).thenReturn(10L);
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
