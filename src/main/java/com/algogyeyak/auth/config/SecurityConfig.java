@@ -31,6 +31,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
 import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.util.StringUtils;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -77,6 +78,19 @@ public class SecurityConfig {
         if (parseAllowedOrigins().isEmpty()) {
             throw new IllegalStateException(
                     "app.cors.allowed-origins(CORS_ALLOWED_ORIGINS)에 유효한 origin이 하나도 없습니다: \"" + allowedOrigins + "\"");
+        }
+    }
+
+    // METRICS_SCRAPE_TOKEN=(빈 값)처럼 env 자체는 있지만 내용이 비어있는 경우를 막는다 - placeholder
+    // 필수화(${METRICS_SCRAPE_TOKEN}, 기본값 없음)는 env가 아예 없는 경우만 fail-fast로 잡아주고,
+    // 빈 문자열은 그대로 통과시킨다. MetricsScrapeTokenFilter가 "Bearer " 뒤 토큰을 이 값과 단순
+    // equals로 비교하므로, 둘 다 빈 문자열이면 Authorization: Bearer  (토큰 없이 공백만) 요청이
+    // 인증을 그대로 통과해버린다.
+    @PostConstruct
+    void validateMetricsScrapeToken() {
+        if (!StringUtils.hasText(metricsScrapeToken)) {
+            throw new IllegalStateException(
+                    "app.metrics.scrape-token(METRICS_SCRAPE_TOKEN)이 비어있습니다 - /actuator/prometheus 인증이 사실상 무력화됩니다.");
         }
     }
 
