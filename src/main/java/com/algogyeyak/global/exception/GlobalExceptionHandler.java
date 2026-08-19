@@ -19,6 +19,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -74,6 +75,20 @@ public class GlobalExceptionHandler {
     ) {
         String message = exception.getRequestPartName() + " 파트는 필수입니다.";
         return buildErrorResponse(ErrorCode.BAD_REQUEST, message);
+    }
+
+    // spring.servlet.multipart.max-file-size/max-request-size(둘 다 10MB)를 넘는 요청은
+    // 컨트롤러/서비스 코드(예: ContractAnalysisOcrService의 자체 10MB 체크)에 도달하기도 전에
+    // 멀티파트 리졸버가 이 예외를 던진다 - 핸들러가 없으면 catch-all Exception으로 떨어져
+    // 500이 나간다. 현재 멀티파트 업로드를 직접 받는 곳이 contract-analysis(/inputs, /ocr)뿐이라
+    // CONTRACT_ANALYSIS_FILE_TOO_LARGE로 매핑한다 - 다른 도메인이 멀티파트 업로드를 추가하면
+    // 그때 이 매핑을 다시 검토해야 한다.
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUploadSizeExceededException(
+            MaxUploadSizeExceededException exception
+    ) {
+        return buildErrorResponse(
+                ErrorCode.CONTRACT_ANALYSIS_FILE_TOO_LARGE, ErrorCode.CONTRACT_ANALYSIS_FILE_TOO_LARGE.getMessage());
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

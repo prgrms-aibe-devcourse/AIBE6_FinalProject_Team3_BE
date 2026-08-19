@@ -20,12 +20,11 @@
 
 ### 1. 정의만 되어 있고 실제로 안 쓰이는 에러코드 (죽은 코드)
 
-`ErrorCode.java`에 있는 도메인별 커스텀 코드 중 다음 8개는 어디에서도 참조되지 않습니다(전체 커스텀 코드 26개 중 약 1/3).
+`ErrorCode.java`에 있는 도메인별 커스텀 코드 중 다음은 어디에서도 참조되지 않습니다.
 
 - `property`: `PROPERTY_REQUIRED_FIELD_MISSING`, `PROPERTY_TYPE_NOT_SUPPORTED`, `PROPERTY_IMAGE_INVALID`
-- `contract-analysis`: `CONTRACT_ANALYSIS_NOT_RELATED`, `CONTRACT_ANALYSIS_MASKING_NOT_CONFIRMED`, `CONTRACT_ANALYSIS_AI_RESPONSE_INVALID`, `CONTRACT_ANALYSIS_AI_HALLUCINATION`, `CONTRACT_ANALYSIS_AI_API_ERROR`
 
-두 도메인 다 "요구사항 명세서를 읽고 실패 사유별로 코드를 미리 다 만들어뒀지만, 정작 그 코드를 던지는 검증 로직은 아직 못 짠" 상태로 보입니다. 특히 contract-analysis의 5개는 전부 아직 없는 `/analyze` 단계용이라 자연스러운 반면, property의 3개는 해당 기능(이미지 검증, 매물유형 검증)이 애초에 스코프에서 빠졌는지 확인이 필요합니다. (**2026-08-06 정정**: 원래 이 목록에 있던 `PROPERTY_INVALID_SEARCH_CONDITION`은 이후 `PropertyService`의 검색/페이지네이션 조건 검증(`getMyProperties`)에서 실제로 4곳에서 던져지고 있어 죽은 코드가 아님을 확인해 제외함.)
+두 도메인 다 "요구사항 명세서를 읽고 실패 사유별로 코드를 미리 다 만들어뒀지만, 정작 그 코드를 던지는 검증 로직은 아직 못 짠" 상태로 보입니다. property의 3개는 해당 기능(이미지 검증, 매물유형 검증)이 애초에 스코프에서 빠졌는지 확인이 필요합니다. (**2026-08-06 정정**: 원래 이 목록에 있던 `PROPERTY_INVALID_SEARCH_CONDITION`은 이후 `PropertyService`의 검색/페이지네이션 조건 검증(`getMyProperties`)에서 실제로 4곳에서 던져지고 있어 죽은 코드가 아님을 확인해 제외함.) (**2026-08-14 정정**: `contract-analysis`의 5개는 이 목록 작성 이후 `/analyze` 단계가 실제로 구현되면서 `CONTRACT_ANALYSIS_MASKING_NOT_CONFIRMED`/`AI_RESPONSE_INVALID`/`AI_HALLUCINATION`/`AI_API_ERROR` 4개는 전부 실제로 던져지는 것을 재확인해 제외함. 나머지 하나였던 `CONTRACT_ANALYSIS_NOT_RELATED`는 끝까지 미사용으로 재확인되어 `ErrorCode.java`에서 아예 삭제함 — "무관한 입력" 처리는 이 전용 코드가 아니라 `/analyze`에서 Gemini가 `clauses`를 비우고 `summary`로 안내하는 방식으로 구현돼 있다, `contract-analysis-design.md` 참고.)
 
 ### 2. market-data는 해소됨, risk-analysis에는 아직 같은 흔적이 남아있음
 
