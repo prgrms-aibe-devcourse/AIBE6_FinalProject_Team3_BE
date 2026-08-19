@@ -7,6 +7,7 @@ import com.algogyeyak.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -98,12 +99,22 @@ public class EmailVerificationService {
         // 성공으로 나간다. 다만 쿨다운은 실제 발송 성공을 전제로 한 제한이므로, 발송이 서버 쪽
         // 이유(SMTP 일시 장애 등)로 실패하면 콜백에서 쿨다운을 풀어 사용자가 즉시 재시도할 수 있게
         // 한다 - 그러지 않으면 코드/링크를 받지도 못한 채 서버 잘못으로 60초를 그냥 기다려야 한다.
-        emailService.sendVerificationCode(normalizedEmail, code)
-                .exceptionally(e -> {
-                    log.error("이메일 인증번호 발송 실패 email={}", normalizedEmail, e);
-                    releaseCooldownBestEffort(cooldownKey, normalizedEmail);
-                    return null;
-                });
+        //
+        // emailTaskExecutor의 큐가 가득 차면(대량 유입) @Async 프록시가 Future를 반환하기도 전에
+        // TaskRejectedException을 동기로 던진다 - 이 경우 .exceptionally()는 아예 걸리지 못하고
+        // 예외가 그대로 이 메서드 밖으로 나가 500이 된다. 비동기 실행 자체에 실패한 것도 "발송
+        // 실패"와 똑같이 취급해야 하므로 호출 자체를 감싼다.
+        try {
+            emailService.sendVerificationCode(normalizedEmail, code)
+                    .exceptionally(e -> {
+                        log.error("이메일 인증번호 발송 실패 email={}", normalizedEmail, e);
+                        releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+                        return null;
+                    });
+        } catch (TaskRejectedException e) {
+            log.error("이메일 인증번호 발송 작업 제출 실패(큐 포화) email={}", normalizedEmail, e);
+            releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+        }
     }
 
     private void releaseCooldownBestEffort(String cooldownKey, String normalizedEmail) {

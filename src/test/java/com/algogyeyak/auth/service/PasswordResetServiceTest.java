@@ -189,6 +189,25 @@ class PasswordResetServiceTest {
         verify(redisTemplate).delete("auth:password-reset:cooldown:test@example.com");
     }
 
+    // 회귀 테스트 - emailTaskExecutor의 큐가 가득 차면 @Async 프록시가 Future를 반환하기도 전에
+    // TaskRejectedException을 동기로 던진다. 이 지점(존재하는 활성 로컬 계정 분기)에서만 발생할 수
+    // 있는 예외를 그대로 노출하면 존재하지 않는 이메일/소셜 전용 계정과 응답이 갈려 계정 존재
+    // 여부가 새어나간다 - 위 mailFailure 테스트(실패한 Future)와 마찬가지로 예외 없이 정상 종료돼야
+    // 한다.
+    @Test
+    void requestResetSwallowsEmailTaskRejectionToAvoidRevealingAccountExists() {
+        User user = localUser(1L);
+        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        doReturn(1L).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
+        when(emailService.sendPasswordResetLink(anyString(), anyString()))
+                .thenThrow(new org.springframework.core.task.TaskRejectedException("queue full"));
+
+        service.requestReset("test@example.com");
+
+        verify(redisTemplate).delete("auth:password-reset:cooldown:test@example.com");
+    }
+
     @Test
     void requestResetSwallowsRedisIssueFailureToAvoidRevealingAccountExists() {
         // 위와 동일한 이유 - 토큰 발급(Redis) 자체가 실패해도 503을 노출하지 않는다.

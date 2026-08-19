@@ -119,6 +119,22 @@ class EmailVerificationServiceTest {
         verify(redisTemplate).delete("auth:email-verify:cooldown:test@example.com");
     }
 
+    // 회귀 테스트 - emailTaskExecutor의 큐가 가득 차면 @Async 프록시가 Future를 반환하기도 전에
+    // TaskRejectedException을 동기로 던진다(위 mailSendFails 테스트처럼 실패한 Future를 반환하는
+    // 것과는 다른 실패 모드). 이 경우도 "발송 실패"와 동일하게 취급돼(쿨다운 해제) 예외 없이
+    // 정상 종료돼야 한다 - 그렇지 않으면 이 예외가 그대로 500으로 새어나간다.
+    @Test
+    void requestCodeReleasesCooldownWhenEmailTaskSubmissionIsRejected() {
+        when(userRepository.existsByEmail("test@example.com")).thenReturn(false);
+        when(valueOps.setIfAbsent(anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+        when(emailService.sendVerificationCode(anyString(), anyString()))
+                .thenThrow(new org.springframework.core.task.TaskRejectedException("queue full"));
+
+        service.requestCode("test@example.com");
+
+        verify(redisTemplate).delete("auth:email-verify:cooldown:test@example.com");
+    }
+
     @Test
     void requestCodeThrowsServiceUnavailableWhenRedisFails() {
         when(userRepository.existsByEmail("test@example.com")).thenReturn(false);

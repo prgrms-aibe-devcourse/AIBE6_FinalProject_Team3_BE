@@ -9,6 +9,7 @@ import com.algogyeyak.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -156,13 +157,24 @@ public class PasswordResetService {
         // 제한이므로(여기서 쿨다운을 풀어도 외부에서 관찰 가능한 응답 차이는 없다), 발송이 서버 쪽
         // 이유(SMTP 일시 장애 등)로 실패하면 콜백에서 쿨다운을 풀어 사용자가 링크를 받지도 못한 채
         // 서버 잘못으로 60초를 그냥 기다리는 일이 없게 한다.
+        //
+        // emailTaskExecutor의 큐가 가득 차면 @Async 프록시가 Future를 반환하기도 전에
+        // TaskRejectedException을 동기로 던진다 - .exceptionally()가 걸리기 전에 예외가 이 메서드
+        // 밖으로 그대로 나가면, 이 지점에 도달한다는 사실 자체가 "존재하는 활성 로컬 계정"이라는
+        // 뜻이라(위 eligibleUser 검사를 통과해야만 여기 옴) 존재하지 않는 이메일/소셜 전용 계정과
+        // 응답이 갈려 계정 존재 여부가 노출된다 - 반드시 이 메서드 안에서 흡수해야 한다.
         String resetLink = frontendBaseUrl + "/reset-password?token=" + rawToken;
-        emailService.sendPasswordResetLink(normalizedEmail, resetLink)
-                .exceptionally(e -> {
-                    log.error("비밀번호 재설정 메일 발송 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
-                    releaseCooldownBestEffort(cooldownKey, normalizedEmail);
-                    return null;
-                });
+        try {
+            emailService.sendPasswordResetLink(normalizedEmail, resetLink)
+                    .exceptionally(e -> {
+                        log.error("비밀번호 재설정 메일 발송 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
+                        releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+                        return null;
+                    });
+        } catch (TaskRejectedException e) {
+            log.error("비밀번호 재설정 메일 발송 작업 제출 실패(큐 포화) - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
+            releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+        }
     }
 
     private void releaseCooldownBestEffort(String cooldownKey, String normalizedEmail) {
