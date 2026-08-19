@@ -60,7 +60,8 @@ public class AdminChecklistTemplateService {
      * (문항이 하나도 없으면 1로 시작).
      */
     @Transactional
-    public AdminChecklistItemTemplateResponse create(Long actorId, AdminChecklistItemTemplateCreateRequest request) {
+    public AdminChecklistItemTemplateResponse create(
+            Long actorId, String actorEmail, AdminChecklistItemTemplateCreateRequest request) {
         // 새로 만드는 문항은 항상 active=true라, 다른 활성 문항과의 code 중복도 그 기준으로 검사한다.
         validateCode(request.code(), request.itemType(), true, null);
         validateApplicablePropertyTypes(request.applicablePropertyTypes());
@@ -86,7 +87,7 @@ public class AdminChecklistTemplateService {
                 .build();
 
         ChecklistItemTemplate saved = checklistItemTemplateRepository.save(template);
-        adminAuditLogger.log(actorId, AdminAuditAction.CREATE_CHECKLIST_TEMPLATE, saved.getId(),
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.CREATE_CHECKLIST_TEMPLATE, saved.getId(),
                 Map.of("content", saved.getContent(), "category", saved.getCategory(), "active", saved.isActive()));
         return AdminChecklistItemTemplateResponse.from(saved);
     }
@@ -102,7 +103,7 @@ public class AdminChecklistTemplateService {
      */
     @Transactional
     public AdminChecklistItemTemplateResponse update(
-            Long actorId, Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
+            Long actorId, String actorEmail, Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
         ChecklistItemTemplate template = findTemplate(templateId);
         validateCode(request.code(), request.itemType(), request.active(), templateId);
         validateNotDeactivatingLastActiveTemplate(template, request.active());
@@ -134,7 +135,7 @@ public class AdminChecklistTemplateService {
         if (versionOnReactivation != null) {
             template.realignVersionOnReactivation(versionOnReactivation);
         }
-        adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_CHECKLIST_TEMPLATE, templateId, Map.of(
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.UPDATE_CHECKLIST_TEMPLATE, templateId, Map.of(
                 "beforeContent", previousContent, "afterContent", template.getContent(),
                 "beforeActive", previousActive, "afterActive", template.isActive()));
         return AdminChecklistItemTemplateResponse.from(template);
@@ -240,7 +241,7 @@ public class AdminChecklistTemplateService {
      * 동시에 삭제를 시도하면 둘 다 통과해 0개가 될 수 있다. 같은 이유(관리자 전용, 저빈도)로 감수한다.
      */
     @Transactional
-    public void delete(Long actorId, Long templateId) {
+    public void delete(Long actorId, String actorEmail, Long templateId) {
         ChecklistItemTemplate template = findTemplate(templateId);
         if (checklistItemTemplateRepository.count() <= 1) {
             throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM);
@@ -253,7 +254,7 @@ public class AdminChecklistTemplateService {
         // 삭제 후에는 다시 조회할 수 없으니, 감사 로그에 남길 내용을 삭제 전에 미리 캡처해둔다.
         Map<String, Object> deletedSummary = Map.of("content", template.getContent(), "category", template.getCategory());
         checklistItemTemplateRepository.delete(template);
-        adminAuditLogger.log(actorId, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE, templateId, deletedSummary);
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE, templateId, deletedSummary);
     }
 
     private ChecklistItemTemplate findTemplate(Long templateId) {
@@ -282,7 +283,7 @@ public class AdminChecklistTemplateService {
      */
     @Transactional
     public AdminChecklistItemTemplateImageResponse addImage(
-            Long actorId, Long templateId, AdminChecklistItemTemplateImageCreateRequest request) {
+            Long actorId, String actorEmail, Long templateId, AdminChecklistItemTemplateImageCreateRequest request) {
         ChecklistItemTemplate template = findTemplate(templateId);
         // 신규 이미지는 항상 맨 뒤에 추가된다 - 관리자가 이미지 순서를 바꾸고 싶으면 삭제 후 재추가.
         int nextDisplayOrder = checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(templateId).stream()
@@ -295,16 +296,16 @@ public class AdminChecklistTemplateService {
                 .imageUrl(request.imageUrl())
                 .displayOrder(nextDisplayOrder)
                 .build());
-        adminAuditLogger.log(actorId, AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE, saved.getId(),
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE, saved.getId(),
                 Map.of("templateId", templateId, "imageUrl", saved.getImageUrl()));
         return AdminChecklistItemTemplateImageResponse.from(saved);
     }
 
     @Transactional
-    public void deleteImage(Long actorId, Long templateId, Long imageId) {
+    public void deleteImage(Long actorId, String actorEmail, Long templateId, Long imageId) {
         ChecklistItemTemplateImage image = findImageOwnedByTemplate(templateId, imageId);
         checklistItemTemplateImageRepository.delete(image);
-        adminAuditLogger.log(actorId, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE, imageId,
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE, imageId,
                 Map.of("templateId", templateId));
     }
 

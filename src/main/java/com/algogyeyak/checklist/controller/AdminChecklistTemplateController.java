@@ -54,7 +54,8 @@ public class AdminChecklistTemplateController {
             @AuthenticationPrincipal JwtUserPrincipal principal,
             @Valid @RequestBody AdminChecklistItemTemplateCreateRequest request
     ) {
-        AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(principal.userId(), request);
+        AdminChecklistItemTemplateResponse result =
+                adminChecklistTemplateService.create(principal.userId(), principal.email(), request);
         // 영구 감사 기록은 AdminChecklistTemplateService가 AdminAuditLogger로 남긴다(실제 변경과
         // 같은 트랜잭션) - 이 로그는 실시간 관측(Prometheus/Grafana)용으로 별도 유지한다.
         AdminActionLog.record(principal.userId(), "CREATE_CHECKLIST_TEMPLATE", "templateId", result.id());
@@ -69,7 +70,7 @@ public class AdminChecklistTemplateController {
             @Valid @RequestBody AdminChecklistItemTemplateUpdateRequest request
     ) {
         AdminChecklistItemTemplateResponse result =
-                adminChecklistTemplateService.update(principal.userId(), templateId, request);
+                adminChecklistTemplateService.update(principal.userId(), principal.email(), templateId, request);
         AdminActionLog.record(principal.userId(), "UPDATE_CHECKLIST_TEMPLATE", "templateId", templateId);
         return ApiResponse.success(result);
     }
@@ -77,7 +78,7 @@ public class AdminChecklistTemplateController {
     @Operation(summary = "문항 템플릿 삭제", description = "문항 템플릿을 삭제한다. 마지막 남은 문항이거나 마지막 활성 문항이면 거부된다.")
     @DeleteMapping("/{templateId}")
     public ApiResponse<Void> delete(@AuthenticationPrincipal JwtUserPrincipal principal, @PathVariable Long templateId) {
-        adminChecklistTemplateService.delete(principal.userId(), templateId);
+        adminChecklistTemplateService.delete(principal.userId(), principal.email(), templateId);
         AdminActionLog.record(principal.userId(), "DELETE_CHECKLIST_TEMPLATE", "templateId", templateId);
         return ApiResponse.successWithoutData();
     }
@@ -105,7 +106,7 @@ public class AdminChecklistTemplateController {
             @Valid @RequestBody AdminChecklistItemTemplateImageCreateRequest request
     ) {
         AdminChecklistItemTemplateImageResponse result =
-                adminChecklistTemplateService.addImage(principal.userId(), templateId, request);
+                adminChecklistTemplateService.addImage(principal.userId(), principal.email(), templateId, request);
         AdminActionLog.record(principal.userId(), "ADD_CHECKLIST_TEMPLATE_IMAGE", "templateId", templateId);
         return ApiResponse.success(result);
     }
@@ -119,7 +120,7 @@ public class AdminChecklistTemplateController {
             @PathVariable Long templateId,
             @PathVariable Long imageId
     ) {
-        adminChecklistTemplateService.deleteImage(principal.userId(), templateId, imageId);
+        adminChecklistTemplateService.deleteImage(principal.userId(), principal.email(), templateId, imageId);
         AdminActionLog.record(principal.userId(), "DELETE_CHECKLIST_TEMPLATE_IMAGE", "imageId", imageId);
         return ApiResponse.successWithoutData();
     }

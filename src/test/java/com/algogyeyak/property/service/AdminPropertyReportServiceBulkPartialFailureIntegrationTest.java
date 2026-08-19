@@ -53,10 +53,10 @@ class AdminPropertyReportServiceBulkPartialFailureIntegrationTest {
         Long reviewerId = 999_000L; // 두 신고 모두의 reporterId와 달라 본인 신고 셀프 검토 가드에 안 걸림
 
         doThrow(new IllegalStateException("감사 로그 직렬화 실패"))
-                .when(adminAuditLogger).log(eq(reviewerId), eq(AdminAuditAction.REVIEW_PROPERTY_REPORT), eq(fails.getId()), any());
+                .when(adminAuditLogger).log(eq(reviewerId), any(), eq(AdminAuditAction.REVIEW_PROPERTY_REPORT), eq(fails.getId()), any());
 
         AdminBulkActionResponse result = adminPropertyReportService.bulkReview(
-                reviewerId, java.util.List.of(succeeds.getId(), fails.getId()), PropertyReportStatus.RESOLVED, null);
+                reviewerId, "reviewer@example.com", java.util.List.of(succeeds.getId(), fails.getId()), PropertyReportStatus.RESOLVED, null);
 
         assertThat(result.succeededIds()).containsExactly(succeeds.getId());
         assertThat(result.failures()).hasSize(1);
