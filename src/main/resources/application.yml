@@ -1,6 +1,17 @@
 spring:
   application:
     name: algogyeyak
+  jpa:
+    properties:
+      hibernate:
+        # 체크리스트 상세 조회 시 문항(ChecklistItem)마다 개별로 나가던 template/template.images
+        # LAZY 연관 로딩을 IN 절 배치 쿼리로 묶는다(64쿼리→7쿼리, 실측 확인). 페이지 크기(기본 20)를
+        # 한 배치로 충분히 덮도록 100으로 잡음. 매물 목록/체크리스트 목록의 PropertyAddress N+1은
+        # 이걸로 안 잡힌다 - mappedBy(비소유) 쪽 @OneToOne은 Hibernate가 프록시 자체를 못 만들어
+        # 배치 대상이 없기 때문(실측으로 확인, IN 절로 안 묶이고 매물마다 개별 SELECT가 그대로 나감).
+        # 그쪽은 PropertyRepository.search()/ChecklistRepository.findOverviewByUserId()의
+        # LEFT JOIN FETCH p.address로 별도 해결함.
+        default_batch_fetch_size: 100
   servlet:
     multipart:
       # contract-analysis /inputs, /ocr가 자체적으로 10MB까지 허용하므로, Spring의 기본값(1MB)에

@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -73,7 +74,10 @@ public class Property {
     @Column(nullable = false, length = 20)
     private PropertyStatus status;
 
-    @OneToOne(mappedBy = "property", cascade = CascadeType.ALL, orphanRemoval = true)
+    // mappedBy(비소유) 쪽 @OneToOne은 fetch 타입과 무관하게 조인으로 한 번에 못 가져오고 매물마다
+    // 별도 SELECT가 나가는 게 JPA의 잘 알려진 한계다 - 기본값(EAGER)이면 이 SELECT가 프록시 지연 없이
+    // 즉시 나가 default_batch_fetch_size로 묶을 수 없으므로, LAZY로 명시해야 배치 효과가 적용된다.
+    @OneToOne(mappedBy = "property", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private PropertyAddress address;
 
     @OneToMany(mappedBy = "property", cascade = CascadeType.ALL, orphanRemoval = true)

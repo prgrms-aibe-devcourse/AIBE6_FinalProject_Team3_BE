@@ -117,7 +117,9 @@ class PropertyControllerTest {
     }
 
     @Test
-    void 이름이_없으면_400을_반환한다() throws Exception {
+    void 이름이_없어도_201을_반환한다() throws Exception {
+        // title은 선택 입력이다(#222) - 비어 있으면 PropertyService가 매물유형으로 대체해 저장하므로
+        // 컨트롤러 레벨 검증에서 막히면 안 된다.
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "",
                 "서울특별시 강남구 테헤란로 123",
@@ -131,12 +133,29 @@ class PropertyControllerTest {
                 null
         );
 
+        PropertyRegisterResponse response = new PropertyRegisterResponse(
+                101L,
+                "오피스텔",
+                "ACTIVE",
+                new PropertyRegisterResponse.AddressResponse(
+                        "서울특별시 강남구 테헤란로 123",
+                        "서울특별시 강남구 역삼동 123-45",
+                        37.4995539438207,
+                        127.031393491745
+                ),
+                MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
+                null
+        );
+
+        when(propertyService.register(anyLong(), any(PropertyRegisterRequest.class))).thenReturn(response);
+
         mockMvc.perform(post("/properties")
                         .with(asUser(USER_ID))
                         .with(csrf())
                         .contentType("application/json")
                         .content(OBJECT_MAPPER.writeValueAsString(request)))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.title").value("오피스텔"));
     }
 
     @Test

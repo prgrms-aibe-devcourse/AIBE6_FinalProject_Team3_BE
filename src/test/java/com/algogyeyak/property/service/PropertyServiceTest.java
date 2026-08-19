@@ -172,6 +172,35 @@ class PropertyServiceTest {
     }
 
     @Test
+    void 이름을_입력하지_않으면_매물유형으로_대체된다() {
+        // 이름 없는 건물도 있어 title은 선택 입력이다(#222) - 비어 있으면 매물유형의 한글 라벨로
+        // 대체해서 저장한다.
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "",
+                "서울특별시 강남구 테헤란로 123",
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                null,
+                null
+        );
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
+        )).thenReturn(false);
+        when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        PropertyRegisterResponse response = propertyService.register(USER_ID, request);
+
+        assertThat(response.title()).isEqualTo("오피스텔");
+    }
+
+    @Test
     void 주소_확인에_실패하면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
@@ -856,6 +885,30 @@ class PropertyServiceTest {
         // risk-analysis가 위험 신호·전세가율을 재계산할 수 있도록 이벤트를 발행한다 - property는
         // risk-analysis를 직접 참조하지 않고 이벤트로만 알린다(도메인 결합 방지).
         verify(eventPublisher).publishEvent(new PropertyUpdatedEvent(1L));
+    }
+
+    @Test
+    void 수정_시_이름을_비우면_매물유형으로_대체된다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.DETACHED_HOUSE)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description("역세권 오피스텔")
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        PropertyUpdateRequest request = new PropertyUpdateRequest("", 35_000_000L, null, 25.0, null, "수정된 설명", null);
+
+        PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
+
+        assertThat(response.title()).isEqualTo("단독/다가구");
     }
 
     @Test

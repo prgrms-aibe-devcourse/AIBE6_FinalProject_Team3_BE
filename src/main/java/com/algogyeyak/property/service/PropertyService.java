@@ -81,7 +81,7 @@ public class PropertyService {
 
         Property property = Property.builder()
                 .userId(userId)
-                .title(request.title())
+                .title(resolveTitle(request.title(), request.propertyType()))
                 .propertyType(request.propertyType())
                 .transactionType(request.transactionType())
                 .deposit(request.deposit())
@@ -264,7 +264,7 @@ public class PropertyService {
         validatePriceCombination(property.getTransactionType(), request.deposit(), request.monthlyRent());
         validateImages(request.images());
 
-        property.updateTitle(request.title());
+        property.updateTitle(resolveTitle(request.title(), property.getPropertyType()));
         property.updatePriceInfo(request.deposit(), request.monthlyRent());
         property.updateArea(request.area());
         property.updateMaintenanceFee(request.maintenanceFee());
@@ -323,6 +323,13 @@ public class PropertyService {
         }
 
         property.delete();
+    }
+
+    // title은 선택 입력이다(#222) - 이름 없는 건물도 있어서다. 비어 있으면 매물유형의 한글 라벨
+    // (예: "오피스텔")로 대체해 저장한다 - title 컬럼 자체는 여전히 NOT NULL로 두고 항상 이 메서드를
+    // 거쳐 값을 채우는 방식이라, 목록/상세 응답 등 title을 읽는 다른 코드는 null을 신경 쓸 필요가 없다.
+    private String resolveTitle(String title, PropertyType propertyType) {
+        return (title == null || title.isBlank()) ? propertyType.displayName() : title;
     }
 
     private void validatePriceCombination(TransactionType transactionType, Long deposit, Long monthlyRent) {
