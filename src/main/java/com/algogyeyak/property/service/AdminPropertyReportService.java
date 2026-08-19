@@ -1,5 +1,6 @@
 package com.algogyeyak.property.service;
 
+import com.algogyeyak.admin.dto.AdminBulkActionResponse;
 import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.global.error.ErrorCode;
@@ -16,24 +17,29 @@ import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * PropertyReport(사용자 자가 신고)와 Property/User는 JPA 연관관계가 아니라 순수 FK 컬럼으로만
  * 연결되어 있다(PropertyReport 엔티티 주석 참고 - risk-analysis 도메인과 의도적으로 분리된 설계).
  * 그래서 목록/상세 조회 시 이 서비스가 직접 배치 조회해 응답에 필요한 정보를 합성한다.
  */
+@Slf4j
 @Service
-@RequiredArgsConstructor
 public class AdminPropertyReportService {
 
     private static final Set<String> ALLOWED_SORT_PROPERTIES = Set.of("createdAt");
@@ -42,6 +48,25 @@ public class AdminPropertyReportService {
     private final PropertyRepository propertyRepository;
     private final UserRepository userRepository;
     private final AdminAuditLogger adminAuditLogger;
+    // bulkReview()가 항목별로 review()를 REQUIRES_NEW로 감싸는 데 쓴다 - AdminUserService의
+    // requiresNewTransactionTemplate과 동일한 이유(self-invocation이 @Transactional 프록시를
+    // 우회해, 항목 처리 도중 예외(특히 adminAuditLogger.log() 이후)가 나면 이미 실행된 변경이
+    // 캐치돼 응답엔 실패로 남으면서도 실제로는 커밋되는 모순이 생긴다).
+    private final TransactionTemplate requiresNewTransactionTemplate;
+
+    public AdminPropertyReportService(
+            PropertyReportRepository propertyReportRepository,
+            PropertyRepository propertyRepository,
+            UserRepository userRepository,
+            AdminAuditLogger adminAuditLogger,
+            PlatformTransactionManager transactionManager) {
+        this.propertyReportRepository = propertyReportRepository;
+        this.propertyRepository = propertyRepository;
+        this.userRepository = userRepository;
+        this.adminAuditLogger = adminAuditLogger;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     @Transactional(readOnly = true)
     public PageResponse<AdminPropertyReportListItemResponse> list(Pageable pageable, PropertyReportSearchCondition condition) {
@@ -97,6 +122,46 @@ public class AdminPropertyReportService {
                 "beforeStatus", previousStatus, "afterStatus", status,
                 "memo", memo == null ? "" : memo));
         return toDetailResponse(report);
+    }
+
+    /**
+     * 여러 신고를 한 번에 조치완료/반려 처리한다. 대상 하나하나가 이미 review()의 가드(본인 신고
+     * 셀프 검토 금지, RECEIVED 상태만 처리 가능)를 그대로 적용받으므로, 이건 원자적
+     * 전체성공-전체실패가 아니라 항목별 성공/실패가 갈리는 배치 처리다 - 하나가 가드에 막혀도
+     * 나머지는 계속 처리하고, 실패한 항목과 사유를 그대로 응답에 담아 돌려준다.
+     *
+     * <p>review() 호출은 requiresNewTransactionTemplate으로 항목마다 독립된 REQUIRES_NEW
+     * 트랜잭션 안에서 실행한다 - self-invocation(this.review(...))은 @Transactional 프록시를
+     * 우회하므로, 그냥 호출하면 이 메서드의 트랜잭션 하나를 모든 항목이 공유하게 된다. 그 상태에서
+     * 항목 처리 도중(특히 adminAuditLogger.log() 호출 이후) 예외가 나면, 그 항목의 상태 전이는
+     * 이미 실행된 채로 예외가 catch에서 흡수돼 밖으로 전파되지 않으므로 결국 정상 커밋되는데,
+     * 응답에는 그 항목이 실패로 기록되는 모순이 생긴다. 항목마다 진짜 새 물리 트랜잭션을 열면 그
+     * 항목의 변경(+감사 로그)만 원자적으로 롤백되고, 이미 커밋된 앞 항목들은 그대로 남는다.
+     *
+     * <p>입력에 같은 id가 중복되면(프론트는 Set이라 안 만들지만 API 호출로는 가능) 첫 시도에서
+     * RESOLVED/REJECTED로 확정된 신고가 두 번째 시도에서 "이미 검토 완료"로 다시 걸려 같은 id가
+     * 성공/실패 양쪽에 나타날 수 있다 - 순서를 보존한 채 중복만 제거해 이 문제를 없앤다.
+     */
+    public AdminBulkActionResponse bulkReview(Long reviewerId, List<Long> reportIds, PropertyReportStatus status, String memo) {
+        List<Long> succeededIds = new ArrayList<>();
+        List<AdminBulkActionResponse.Failure> failures = new ArrayList<>();
+        for (Long reportId : new LinkedHashSet<>(reportIds)) {
+            try {
+                requiresNewTransactionTemplate.executeWithoutResult(status_ -> review(reviewerId, reportId, status, memo));
+                succeededIds.add(reportId);
+            } catch (BusinessException e) {
+                failures.add(new AdminBulkActionResponse.Failure(reportId, e.getMessage()));
+            } catch (RuntimeException e) {
+                // BusinessException이 아닌 예외(예: DB 접근 오류, 감사 로그 실패)를 여기서 잡지
+                // 않으면 항목별 성공/실패가 갈리는 배치라는 이 메서드의 설계 의도(위 클래스 주석
+                // 참고)를 예상 못한 예외 타입 때문에 잃게 되므로, 여기서 흡수하고 일반화된
+                // 메시지로 실패 처리한다 - 위 REQUIRES_NEW 덕분에 이 항목의 변경은 이미 롤백된
+                // 뒤이므로 안전하다.
+                log.warn("일괄 신고 검토 중 예상치 못한 오류 (reportId={})", reportId, e);
+                failures.add(new AdminBulkActionResponse.Failure(reportId, "처리 중 오류가 발생했습니다."));
+            }
+        }
+        return new AdminBulkActionResponse(succeededIds, failures);
     }
 
     private AdminPropertyReportDetailResponse toDetailResponse(PropertyReport report) {

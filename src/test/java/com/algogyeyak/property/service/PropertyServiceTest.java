@@ -34,12 +34,13 @@ import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import com.algogyeyak.property.event.PropertyUpdatedEvent;
+import com.algogyeyak.property.repository.PropertyImageRepository;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
-import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
-import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
-import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
+import com.algogyeyak.riskanalysis.client.PropertyRiskSummaryProvider;
+import com.algogyeyak.riskanalysis.dto.PropertyRiskSummary;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,13 +77,10 @@ class PropertyServiceTest {
     private PropertyReportRepository propertyReportRepository;
 
     @Mock
-    private PropertyRiskRepository propertyRiskRepository;
+    private PropertyImageRepository propertyImageRepository;
 
     @Mock
-    private PropertyRiskCheckRepository propertyRiskCheckRepository;
-
-    @Mock
-    private DepositSafetyCheckRepository depositSafetyCheckRepository;
+    private PropertyRiskSummaryProvider propertyRiskSummaryProvider;
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
@@ -96,8 +94,7 @@ class PropertyServiceTest {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
                 checklistRepository, checklistItemRepository, propertyReportRepository,
-                propertyRiskRepository, propertyRiskCheckRepository, depositSafetyCheckRepository,
-                eventPublisher
+                propertyImageRepository, propertyRiskSummaryProvider, eventPublisher
         );
     }
 
@@ -172,6 +169,35 @@ class PropertyServiceTest {
         org.mockito.ArgumentCaptor<Property> captor = org.mockito.ArgumentCaptor.forClass(Property.class);
         verify(propertyRepository).save(captor.capture());
         assertThat(captor.getValue().getMaintenanceFee()).isEqualTo(150_000L);
+    }
+
+    @Test
+    void 이름을_입력하지_않으면_매물유형으로_대체된다() {
+        // 이름 없는 건물도 있어 title은 선택 입력이다(#222) - 비어 있으면 매물유형의 한글 라벨로
+        // 대체해서 저장한다.
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "",
+                "서울특별시 강남구 테헤란로 123",
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                null,
+                null
+        );
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
+        )).thenReturn(false);
+        when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        PropertyRegisterResponse response = propertyService.register(USER_ID, request);
+
+        assertThat(response.title()).isEqualTo("오피스텔");
     }
 
     @Test
@@ -451,7 +477,7 @@ class PropertyServiceTest {
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
         MarketComparisonResponse comparison = MarketComparisonResponse.available(
-                28_000_000L, 0.07, 5, "2026-06-20", 300
+                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6
         );
         when(marketComparisonService.compare(property)).thenReturn(comparison);
 
@@ -533,18 +559,11 @@ class PropertyServiceTest {
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(checkedWithRisks, checkedClean, neverChecked), pageable, 3));
 
-        // checkedWithRisks/checkedClean은 4종 신호 판정이 이미 돌았다는 것만 표시하면 되므로 신호 하나씩만 둔다.
-        when(propertyRiskCheckRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
-                com.algogyeyak.riskanalysis.entity.PropertyRiskCheck.success(
-                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "v1.0"),
-                com.algogyeyak.riskanalysis.entity.PropertyRiskCheck.success(
-                        checkedClean, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "v1.0")
-        ));
-        when(propertyRiskRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
-                com.algogyeyak.riskanalysis.entity.PropertyRisk.of(
-                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.PRICE_ANOMALY, "시세 대비 높은 가격"),
-                com.algogyeyak.riskanalysis.entity.PropertyRisk.of(
-                        checkedWithRisks, com.algogyeyak.riskanalysis.enums.RiskSignalType.DUPLICATE_LISTING, "유사 주소 중복")
+        // checkedWithRisks/checkedClean은 4종 신호 판정이 이미 돌았다는 것만 표시하면 되므로, 이제는
+        // PropertyRiskSummaryProvider가 돌려주는 요약 맵으로 표현한다(neverChecked는 맵에 아예 없음).
+        when(propertyRiskSummaryProvider.getSummariesByUserId(USER_ID)).thenReturn(Map.of(
+                1L, new PropertyRiskSummary(2, "시세 대비 높은 가격, 유사 주소 중복", null),
+                2L, new PropertyRiskSummary(0, null, null)
         ));
 
         PageResponse<PropertyListResponse> result =
@@ -578,13 +597,10 @@ class PropertyServiceTest {
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(calculated, unavailable), pageable, 2));
 
-        when(depositSafetyCheckRepository.findAllByProperty_UserId(USER_ID)).thenReturn(List.of(
-                com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.calculated(
-                        calculated, new java.math.BigDecimal("85.00"), null, null,
-                        java.time.LocalDate.of(2026, 6, 20), "설명", "v1.0"),
-                com.algogyeyak.riskanalysis.entity.DepositSafetyCheck.unavailable(
-                        unavailable, null, null,
-                        com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason.TRANSACTION_TYPE_UNSUPPORTED, "v1.0")
+        // unavailable(판정불가)은 요약 맵에 아예 안 나타난다(PropertyRiskSummaryProviderImpl이
+        // CALCULATED 상태인 것만 jeonseRatio 키를 채움).
+        when(propertyRiskSummaryProvider.getSummariesByUserId(USER_ID)).thenReturn(Map.of(
+                1L, new PropertyRiskSummary(null, null, 85)
         ));
 
         PageResponse<PropertyListResponse> result =
@@ -593,6 +609,50 @@ class PropertyServiceTest {
         assertThat(result.content()).hasSize(2);
         assertThat(result.content().get(0).jeonseRatio()).isEqualTo(85);
         assertThat(result.content().get(1).jeonseRatio()).isNull();
+    }
+
+    @Test
+    void 매물_목록조회_응답에_대표_이미지가_가장_먼저_업로드된_이미지로_채워진다() {
+        Property withImages = Property.builder()
+                .userId(USER_ID).title("이미지 있는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(30_000_000L).area(23.5).build();
+        ReflectionTestUtils.setField(withImages, "id", 1L);
+
+        Property withoutImages = Property.builder()
+                .userId(USER_ID).title("이미지 없는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(20_000_000L).area(18.0).build();
+        ReflectionTestUtils.setField(withoutImages, "id", 2L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(withImages, withoutImages), pageable, 2));
+
+        // id 오름차순(=업로드 순서)으로 정렬된 상태로 Repository가 내려준다고 가정하고, 매물당
+        // 가장 먼저(가장 작은 id) 업로드된 이미지만 대표 이미지로 채택되는지 확인한다.
+        com.algogyeyak.property.entity.PropertyImage firstImage =
+                com.algogyeyak.property.entity.PropertyImage.builder()
+                        .imageUrl("https://cdn.algogyeyak.com/img/first.jpg").build();
+        ReflectionTestUtils.setField(firstImage, "id", 10L);
+        withImages.addImage(firstImage);
+
+        com.algogyeyak.property.entity.PropertyImage secondImage =
+                com.algogyeyak.property.entity.PropertyImage.builder()
+                        .imageUrl("https://cdn.algogyeyak.com/img/second.jpg").build();
+        ReflectionTestUtils.setField(secondImage, "id", 11L);
+        withImages.addImage(secondImage);
+
+        when(propertyImageRepository.findByProperty_IdInOrderByProperty_IdAscIdAsc(List.of(1L, 2L)))
+                .thenReturn(List.of(firstImage, secondImage));
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content().get(0).representativeImageUrl())
+                .isEqualTo("https://cdn.algogyeyak.com/img/first.jpg");
+        assertThat(result.content().get(1).representativeImageUrl()).isNull();
     }
 
     @Test
@@ -825,6 +885,30 @@ class PropertyServiceTest {
         // risk-analysis가 위험 신호·전세가율을 재계산할 수 있도록 이벤트를 발행한다 - property는
         // risk-analysis를 직접 참조하지 않고 이벤트로만 알린다(도메인 결합 방지).
         verify(eventPublisher).publishEvent(new PropertyUpdatedEvent(1L));
+    }
+
+    @Test
+    void 수정_시_이름을_비우면_매물유형으로_대체된다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.DETACHED_HOUSE)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description("역세권 오피스텔")
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        PropertyUpdateRequest request = new PropertyUpdateRequest("", 35_000_000L, null, 25.0, null, "수정된 설명", null);
+
+        PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
+
+        assertThat(response.title()).isEqualTo("단독/다가구");
     }
 
     @Test

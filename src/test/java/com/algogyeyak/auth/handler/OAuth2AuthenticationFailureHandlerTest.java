@@ -26,15 +26,17 @@ class OAuth2AuthenticationFailureHandlerTest {
         ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login");
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
-        // CustomOAuth2UserService가 만드는 구체적인 코드(account_blocked/email_conflict 등)를 그대로
-        // 전달해야, 프론트가 "정지된 계정"과 "알 수 없는 오류"를 구분해 보여줄 수 있다 - 예전엔 이
-        // 코드와 무관하게 항상 oauth_login_failed로 덮어썼다.
-        AuthenticationException exception = new OAuth2AuthenticationException(new OAuth2Error("account_blocked"));
+        // 이 핸들러는 CustomOAuth2UserService가 만드는 코드가 무엇이든(email_conflict/
+        // social_account_conflict 등, 아래 개별 테스트 참고) 그대로 전달해야 프론트가 사유별로
+        // 다른 안내를 보여줄 수 있다 - 예전엔 코드와 무관하게 항상 oauth_login_failed로 덮어썼다.
+        // 여기서는 그 메커니즘 자체(임의의 코드를 그대로 통과시키는지)만 확인하므로 실제 코드베이스가
+        // 지금 쓰는 값과 무관한 예시 문자열을 쓴다 - 실제 존재하는 코드는 아래 개별 테스트가 각각 검증한다.
+        AuthenticationException exception = new OAuth2AuthenticationException(new OAuth2Error("some_domain_specific_code"));
 
         handler.onAuthenticationFailure(request, response, exception);
 
         verify(authorizationRequestRepository).removeAuthorizationRequest(request, response);
-        assertEquals("https://example.com/login?error=account_blocked", response.getRedirectedUrl());
+        assertEquals("https://example.com/login?error=some_domain_specific_code", response.getRedirectedUrl());
     }
 
     @Test
@@ -48,21 +50,6 @@ class OAuth2AuthenticationFailureHandlerTest {
 
         verify(authorizationRequestRepository).removeAuthorizationRequest(request, response);
         assertEquals("https://example.com/login?error=oauth_login_failed", response.getRedirectedUrl());
-    }
-
-    @Test
-    void forwardsAccountBlockedErrorCodeInsteadOfGenericOne() throws Exception {
-        // CustomOAuth2UserService.rejectIfBlocked()가 만드는 account_blocked를 이 핸들러가 전부
-        // oauth_login_failed로 뭉개면, frontend(login/page.tsx)가 이미 준비해둔 "정지된 계정입니다"
-        // 안내가 화면까지 전혀 도달하지 못한다.
-        ReflectionTestUtils.setField(handler, "authorizedRedirectUri", "https://example.com/login");
-        MockHttpServletRequest request = new MockHttpServletRequest();
-        MockHttpServletResponse response = new MockHttpServletResponse();
-        AuthenticationException exception = new OAuth2AuthenticationException(new OAuth2Error("account_blocked"));
-
-        handler.onAuthenticationFailure(request, response, exception);
-
-        assertEquals("https://example.com/login?error=account_blocked", response.getRedirectedUrl());
     }
 
     @Test

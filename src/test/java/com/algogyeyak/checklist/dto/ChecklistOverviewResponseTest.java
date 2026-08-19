@@ -41,9 +41,12 @@ class ChecklistOverviewResponseTest {
         LocalDateTime checklistUpdatedAt = LocalDateTime.of(2026, 7, 30, 10, 0);
         ReflectionTestUtils.setField(checklist, "updatedAt", checklistUpdatedAt);
 
-        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, checklist);
+        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, checklist, 75, 1);
 
         assertThat(response.lastCheckedAt()).isEqualTo(checklistUpdatedAt);
+        assertThat(response.title()).isEqualTo("테스트 매물");
+        assertThat(response.progressPercent()).isEqualTo(75);
+        assertThat(response.cautionCount()).isEqualTo(1);
     }
 
     @Test
@@ -52,10 +55,21 @@ class ChecklistOverviewResponseTest {
         LocalDateTime propertyUpdatedAt = LocalDateTime.of(2026, 6, 1, 12, 0);
         Property property = property(propertyUpdatedAt);
 
-        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, null);
+        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, null, null, null);
 
         assertThat(response.checklistId()).isNull();
         assertThat(response.status()).isEqualTo(ChecklistStatus.NOT_STARTED);
         assertThat(response.lastCheckedAt()).isEqualTo(propertyUpdatedAt);
+    }
+
+    @Test
+    @DisplayName("체크리스트를 시작 안 했으면 progressPercent/cautionCount는 null이다")
+    void progressAndCautionAreNullWhenNotStarted() {
+        Property property = property(LocalDateTime.of(2026, 6, 1, 12, 0));
+
+        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, null, null, null);
+
+        assertThat(response.progressPercent()).isNull();
+        assertThat(response.cautionCount()).isNull();
     }
 }

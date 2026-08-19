@@ -8,17 +8,17 @@
 
 **범위**: `com.algogyeyak.checklist.*`(체크리스트 생성/조회/항목 확인/결과 확인)만 다룹니다.
 
-## 문항 구성 (템플릿 버전 2 기준)
+## 문항 구성 (템플릿 버전 3 기준)
 
-템플릿 버전 2 기준, **매물유형별로 실제 적용되는 문항 수는 24개**로 요구사항의 "20~24개" 범위 상한에 맞습니다(원본 템플릿 목록 자체는 매물유형별 변형 문항이 함께 들어있어 25행이지만, 체크리스트 하나에는 유형에 맞는 변형 1개만 적용됩니다).
+**(2026-08-14 갱신)** 실사용 피드백(더 구체적인 확인 항목 요청)을 반영해 버전 2(24개)에서 버전 3으로 6개 문항이 새로 추가됐습니다. 매물유형별 실제 적용 문항 수는 **오피스텔 29개, 연립다세대·단독다가구 30개**로, 기존 요구사항의 "20~24개" 상한을 넘어섰습니다 — 신규 항목들을 기존 항목에 병합(예: 콘센트+누전+차단기를 하나로)하는 방안도 검토했으나, 병합하면 "어느 부분이 문제인지" 구분이 안 돼 항목 수 증가를 감수하고 명확성을 우선하기로 결정했습니다. 이에 따라 요구사항 명세서의 문항 수 상한 자체를 20~30개로 갱신하는 것으로 판단합니다(`ChecklistTemplateSeedDataTest` 참고).
 
-| 카테고리 | 요구사항 개수 | 실제 개수 |
+| 카테고리 | 버전 2 개수 | 버전 3 개수 |
 |---|---|---|
-| 실내 상태 | 4~5개 | 5개 ✅ |
-| 소음·환경 | 2~3개 | 3개 ✅ |
-| 보안·안전 | 3~4개 | 4개 ✅ (잠금장치 문항은 매물유형별 변형 1개만 적용) |
-| 서류·행정 | 9개 | 9개 ✅ ("관리비 확인" 신규 추가분 노션 명세서 반영 완료) |
-| 주변 환경 | 2~3개 | 3개 ✅ |
+| 실내 상태 | 5개 | **10개** (단창/이중창·누전·차단기·보일러종류·냉난방방식 5개 신규) |
+| 소음·환경 | 3개 | 3개 (문항 수는 그대로, 외부소음 항목 guideText만 보강) |
+| 보안·안전 | 4개(매물유형별 변형 1개만 적용) | 4~5개(방범창은 연립다세대·단독다가구에만 신규 적용, 오피스텔은 그대로 4개) |
+| 서류·행정 | 9개 | 9개 |
+| 주변 환경 | 3개 | 3개 |
 
 **보안·안전 잠금장치 문항 (매물유형별 분기)**
 - 오피스텔·연립다세대: "공동현관과 현관문 잠금장치가 모두 정상 작동하나요?" (둘 다 있는 구조라 한 문항으로 같이 확인)
@@ -82,7 +82,7 @@
 |---|---|---|
 | 매물유형·거래유형에 맞는 항목으로 생성 | O | ✅ 매물유형 필터링 반영 완료(거래유형 분기는 아직 없음) |
 | 동일 조건 매물엔 동일 버전 템플릿 적용 | O | ✅ |
-| 템플릿 변경 이력을 버전으로 관리 | O | ✅ 이번 작업으로 버전 1→2 첫 실전 반영 완료(내용은 스냅샷 복사되므로 기존 체크리스트엔 영향 없음). 다만 버전 이력 조회 등 정식 체계는 여전히 없고 Flyway 도입 전 임시 방식(seeder) 그대로 |
+| 템플릿 변경 이력을 버전으로 관리 | O | ✅ 버전 1→2에 이어 **(2026-08-14)** 2→3도 반영(내용은 스냅샷 복사되므로 기존 체크리스트엔 영향 없음). 다만 버전 이력 조회 등 정식 체계는 여전히 없고 Flyway 도입 전 임시 방식(seeder) 그대로 |
 | 하나의 유저-매물 조합엔 하나의 활성 체크리스트만 | O | ✅ DB 유니크 제약으로 보장 |
 | 체크리스트 항목은 반드시 체크리스트에 속함 | O | ✅ |
 | 삭제된 매물의 체크리스트는 수정 불가 | O | ✅ 조회·항목수정 시점 모두에서 검사하도록 수정 완료 |
@@ -98,11 +98,31 @@
 
 ## 요구사항에 없던 추가 구현
 
-- **`GET /checklists`(내 체크리스트 목록)** — 본인 매물 전체와 매물별 체크리스트 진행 상태(시작 전 포함)를 한 번에 보여주기 위해 추가됨. **(2026-07-30 갱신)** 응답에 `lastCheckedAt`(최종 점검일) 필드 추가 — 체크리스트가 있으면 `checklist.updatedAt`, 시작 전이면 `property.updatedAt`으로 대체. 목록 정렬 기준도 매물 등록일(`createdAt`) 최신순에서 `lastCheckedAt` 최신순으로 변경(동률이면 안정 정렬로 등록일 최신순 유지) — FE가 "최종 점검일" 표시를 요청하면서 함께 결정됨. **(2026-08-06 페이지네이션 추가, breaking change)** 매물 목록(`GET /properties`)과 동일한 컨벤션으로 `page`/`size` 쿼리 파라미터 + `PageResponse` 봉투 응답으로 전환 — 응답이 배열(`data: [...]`)에서 객체(`data: { content, page, size, totalElements, totalPages, hasNext }`)로 바뀜. 원래 "타겟 유저가 매물을 많이 등록할 일이 적어 당장 불필요"로 보류했던 항목이었으나, 다른 목록 API(`GET /properties`, 관리자 유저/신고 목록)들이 이미 전부 DB 레벨 페이지네이션을 쓰고 있어 일관성 차원에서 도입 결정됨. 정렬(`lastCheckedAt` 내림차순)은 DB 쿼리(`ChecklistRepository.findOverviewByUserId()` — Property LEFT JOIN Checklist, `COALESCE(checklist.updatedAt, property.updatedAt)` 기준)로 이동해 처리하며, 사용자가 정렬 기준을 고를 수 없어 클라이언트가 보낸 `sort` 파라미터는 무시함
+- **`GET /checklists`(내 체크리스트 목록)** — 본인 매물 전체와 매물별 체크리스트 진행 상태(시작 전 포함)를 한 번에 보여주기 위해 추가됨.
+
+  - **(2026-07-30)** 응답에 `lastCheckedAt`(최종 점검일) 필드 추가 — 체크리스트가 있으면 `checklist.updatedAt`, 시작 전이면 `property.updatedAt`으로 대체. 목록 정렬 기준도 매물 등록일(`createdAt`) 최신순에서 `lastCheckedAt` 최신순으로 변경(동률이면 안정 정렬로 등록일 최신순 유지) — FE가 "최종 점검일" 표시를 요청하면서 함께 결정됨.
+  - **(2026-08-06, breaking change)** 페이지네이션 추가 — 매물 목록(`GET /properties`)과 동일한 컨벤션으로 `page`/`size` 쿼리 파라미터 + `PageResponse` 봉투 응답으로 전환. 응답이 배열(`data: [...]`)에서 객체(`data: { content, page, size, totalElements, totalPages, hasNext }`)로 바뀜. 원래 "타겟 유저가 매물을 많이 등록할 일이 적어 당장 불필요"로 보류했던 항목이었으나, 다른 목록 API(`GET /properties`, 관리자 유저/신고 목록)들이 이미 전부 DB 레벨 페이지네이션을 쓰고 있어 일관성 차원에서 도입 결정됨. 정렬(`lastCheckedAt` 내림차순)은 DB 쿼리(`ChecklistRepository.findOverviewByUserId()` — Property LEFT JOIN Checklist, `COALESCE(checklist.updatedAt, property.updatedAt)` 기준)로 이동해 처리하며, 사용자가 정렬 기준을 고를 수 없어 클라이언트가 보낸 `sort` 파라미터는 무시함.
+  - **(2026-08-13)** 응답에 `title`(매물 제목) 필드 추가 — 주소만으로는 목록에서 매물을 구분하기 어렵다는 이유로, 이미 `Property` 엔티티에 있던 값을 그대로 노출함(리포지토리 쿼리가 `Property` 엔티티 전체를 select하고 있어 쿼리 변경 없이 반영됨).
+  - **(2026-08-18)** 응답에 `progressPercent`(진행률 %)/`cautionCount`(주의 항목 수) 필드 추가 — 매물 목록(`GET /properties`)엔 이미 있던 진행률 표시가 정작 체크리스트 목록에는 없어 비일관적이라는 피드백으로 추가됨. `findOverviewByUserId()`가 `Checklist`만 가져오고 `items`는 LAZY라, 이걸 그대로 `Checklist.computeResult()`에 넘기면 체크리스트마다 지연 로딩 쿼리가 하나씩 더 나가는 N+1이 생긴다 — 그래서 `PropertyService`가 매물 목록 진행률에 이미 쓰던 집계 쿼리(`ChecklistItemRepository.findProgressByUserId()`, property.id로 GROUP BY)를 그대로 재사용하되, `issueCount`(`ChecklistItem.hasIssue()`와 동일한 조건을 `CASE WHEN`으로 재현) 집계를 하나 추가해 확장함. 새 쿼리를 따로 만들지 않고 기존 걸 확장한 덕분에, 페이지 크기와 무관하게 항상 쿼리 2개(오버뷰 페이지 쿼리 + 진행률 집계 쿼리)로 끝난다. 둘 다 체크리스트가 없는(시작 전) 매물은 `null`로 남긴다(0%/0건과 구분).
 - **`userNote`(미흡 메모)** — CHECK 타입 항목에 "완료했지만 미흡함"을 메모와 함께 남기는 기능. `hasIssue() = issueFound || userNote != null`
 - **관리비 확인 항목** — 서류·행정 카테고리에 신규 추가("관리비에 전기세·수도세 등이 포함되어 있는지 확인했나요?"). 오피스텔 등에서 관리비가 실제 임대료보다 커질 수 있다는 실용적 이유로 추가(노션 요구사항 명세서 반영 완료)
 - **`helperText`(쉬운 설명)** **(2026-07-30 추가)** — `guideText`(짧은 실무 안내)와 별개로, 부동산 지식이 없는 사용자도 이해할 수 있게 초등학생 수준으로 풀어쓴 설명. `ChecklistItemTemplate`/`ChecklistItem`에 컬럼 추가, 템플릿→문항 스냅샷 복사 시 함께 복사됨. 서류·행정 REQUIRED 6개 문항(등기부등본/신탁등기/명의불일치/소유권취득일/확정일자/전입세대열람)에 우선 반영, FE가 이미 콘텐츠를 준비해둔 상태에서 백엔드 필드가 뒤따라 추가됨. **(2026-07-31 갱신)** 값 안에 마크다운 스타일 강조(`**강조할 문구**`)와 문단 구분(`\n\n`)이 포함돼 있음 — 순수 텍스트가 아니라 경량 마크업이 섞인 문자열이므로, FE는 그대로 `<p>`에 렌더링하면 안 되고 ① `**...**` 파싱 후 굵게 표시, ② `white-space: pre-line`(또는 동등한 처리)으로 `\n\n`을 문단 줄바꿈으로 반영해야 의도대로 보임(현재 `ChecklistClient.tsx`는 아직 미반영 상태)
 - **`disclaimer`(면책 문구)** **(2026-07-30 추가)** — 결과 조회(`GET /checklists/{checklistId}/result`) 응답에 "이 결과는 매물의 안전을 보장하지 않습니다."라는 고정 문구를 `disclaimer` 필드로 포함. 체크리스트 결과가 등급·점수가 아니라는 점을 API 응답 차원에서도 명시하기 위해 추가
+
+## (2026-08-14) 실사용 피드백 반영 — 신규 문항 6개, 다지선다 타입, 예시 이미지
+
+일주일간 수집된 실사용 피드백("확인 항목을 더 구체적으로", "예시 사진 추가", "보일러 종류 안내", "보안·단열 항목 보완")을 검토해 아래를 반영했습니다.
+
+- **신규 문항 6개** — 단창/이중창 여부(YES_NO), 콘센트·전기 배선 누전 위험(CHECK, guideText로 확인 방법 안내), 차단기함 상태(CHECK), 보일러 종류(MULTIPLE_CHOICE), 냉난방 방식(MULTIPLE_CHOICE), 방범창(CHECK, 연립다세대·단독다가구 전용). 기존 CCTV·화재감지기 항목은 이미 있어 중복 추가하지 않음.
+- **`ChecklistItemType.MULTIPLE_CHOICE` 신규 도입** — 기존 4개 타입(CHECK/YES_NO/DATE/DOCUMENT_REQUEST)이 전부 이진 응답이라 "보일러 종류"처럼 3개 이상 선택지 중 하나를 고르는 문항을 표현할 방법이 없었음. `ChecklistItemTemplate`/`ChecklistItem` 양쪽에 `options`(콤마 구분 문자열, 예: `"가스보일러,기름보일러,전기보일러,지역난방"`) 필드를 추가하고 템플릿→문항 스냅샷 복사 시 함께 복사됨(문항 내용 자체라 guideText/helperText와 동일하게 시점 고정 필요). 단일 선택만 지원(다중 선택 불필요 확인 완료).
+  - ✅ **(2026-08-19 완료)** "미흡" 선택 시 주의 항목(`issueFound`) 자동판정 로직 추가함 — `ChecklistItem.answerMultipleChoice()`가 `markAnswered(rawValue, "미흡".equals(rawValue))`로 판정. CHECK 타입은 "미흡" 표시가 `markInsufficient()`로 별도 처리(메모 필수 아님, `userNote` 세팅)되는데, MULTIPLE_CHOICE는 메모 없이 값만으로 판단 — 문항마다 선택지 이름은 달라도("양호/보통/미흡" 등) "미흡"이라는 값 자체는 항상 같은 의미(주의 필요)로 취급하기로 함(YES_NO의 `answerYesNo()`처럼 문항별 `code` 분기가 필요 없는 이유). 채광/수압/냉난방시설 문항을 CHECK→MULTIPLE_CHOICE로 전환하는 작업(FE 쪽 mock 반영 완료, 관리자 페이지로 템플릿 적용 예정)에 대비해 미리 반영함. 메모(왜 미흡한지 구체적 사유) 기능은 이번 범위에서 제외 — "미흡"이라는 선택 자체가 문항 content와 결합해 최소한의 맥락은 남고, 실제 요구가 나오면 그때 별도로 추가하기로 함(BE 응답 저장 + FE 입력창 둘 다 손대야 해서 스코프가 커짐).
+- **외부 소음 항목 guideText 보강** — "저층이 더 심하다/고층이 더 심하다"로 일반화할 수 없어(저층은 도로·행인 소음, 고층은 바람·실외기 소음으로 종류 자체가 다름), 층수 판정 로직을 새로 만드는 대신 두 케이스를 guideText에 모두 안내하는 방식으로 해결.
+- **예시 이미지 스키마 신규 도입** — `checklist_item_template_images` 테이블(`ChecklistItemTemplateImage`, `template_id` FK)을 신설. `ChecklistItem`에도 원본 템플릿을 가리키는 `template` FK(nullable)를 추가해, 문항 조회 시 `item.getTemplate().getImages()`로 이미지를 가져옴. **guideText/helperText와 달리 스냅샷 복사하지 않고 항상 템플릿을 실시간 참조** — 이미지는 문항 내용처럼 시점 고정이 필요한 콘텐츠가 아니라(현재 AI 생성 이미지를 추후 실제 사진으로 교체할 예정), 관리자가 이미지를 교체하면 이미 만들어진 체크리스트에도 자동 반영되는 편이 낫다고 판단.
+  - 이미지는 S3(`checklist-template-images/` prefix, 폴더 구분 없이 파일명으로만 구분)에 콘솔로 직접 업로드하고, `S3ImagePurpose.CHECKLIST_TEMPLATE`(신규, 프로필/매물 이미지와 동일한 public 정책)를 통해 `S3PresignService.generateDownloadUrl()`로 URL을 생성 — 프로필/매물 이미지가 이미 쓰던 인프라를 그대로 재사용.
+  - 문항 content ↔ 이미지 key 매핑은 `ChecklistTemplateSeeder`에 데이터로 둠(`application.yml` 등 설정 파일이 아니라 코드) — 환경별로 달라지는 설정값이 아니라 `ChecklistTemplateSeedData`의 문항 내용과 같은 성격의 시드 데이터라고 판단.
+  - ~~관리자 페이지에 이미지 관리 API(업로드/삭제)는 아직 없음~~ — ✅ **(2026-08-14 오후 해결)** `AdminChecklistTemplateController`에 이미지 목록조회(`GET`)/추가(`POST`)/삭제(`DELETE`) 3개 엔드포인트를 추가함. 파일 업로드 자체는 아직 지원하지 않고(S3 콘솔에 직접 올린 뒤) URL만 입력받는 방식 — presign/confirm 업로드 흐름은 이번 범위 밖. 신규 이미지는 항상 표시순서 맨 뒤에 추가되고, 순서를 바꾸려면 삭제 후 재추가해야 함(별도 재정렬 API 없음).
+- **`GET /checklists` 응답에 `title`(매물 제목) 필드 추가** — 위 "요구사항에 없던 추가 구현" 절 참고.
+- **(2026-08-14 오후, HOTFIX) 시더가 이미 시딩된 DB엔 신규 문항을 반영 못하던 버그 수정** — `ChecklistTemplateSeeder.run()`이 `checklistItemTemplateRepository.count() > 0`이면 그냥 아무것도 안 하고 끝나는 구조였다. 운영 DB에는 이미 v2 시점의 문항이 시딩돼 있었기 때문에, v3 코드(신규 6개 문항)를 배포해도 시더가 조용히 스킵되어 실제로는 신규 문항이 하나도 반영되지 않았다(코드 배포와 실제 DB 반영이 분리되는 이 시더 방식의 알려진 한계가 실제로 터진 사례). 수정: 테이블이 완전히 비어있으면 기존처럼 전체 시딩, 이미 데이터가 있으면 `content`(문항 텍스트) 기준으로 없는 문항만 추가하고 기존 문항은 v3 설계(카테고리·순번 등)에 맞춰 재동기화(`ChecklistItemTemplate.resyncFromSeed()` 신규 추가 — `update()`와 달리 `version`도 함께 갱신하되 관리자가 수동으로 비활성화했을 수 있는 `active`는 건드리지 않음)하도록 변경. 예시 이미지도 아직 안 붙어있는 문항(신규 문항 + 이미지 기능 생기기 전에 시딩된 기존 문항 둘 다)에만 뒤늦게 붙여, 재배포될 때마다 중복으로 쌓이지 않게 처리. 근본적으로는 Flyway 같은 진짜 마이그레이션 도구가 필요한 상황이라는 점이 다시 확인됨 — 이번엔 당장의 운영 반영이 급해 시더를 보강하는 선에서 처리했고, Flyway 전환은 별도 과제로 남김.
 
 ## 해결 내역 (이전 "확인 필요" 8개 항목)
 
@@ -130,4 +150,27 @@
 
 ## 남은 이슈 / 확인 필요
 
-1. **거래유형별 문항 분기는 여전히 없음** — 이번엔 매물유형 필터만 추가했고, 거래유형(전세/월세)에 따른 분기는 다루지 않음. 24개 문항을 다시 살펴봐도 전세/월세 중 하나에만 해당하는 항목은 없어 지금 당장 필요하진 않다고 판단 — 필요성이 확인되면 동일한 필터 메커니즘(`applicablePropertyTypes`와 유사한 방식)으로 확장 가능
+1. **거래유형별 문항 분기는 여전히 없음** — 이번엔 매물유형 필터만 추가했고, 거래유형(전세/월세)에 따른 분기는 다루지 않음. 문항을 다시 살펴봐도 전세/월세 중 하나에만 해당하는 항목은 없어 지금 당장 필요하진 않다고 판단 — 필요성이 확인되면 동일한 필터 메커니즘(`applicablePropertyTypes`와 유사한 방식)으로 확장 가능
+2. ~~**(2026-08-14 신규) 예시 이미지 관리자 API 없음** — 지금은 `ChecklistTemplateSeeder`에 문항 content ↔ S3 key 매핑을 하드코딩해두고 앱 최초 기동 시 한 번만 반영하는 구조. 이미지를 교체/추가하려면 코드 수정 + 재배포가 필요함.~~ — ✅ **(2026-08-14 오후 해결)** `AdminChecklistTemplateController`에 이미지 목록조회/추가/삭제 API 3개를 추가해, 이제 재배포 없이 이미지 추가/삭제가 가능함(문항 텍스트/타입과 동일한 수준으로 맞춰짐). 다만 앱 최초 기동 시 시더가 반영하는 초기 4개 문항(누수/콘센트/차단기/화재감지기)의 이미지는 여전히 `ChecklistTemplateSeeder` 하드코딩 그대로이고, 파일 업로드(presign/confirm) 자체는 지원하지 않아 URL은 S3 콘솔에서 직접 올린 뒤 API에 붙여넣어야 함.
+
+## 전수조사 결과 (2026-08-12)
+
+### 버그/정확성
+
+특별히 발견된 이슈 없음. 아래 항목들을 코드 기준으로 재검증했고 문제 없음을 확인:
+- `ChecklistItem.check()`/`markInsufficient()`/`answer()`가 각각 `itemType`을 검증해 CHECK/YES_NO/DATE/DOCUMENT_REQUEST 방식이 서로 섞여 호출될 수 없음(`ChecklistService.updateChecklistItem`에서 잘못된 조합을 보내면 전부 400).
+- `Checklist.refreshStatus()`/`computeResult()`는 `items`가 0개(모든 템플릿이 비활성화된 극단적 상황)여도 예외 없이 `NOT_STARTED`로 안전하게 계산됨(다만 `AdminChecklistTemplateService`가 활성 문항 0개를 이미 막고 있어 실제로 도달하기는 어려움).
+- `getChecklist`/`updateChecklistItem`/`getChecklistResult` 세 곳 모두 매물 소유권(`property.isOwnedBy`/`checklist.getUser().getId().equals(userId)`)과 매물 삭제 여부를 일관되게 재검증함.
+
+### 보안
+
+특별히 발견된 이슈 없음.
+- `GET /checklists` 목록(`ChecklistRepository.findOverviewByUserId`)이 `p.userId = :userId`와 `c.user.id = :userId` 조건을 모두 걸어 다른 유저의 매물/체크리스트가 섞여 나올 수 없음을 코드로 확인.
+- `updateChecklistItem`은 itemId를 해당 `checklist.getItems()`(이미 소유권 검증된 체크리스트) 컬렉션 내에서만 찾으므로, 다른 유저의 체크리스트에 속한 itemId를 넣어도 `CHECKLIST_ITEM_NOT_FOUND`로만 끝나고 크로스 체크리스트 접근이 되지 않음.
+- `/checklists/**`, `/properties/**/checklists` 모두 `SecurityConfig`의 `anyRequest().authenticated()`에 걸려 인증 없이 접근 가능한 구멍이 없음.
+
+### 코드 품질 (중복/구조/일관성)
+
+1. ~~`ChecklistItemResponse.from()`이 `ChecklistItem.hasIssue()`를 재사용하지 않고 같은 로직을 중복 구현~~ **(2026-08-13 코드 수정 완료)** — `ChecklistItemResponse.from()`이 `item.isIssueFound() || item.getUserNote() != null`을 직접 계산하던 걸 `item.hasIssue()` 호출로 교체함. 계산식이 원래 완전히 동일했어서(`ChecklistItem.hasIssue()`와 100% 같은 식) 동작 변화는 없는 순수 리팩터.
+2. ~~`ChecklistRepository.findAllByUserId(Long userId)`가 죽은 코드~~ **(2026-08-13 정정, 오탐)** — 전수조사 당시 `checklist` 패키지 범위로만 참조를 확인해 놓친 것으로 보인다. 실제로는 `UserService.withdraw()`(`UserService.java:234`)가 회원 탈퇴 시 본인 소유 체크리스트를 하드 삭제하기 위해 이 메서드로 목록을 조회한다 — 삭제하면 회원 탈퇴 기능이 깨지므로 코드 변경 불필요.
+3. ~~**관리자 템플릿 신규 생성 시 `version` 산정이 "활성" 기준이 아니라 "전체(비활성 포함)" 기준** — `AdminChecklistTemplateService.create()`(`AdminChecklistTemplateService.java:63-66`)는 `findAllByOrderByDisplayOrderAsc()`(활성+비활성 전체)에서 최대 버전을 구해 새 문항에 배정한다. 반면 `ChecklistItemTemplate` 클래스 주석은 "버전 하나 = 전체 매물 공통"이라는 불변식을 전제한다. 만약 과거에 더 높은 버전 번호를 가진 비활성 문항이 남아있는 상태에서 관리자가 새 문항을 추가하면, 새 문항은 현재 활성 배치보다 더 높은 번호를 받게 되고, `ChecklistService.createChecklist()`는 활성 목록의 첫 항목 버전만 체크리스트의 `templateVersion`으로 저장하므로 실제로는 서로 다른 버전 번호가 섞인 활성 문항 집합인데도 단일 버전 값만 기록되는 불일치가 생길 수 있다.~~ — ✅ **(2026-08-12 해결)** 버전 산정을 `findAllByOrderByDisplayOrderAsc()`(전체)에서 `findByActiveTrueOrderByDisplayOrderAsc()`(활성만)로 변경해 비활성 문항의 버전이 더 이상 영향을 주지 않도록 했고, 이 시나리오를 직접 재현하는 회귀 테스트(`AdminChecklistTemplateServiceTest.createIgnoresHigherVersionFromInactiveTemplates`)를 추가함.

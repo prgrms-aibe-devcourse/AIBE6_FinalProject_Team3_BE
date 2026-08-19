@@ -58,6 +58,20 @@ public class CookieUtils {
             throw new IllegalStateException(
                     "app.cookie.same-site must be one of Strict/Lax/None (got: \"" + sameSite + "\")");
         }
+        // SameSite=Strict는 형식상 유효한 값이지만 이 앱의 OAuth2 로그인(구글/카카오)을 조용히
+        // 전부 깨뜨린다 - CookieAuthorizationRequestRepository가 발급하는 oauth2_auth_request
+        // 쿠키는 IdP에서 돌아오는 크로스사이트 최상위 GET 리다이렉트(/login/oauth2/code/*)에서도
+        // 브라우저가 그대로 실어 보내야 하는데, SameSite=Strict는 정확히 이 경우에 쿠키를 보내지
+        // 않도록 정의돼 있다. "Strict가 더 안전하다"고 생각해 이 값으로 설정하면 소셜 로그인이
+        // 전부 authorization_request_not_found류 오류로 실패하는데 원인이 겉으로 드러나지
+        // 않으므로, None+Secure 조합 검증과 동일하게 기동 자체를 막는다.
+        if ("strict".equalsIgnoreCase(sameSite)) {
+            throw new IllegalStateException(
+                    "app.cookie.same-site=Strict breaks OAuth2 login (Google/Kakao) - the authorization-request "
+                            + "cookie must survive a cross-site top-level redirect back from the identity provider, "
+                            + "which browsers refuse to attach under SameSite=Strict. Use Lax (same-origin "
+                            + "deployment) or None+Secure (cross-origin deployment) instead.");
+        }
         // 브라우저는 SameSite=None인데 Secure가 없는 쿠키는 아예 거부한다 — 이 조합으로 기동되면
         // access/refresh 쿠키가 Set-Cookie로는 내려가지만 브라우저가 조용히 버려서 로그인이
         // 전부 깨지는데, 그 원인이 겉으로 드러나지 않는다. 배포 시 COOKIE_SECURE를 함께 켜는 걸

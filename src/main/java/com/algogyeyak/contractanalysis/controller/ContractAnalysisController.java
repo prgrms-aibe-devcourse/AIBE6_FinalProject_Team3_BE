@@ -83,9 +83,10 @@ public class ContractAnalysisController {
 
     @PostMapping("/analyze")
     public ResponseEntity<ApiResponse<ContractAnalysisAnalyzeResponse>> analyze(
-            @RequestBody ContractAnalysisAnalyzeRequest request
+            @RequestBody ContractAnalysisAnalyzeRequest request,
+            @AuthenticationPrincipal JwtUserPrincipal principal
     ) {
-        ContractAnalysisAnalyzeResponse response = contractAnalysisAnalyzeService.analyze(request);
+        ContractAnalysisAnalyzeResponse response = contractAnalysisAnalyzeService.analyze(principal.userId(), request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

@@ -30,8 +30,13 @@ public interface ChecklistRepository extends JpaRepository<Checklist, Long> {
     // 이 ORDER BY 뒤에 추가 정렬이 덧붙어 의도와 다른 결과가 나올 수 있음).
     // property 도메인이 checklist를 몰라도 되도록(기존 컨벤션), 이 JOIN 쿼리는 property 쪽이 아니라
     // 여기(checklist 쪽, 이미 Property를 참조하는 도메인)에 둔다.
+    // p.address도 LEFT JOIN FETCH로 같이 가져온다 - PropertyAddress는 mappedBy(비소유) 쪽 @OneToOne이라
+    // Hibernate가 지연 로딩용 프록시 자체를 못 만들어 default_batch_fetch_size로도 안 묶이고 매물마다
+    // 개별 SELECT가 나가는 게 실측으로 확인됨(ChecklistOverviewResponse.from()이 매물마다
+    // property.getAddress()를 호출). 1:1 관계라 fetch join을 페이지네이션과 같이 써도 row가 안
+    // 불어나 안전함(items 같은 컬렉션 fetch join과는 다름).
     @Query("""
-            SELECT p, c FROM Property p LEFT JOIN Checklist c ON c.property = p AND c.user.id = :userId
+            SELECT p, c FROM Property p LEFT JOIN FETCH p.address LEFT JOIN Checklist c ON c.property = p AND c.user.id = :userId
             WHERE p.userId = :userId AND p.status = :status
             ORDER BY COALESCE(c.updatedAt, p.updatedAt) DESC
             """)

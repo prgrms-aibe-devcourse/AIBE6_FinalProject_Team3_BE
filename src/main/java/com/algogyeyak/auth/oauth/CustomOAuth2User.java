@@ -14,10 +14,6 @@ public class CustomOAuth2User implements OAuth2User {
     private final Map<String, Object> attributes;
     private final boolean linkedToExistingAccount;
 
-    public CustomOAuth2User(User user, Map<String, Object> attributes) {
-        this(user, attributes, false);
-    }
-
     // linkedToExistingAccount: 이번 로그인이 새 계정 생성이 아니라, 같은(검증된) 이메일의 기존
     // 계정(로컬 가입 또는 다른 소셜)에 방금 연동된 경우 true — 성공 핸들러가 이 값을 보고 프론트에
     // "기존 계정과 연결되었습니다" 안내를 한 번 띄울지 판단한다.

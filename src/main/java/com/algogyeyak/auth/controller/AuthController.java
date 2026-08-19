@@ -1,7 +1,11 @@
 package com.algogyeyak.auth.controller;
 
+import com.algogyeyak.auth.dto.EmailVerificationConfirmRequest;
+import com.algogyeyak.auth.dto.EmailVerificationRequest;
 import com.algogyeyak.auth.dto.LoginRequest;
 import com.algogyeyak.auth.dto.PasswordPolicy;
+import com.algogyeyak.auth.dto.PasswordResetConfirmRequest;
+import com.algogyeyak.auth.dto.PasswordResetRequest;
 import com.algogyeyak.auth.dto.PasswordUpdateRequest;
 import com.algogyeyak.auth.dto.SignupRequest;
 import com.algogyeyak.auth.util.EmailNormalizer;
@@ -9,7 +13,9 @@ import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
 import com.algogyeyak.auth.oauth.CookieUtils;
+import com.algogyeyak.auth.service.EmailVerificationService;
 import com.algogyeyak.auth.service.LocalAuthService;
+import com.algogyeyak.auth.service.PasswordResetService;
 import com.algogyeyak.auth.service.SessionLogoutService;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.global.error.ErrorCode;
@@ -56,12 +62,21 @@ public class AuthController {
     private final RefreshTokenService refreshTokenService;
     private final LocalAuthService localAuthService;
     private final SessionLogoutService sessionLogoutService;
+    private final EmailVerificationService emailVerificationService;
+    private final PasswordResetService passwordResetService;
 
     @Value("${app.dev-login.enabled}")
     private boolean devLoginEnabled;
 
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
+
+    // @Operation/@ApiResponse의 description은 어노테이션 속성이라 컴파일타임 상수만 허용된다 -
+    // EmailVerificationService/PasswordResetService처럼 @Value로 런타임 주입할 수 없어, 아래 값은
+    // application.yml의 실제 설정값과 별도로 수동 동기화해야 한다(설정을 바꾸면 이 상수도 같이 바꿀 것).
+    private static final int EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60; // app.email-verification.resend-cooldown-seconds
+    private static final int EMAIL_VERIFICATION_TICKET_VALIDITY_MINUTES = 30; // app.email-verification.verified-ticket-validity-seconds
+    private static final int PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS = 60; // app.password-reset.request-cooldown-seconds
 
     // 운영에서도 devLoginEnabled를 켤 수 있게 되면서(스위치 하나만으로는 "아무나" 이 엔드포인트를
     // 호출해 admin이 될 수 있다) 추가한 공유 비밀 값 — 이 값을 아는 사람만 dev-login을 쓸 수 있다.
@@ -85,13 +100,17 @@ public class AuthController {
             JwtProvider jwtProvider,
             RefreshTokenService refreshTokenService,
             LocalAuthService localAuthService,
-            SessionLogoutService sessionLogoutService) {
+            SessionLogoutService sessionLogoutService,
+            EmailVerificationService emailVerificationService,
+            PasswordResetService passwordResetService) {
         this.cookieUtils = cookieUtils;
         this.userRepository = userRepository;
         this.jwtProvider = jwtProvider;
         this.refreshTokenService = refreshTokenService;
         this.localAuthService = localAuthService;
         this.sessionLogoutService = sessionLogoutService;
+        this.emailVerificationService = emailVerificationService;
+        this.passwordResetService = passwordResetService;
     }
 
     public record MeResponse(
@@ -120,12 +139,65 @@ public class AuthController {
                 new PasswordPolicyResponse(PasswordPolicy.HTML_INPUT_PATTERN, PasswordPolicy.MESSAGE)));
     }
 
+    // 계정이 아직 없는 상태(회원가입 폼에서 이메일만 입력한 시점)에서 호출한다 - 이미 가입된 이메일이면
+    // 인증번호를 보내지 않고 바로 실패시켜, 사용자가 로그인 화면으로 가야 함을 즉시 알 수 있게 한다.
+    @Operation(summary = "이메일 인증번호 발송(회원가입)", description = "회원가입 전 이메일 소유권 확인용 6자리 인증번호를 발송한다. 이미 가입된 이메일이면 발송하지 않고 실패로 응답한다. 재발송은 "
+            + EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS + "초 쿨다운이 있다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "발송 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 가입된 이메일 (AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재발송 쿨다운(" + EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS + "초) 이내 재요청 (AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "메일 발송 실패 (EMAIL_SEND_FAILED)")
+    @PostMapping("/email-verification/request")
+    public ResponseEntity<ApiResponse<Void>> requestEmailVerification(
+            @Valid @RequestBody EmailVerificationRequest request) {
+        emailVerificationService.requestCode(request.getEmail());
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    // 확인에 성공하면 이 이메일에 대해 EMAIL_VERIFICATION_TICKET_VALIDITY_MINUTES(아래)만큼 유효한
+    // 인증 완료 기록만 남긴다 - 계정은 아직 만들지 않는다(실제 계정 생성은 이어지는 /auth/signup
+    // 호출에서 이 기록을 확인한다).
+    @Operation(summary = "이메일 인증번호 확인(회원가입)", description = "발송된 6자리 인증번호를 확인한다. 성공 시 이 이메일로 "
+            + EMAIL_VERIFICATION_TICKET_VALIDITY_MINUTES + "분 이내에 /auth/signup을 완료할 수 있다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "인증 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "인증번호가 올바르지 않거나 만료됨/시도 횟수 초과 (AUTH_EMAIL_VERIFICATION_CODE_INVALID)")
+    @PostMapping("/email-verification/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmEmailVerification(
+            @Valid @RequestBody EmailVerificationConfirmRequest request) {
+        emailVerificationService.confirmCode(request.getEmail(), request.getCode());
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    // 이메일 존재 여부를 노출하지 않기 위해 계정이 없거나 소셜 전용 계정이어도 항상 200으로 응답한다
+    // (PasswordResetService.requestReset 참고 - 그 경우 내부적으로 아무 것도 하지 않고 조용히 리턴한다).
+    // 계정이 존재하는 경우의 토큰 발급(Redis)/메일 발송 실패도 같은 이유로 로그만 남기고 200으로
+    // 응답한다 - 그러지 않으면 그 실패들이 "이 계정은 실제로 존재한다"는 신호가 되어버린다.
+    @Operation(summary = "비밀번호 재설정 요청", description = "이메일을 받아 (로컬 비밀번호가 있는) 계정이면 재설정 링크를 발송한다. 계정 존재 여부를 노출하지 않기 위해 토큰 발급/메일 발송이 내부적으로 실패해도 항상 동일한 성공 응답을 반환한다. "
+            + PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS + "초 쿨다운이 있다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "요청 접수(계정 존재 여부 및 실제 발송 성공 여부는 노출하지 않음)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재요청 쿨다운(" + PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS + "초) 이내 재요청 (AUTH_PASSWORD_RESET_TOO_MANY_REQUESTS)")
+    @PostMapping("/password-reset/request")
+    public ResponseEntity<ApiResponse<Void>> requestPasswordReset(@Valid @RequestBody PasswordResetRequest request) {
+        passwordResetService.requestReset(request.getEmail());
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
+    @Operation(summary = "비밀번호 재설정 실행", description = "이메일로 받은 토큰과 새 비밀번호로 비밀번호를 변경한다. 성공 시 기존 refresh token(세션)을 모두 무효화한다.")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "재설정 성공")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "새 비밀번호 형식이 올바르지 않거나(영문+숫자 포함 8~72자), 토큰이 유효하지 않거나 만료됨 (AUTH_PASSWORD_RESET_TOKEN_INVALID)")
+    @PostMapping("/password-reset/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmPasswordReset(@Valid @RequestBody PasswordResetConfirmRequest request) {
+        passwordResetService.confirmReset(request.getToken(), request.getNewPassword());
+        return ResponseEntity.ok(ApiResponse.successWithoutData());
+    }
+
     // 소셜 로그인(OAuth2AuthenticationSuccessHandler)과 달리 리다이렉트가 아니라 REST 응답이므로,
     // 가입 직후 바로 온보딩(프로필 등록) 화면으로 넘어갈 수 있도록 여기서도 access/refresh 쿠키를
     // 즉시 발급해 자동 로그인 상태로 만든다.
-    @Operation(summary = "회원가입", description = "이메일/비밀번호로 가입한다. 성공 시 access/refresh 토큰을 쿠키로 즉시 발급해 자동 로그인 상태로 만든다.")
+    @Operation(summary = "회원가입", description = "이메일/비밀번호로 가입한다. /auth/email-verification/confirm으로 이메일 인증을 먼저 마쳐야 한다. 성공 시 access/refresh 토큰을 쿠키로 즉시 발급해 자동 로그인 상태로 만든다.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "회원가입 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 형식이 올바르지 않음 (이메일/비밀번호/닉네임 형식 위반)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "이메일 인증을 완료하지 않음 (AUTH_EMAIL_NOT_VERIFIED)")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 가입된 이메일 또는 사용 중인 닉네임 (AUTH_EMAIL_ALREADY_EXISTS / AUTH_NICKNAME_ALREADY_EXISTS)")
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<MeResponse>> signup(
@@ -150,6 +222,7 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "로그인 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 형식이 올바르지 않음 (이메일/비밀번호 누락)")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "이메일 또는 비밀번호가 올바르지 않음 (AUTH_INVALID_CREDENTIALS)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "같은 이메일로 로그인 시도가 너무 많음 (AUTH_TOO_MANY_LOGIN_ATTEMPTS)")
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<MeResponse>> login(
             @Valid @RequestBody LoginRequest request, HttpServletResponse response) {
@@ -159,9 +232,12 @@ public class AuthController {
     }
 
     // 닉네임/프로필 사진/권한은 JWT 발급 시점(로그인 시점) 값이 아니라, 그 이후 변경돼도 항상 최신
-    // 값이 반영되도록 매 요청마다 User 엔티티에서 조회한다. role도 예외가 아니다 — 그렇지 않으면
-    // 관리자 권한이 회수된 사용자가 access token 만료(최대 30분) 전까지는 이 응답에서 계속 예전
-    // role을 보게 된다.
+    // 값이 반영되어야 한다 — 그렇지 않으면 관리자 권한이 회수된 사용자가 access token 만료(최대
+    // 30분) 전까지는 이 응답에서 계속 예전 role을 보게 된다. 이 최신성은 컨트롤러가 직접 DB를
+    // 조회해서가 아니라(2026-08-12 이전엔 그랬음), JwtAuthenticationFilter.authenticate()가 이미
+    // 매 요청 User를 재조회해 principal에 담아주기 때문에 보장된다 — 존재/탈퇴/정지 여부도 필터가
+    // 먼저 걸러내므로(통과 못 하면 이 메서드 자체가 호출되지 않음), 여기서 같은 조회를 반복할
+    // 필요가 없다(전수조사 결과 코드 품질 2번 참고).
     @Operation(summary = "내 정보 조회", description = "access token 쿠키로 인증된 사용자 본인의 정보를 반환한다. Authorization: Bearer 헤더로도 인증 가능하다.")
     @SecurityRequirement(name = "access_token")
     @SecurityRequirement(name = "bearerAuth")
@@ -169,13 +245,9 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증되지 않았거나 탈퇴한 사용자")
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<MeResponse>> me(@AuthenticationPrincipal JwtUserPrincipal principal) {
-        // Access Token 자체는 유효해도 그 사이 탈퇴했거나 계정이 삭제된 사용자라면 세션을 더 이상
-        // 유효하다고 취급하면 안 된다 — 실제 계정 없이 success 응답을 내려주는 것을 방지한다.
-        User user = userRepository.findById(principal.userId())
-                .filter(found -> !found.isWithdrawn() && !found.isSuspended())
-                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "존재하지 않거나 탈퇴한 사용자입니다."));
-
-        return ResponseEntity.ok(ApiResponse.success(toMeResponse(user)));
+        return ResponseEntity.ok(ApiResponse.success(new MeResponse(
+                principal.userId(), principal.email(), principal.nickname(), principal.profileImageUrl(),
+                principal.role().name())));
     }
 
     // 구글/카카오로만 가입한 계정도 여기서 비밀번호를 설정하면 그 즉시 같은 이메일로 로컬

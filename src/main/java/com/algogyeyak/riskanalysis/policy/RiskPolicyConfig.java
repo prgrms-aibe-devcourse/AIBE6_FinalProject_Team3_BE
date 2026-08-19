@@ -13,7 +13,6 @@ public class RiskPolicyConfig {
     private int jeonseRatioCautionFrom;   // 80 (안전/주의 경계)
     private int jeonseRatioWarnFrom;      // 100
     private int jeonseRatioWarnTo;        // 150
-    private int jeonseRatioAlertOver;     // 150
     private boolean multiAccountDetectionEnabled; // 동일계정 다수등록 체크 활성화/비활성화
     private int sameAccountThresholdCount;        // 동일계정 다수등록 판단 개수 임계값 (예: 3)
     private int sameAccountWindowDays;             // 동일계정 다수등록 판단 기간(일) (예: 7)

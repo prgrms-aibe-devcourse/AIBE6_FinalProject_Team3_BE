@@ -10,6 +10,8 @@ import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.entity.ChecklistResult;
 import com.algogyeyak.checklist.entity.ChecklistStatus;
+import com.algogyeyak.checklist.repository.ChecklistItemRepository;
+import com.algogyeyak.checklist.repository.ChecklistItemRepository.ChecklistProgressProjection;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
@@ -42,10 +44,11 @@ class ChecklistServiceTest {
 
     private final ChecklistRepository checklistRepository = mock(ChecklistRepository.class);
     private final ChecklistItemTemplateRepository templateRepository = mock(ChecklistItemTemplateRepository.class);
+    private final ChecklistItemRepository checklistItemRepository = mock(ChecklistItemRepository.class);
     private final UserRepository userRepository = mock(UserRepository.class);
     private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final ChecklistService checklistService =
-            new ChecklistService(checklistRepository, templateRepository, userRepository, propertyRepository);
+            new ChecklistService(checklistRepository, templateRepository, checklistItemRepository, userRepository, propertyRepository);
 
     private User user(Long id) {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
@@ -211,6 +214,37 @@ class ChecklistServiceTest {
         assertThat(result.content().get(1).checklistId()).isNull();
         assertThat(result.content().get(1).status()).isEqualTo(ChecklistStatus.NOT_STARTED);
         assertThat(result.totalElements()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("매물별 진행률·주의 항목 개수를 붙이고, 체크리스트를 시작 안 한 매물은 둘 다 null이다")
+    void listMyChecklistsAttachesProgressAndCautionCount() {
+        Property started = property(10L, 1L);
+        Property notStarted = property(20L, 1L);
+
+        Checklist checklist = checklistWithOneCheckItem(user(1L));
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        org.springframework.data.domain.Page<Object[]> page = new org.springframework.data.domain.PageImpl<>(
+                List.of(new Object[]{started, checklist}, new Object[]{notStarted, null}),
+                pageable, 2);
+        when(checklistRepository.findOverviewByUserId(1L, PropertyStatus.ACTIVE, pageable)).thenReturn(page);
+
+        ChecklistProgressProjection progress = mock(ChecklistProgressProjection.class);
+        when(progress.getPropertyId()).thenReturn(10L);
+        when(progress.getTotalCount()).thenReturn(4L);
+        when(progress.getCheckedCount()).thenReturn(3L);
+        when(progress.getIssueCount()).thenReturn(2L);
+        when(checklistItemRepository.findProgressByUserId(1L)).thenReturn(List.of(progress));
+
+        com.algogyeyak.global.response.PageResponse<ChecklistOverviewResponse> result =
+                checklistService.listMyChecklists(1L, pageable);
+
+        assertThat(result.content().get(0).progressPercent()).isEqualTo(75);
+        assertThat(result.content().get(0).cautionCount()).isEqualTo(2);
+        assertThat(result.content().get(1).progressPercent()).isNull();
+        assertThat(result.content().get(1).cautionCount()).isNull();
     }
 
     @Test

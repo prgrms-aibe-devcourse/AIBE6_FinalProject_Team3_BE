@@ -38,16 +38,18 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
 
     /**
      * risk-analysis의 중복매물 탐지용 - 위 두 메서드와 달리 userId 조건이 없다(다른 계정이 올린
-     * 매물도 잡아야 함). 본인 자신은 idNot으로 제외한다.
+     * 매물도 잡아야 함). 본인 자신은 idNot으로 제외한다. exists 대신 엔티티를 직접 가져오는 이유는
+     * DuplicateListingDetector가 가격·등록일을 비교 정보로 보여줘야 하기 때문(단순 존재 여부만으로는
+     * 부족함) - 여러 건이 있을 수 있어 가장 최근 것을 비교 대상으로 쓰도록 정렬해서 반환한다.
      */
-    boolean existsByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddress(
+    List<Property> findAllByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddressOrderByCreatedAtDesc(
             Long id,
             TransactionType transactionType,
             PropertyStatus status,
             String roadAddress
     );
 
-    boolean existsByIdNotAndTransactionTypeAndStatusAndAddress_JibunAddress(
+    List<Property> findAllByIdNotAndTransactionTypeAndStatusAndAddress_JibunAddressOrderByCreatedAtDesc(
             Long id,
             TransactionType transactionType,
             PropertyStatus status,
@@ -93,7 +95,7 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
      */
     @Query("""
             SELECT p FROM Property p
-            LEFT JOIN p.address a
+            LEFT JOIN FETCH p.address a
             WHERE p.userId = :userId
               AND p.status = :status
               AND (:region IS NULL OR a.roadAddress LIKE CONCAT('%', :region, '%')
@@ -135,8 +137,12 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
     @Query("SELECT p.createdAt FROM Property p WHERE p.createdAt >= :start AND p.createdAt < :end")
     List<LocalDateTime> findCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
-    // 관리자 통계 대시보드: 신규 등록 매물 수 카드용(기간 내 등록 + 활성 상태).
-    long countByStatusAndCreatedAtBetween(PropertyStatus status, LocalDateTime start, LocalDateTime end);
+    // 관리자 통계 대시보드: 신규 등록 매물 수 카드용(기간 내 등록). 요약 카드는 아래 추이 차트
+    // (findCreatedAtBetween)와 항상 합이 맞아야 하므로(AdminStatsService.summary() 참고), 이 카드도
+    // 같은 이유로 status 필터링을 하지 않는다 - 기간 내 등록됐다가 이후 삭제된 매물도 "등록 발생"
+    // 자체는 카운트에 포함된다. (예전엔 ACTIVE로 필터링했는데, 그러면 기간 내 삭제된 등록 건이
+    // 추이 차트 합계에는 잡히고 이 카드에는 안 잡혀 같은 화면에서 숫자가 어긋났다.)
+    long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
     // 관리자 통계 대시보드: 매물 등록자/미등록자 분포용 - 주어진 유저 id들 중 매물을 1건이라도
     // 등록한 유저가 몇 명인지. 가입 시점과 무관하게 "등록한 적이 있는지"를 기준으로 삼으므로(가입은

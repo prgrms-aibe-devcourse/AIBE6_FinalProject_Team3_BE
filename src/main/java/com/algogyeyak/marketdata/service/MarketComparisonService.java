@@ -130,7 +130,9 @@ public class MarketComparisonService {
                 differenceRate,
                 used.size(),
                 latestDealDate != null ? latestDealDate.toString() : null,
-                radiusUsed
+                radiusUsed,
+                properties.areaErrorRate(),
+                properties.lookbackMonths()
         );
     }
 

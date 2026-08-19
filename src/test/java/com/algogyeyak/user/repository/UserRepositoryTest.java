@@ -84,6 +84,21 @@ class UserRepositoryTest {
         assertThat(result.getTotalElements()).isEqualTo(2);
     }
 
+    // 회귀 테스트 - ESCAPE '\'가 없으면 검색어에 포함된 리터럴 "_"가 SQL LIKE 와일드카드(임의의 한
+    // 글자)로 해석돼, 이 검색이 "test_user@example.com"뿐 아니라 "testXuser@example.com"까지
+    // 걸려버린다. AdminUserService.escapeLikePattern()이 넘기는 것과 동일하게 이미 이스케이프된
+    // 입력("test\\_user")을 직접 주어, ESCAPE '\'가 그 이스케이프를 실제로 해석해 "_"를 리터럴
+    // 문자로만 매칭하는지 확인한다.
+    @Test
+    void 이스케이프된_밑줄은_와일드카드가_아니라_리터럴_문자로_매칭된다() {
+        save("test_user@example.com", "닉네임1", Role.USER, UserStatus.ACTIVE);
+        save("testXuser@example.com", "닉네임2", Role.USER, UserStatus.ACTIVE);
+
+        var result = userRepository.search("test\\_user", null, null, null, PageRequest.of(0, 20));
+
+        assertThat(result.getContent()).extracting(User::getEmail).containsExactly("test_user@example.com");
+    }
+
     @Test
     void 여러_필터가_동시에_AND_조건으로_적용된다() {
         save("target@example.com", "타겟닉네임", Role.ADMIN, UserStatus.ACTIVE);

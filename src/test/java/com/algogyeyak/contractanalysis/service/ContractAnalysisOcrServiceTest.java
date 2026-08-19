@@ -19,7 +19,8 @@ import org.springframework.web.multipart.MultipartFile;
 class ContractAnalysisOcrServiceTest {
 
     private final ClovaOcrClient clovaOcrClient = mock(ClovaOcrClient.class);
-    private final ContractAnalysisOcrService service = new ContractAnalysisOcrService(clovaOcrClient);
+    private final ContractAnalysisOcrService service =
+            new ContractAnalysisOcrService(clovaOcrClient, new ImagePreprocessor());
 
     private MultipartFile jpegImage() {
         MultipartFile image = mock(MultipartFile.class);
@@ -87,6 +88,27 @@ class ContractAnalysisOcrServiceTest {
         assertEquals(0.9, response.confidence());
         assertEquals(true, response.editable());
         assertEquals(0, response.uncertainFields().size());
+    }
+
+    @Test
+    void recognizeSetsShortTextWarningWhenExtractedTextIsShort() {
+        // 0자(EMPTY_RESULT)는 아니지만 계약서 내용이라기엔 너무 짧은 경우 - 거부하지 않고 힌트만 내려준다.
+        when(clovaOcrClient.recognize(any(), anyString()))
+                .thenReturn(responseWithConfidences(0.99, 0.98));
+
+        ContractAnalysisOcrResponse response = service.recognize(jpegImage());
+
+        assertEquals(true, response.shortTextWarning());
+    }
+
+    @Test
+    void recognizeDoesNotSetShortTextWarningWhenExtractedTextIsLongEnough() {
+        when(clovaOcrClient.recognize(any(), anyString()))
+                .thenReturn(responseWithConfidences(0.99, 0.99, 0.99, 0.99, 0.99, 0.99, 0.99));
+
+        ContractAnalysisOcrResponse response = service.recognize(jpegImage());
+
+        assertEquals(false, response.shortTextWarning());
     }
 
     @Test

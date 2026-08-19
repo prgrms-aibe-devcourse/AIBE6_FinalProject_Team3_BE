@@ -68,7 +68,7 @@ class PropertyControllerTest {
     private PropertyService propertyService;
 
     private RequestPostProcessor asUser(Long userId) {
-        JwtUserPrincipal principal = new JwtUserPrincipal(userId, "test@example.com", Role.USER);
+        JwtUserPrincipal principal = new JwtUserPrincipal(userId, "test@example.com", Role.USER, "테스트유저", null);
         Authentication auth = new UsernamePasswordAuthenticationToken(principal, null, List.of());
         return authentication(auth);
     }
@@ -117,7 +117,9 @@ class PropertyControllerTest {
     }
 
     @Test
-    void 이름이_없으면_400을_반환한다() throws Exception {
+    void 이름이_없어도_201을_반환한다() throws Exception {
+        // title은 선택 입력이다(#222) - 비어 있으면 PropertyService가 매물유형으로 대체해 저장하므로
+        // 컨트롤러 레벨 검증에서 막히면 안 된다.
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "",
                 "서울특별시 강남구 테헤란로 123",
@@ -131,12 +133,29 @@ class PropertyControllerTest {
                 null
         );
 
+        PropertyRegisterResponse response = new PropertyRegisterResponse(
+                101L,
+                "오피스텔",
+                "ACTIVE",
+                new PropertyRegisterResponse.AddressResponse(
+                        "서울특별시 강남구 테헤란로 123",
+                        "서울특별시 강남구 역삼동 123-45",
+                        37.4995539438207,
+                        127.031393491745
+                ),
+                MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
+                null
+        );
+
+        when(propertyService.register(anyLong(), any(PropertyRegisterRequest.class))).thenReturn(response);
+
         mockMvc.perform(post("/properties")
                         .with(asUser(USER_ID))
                         .with(csrf())
                         .contentType("application/json")
                         .content(OBJECT_MAPPER.writeValueAsString(request)))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.title").value("오피스텔"));
     }
 
     @Test
@@ -181,7 +200,8 @@ class PropertyControllerTest {
                 null,
                 2,
                 "시세 대비 높은 가격, 전세가율 확인 필요",
-                85
+                85,
+                "https://example.com/property-image.jpg"
         );
 
         Pageable pageable = PageRequest.of(0, 20);
@@ -201,6 +221,7 @@ class PropertyControllerTest {
                 .andExpect(jsonPath("$.data.content[0].signalSummary").value("시세 대비 높은 가격, 전세가율 확인 필요"))
                 .andExpect(jsonPath("$.data.content[0].jeonseRatio").value(85))
                 .andExpect(jsonPath("$.data.content[0].maintenanceFee").value(100_000))
+                .andExpect(jsonPath("$.data.content[0].representativeImageUrl").value("https://example.com/property-image.jpg"))
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.hasNext").value(false));
     }

@@ -1,6 +1,17 @@
 spring:
   application:
     name: algogyeyak
+  jpa:
+    properties:
+      hibernate:
+        # 체크리스트 상세 조회 시 문항(ChecklistItem)마다 개별로 나가던 template/template.images
+        # LAZY 연관 로딩을 IN 절 배치 쿼리로 묶는다(64쿼리→7쿼리, 실측 확인). 페이지 크기(기본 20)를
+        # 한 배치로 충분히 덮도록 100으로 잡음. 매물 목록/체크리스트 목록의 PropertyAddress N+1은
+        # 이걸로 안 잡힌다 - mappedBy(비소유) 쪽 @OneToOne은 Hibernate가 프록시 자체를 못 만들어
+        # 배치 대상이 없기 때문(실측으로 확인, IN 절로 안 묶이고 매물마다 개별 SELECT가 그대로 나감).
+        # 그쪽은 PropertyRepository.search()/ChecklistRepository.findOverviewByUserId()의
+        # LEFT JOIN FETCH p.address로 별도 해결함.
+        default_batch_fetch_size: 100
   servlet:
     multipart:
       # contract-analysis /inputs, /ocr가 자체적으로 10MB까지 허용하므로, Spring의 기본값(1MB)에
@@ -20,6 +31,22 @@ spring:
       # 짧게 끊어야 장애가 즉시 401/503으로 드러난다.
       connect-timeout: 2s
       timeout: 2s
+  # 이메일 인증(회원가입)/비밀번호 재설정 메일 발송용. 로컬은 값을 채우지 않으면 발송 시점에만
+  # 실패한다(기동 자체는 막지 않음 - MAIL_USERNAME/PASSWORD가 비어 있으면 Gmail SMTP 인증에서
+  # 거부되므로, 로컬에서 그 기능을 직접 테스트하려는 사람만 backend/.env에 실제 값을 채우면 된다).
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+        transport:
+          protocol: smtp
   security:
     oauth2:
       client:
@@ -53,6 +80,28 @@ app:
   oauth2:
     authorized-redirect-uri: ${OAUTH2_REDIRECT_URI:http://localhost:3000/oauth/callback}
     state-signing-key: ${OAUTH2_STATE_SIGNING_KEY:local-dev-only-state-signing-key-please-override-32-bytes-min}
+  # 비밀번호 재설정 이메일에 담을 링크(`{base-url}/reset-password?token=...`)의 origin. OAuth2
+  # 리다이렉트가 이미 프론트 origin을 알고 있지만(app.oauth2.authorized-redirect-uri), 그건 쿼리에
+  # code/state가 붙는 전용 콜백 경로라 재사용하지 않고 별도 값으로 둔다.
+  frontend:
+    base-url: ${FRONTEND_BASE_URL:http://localhost:3000}
+  mail:
+    from: ${MAIL_FROM:no-reply@algogyeyak.local}
+  email-verification:
+    code-validity-seconds: 300 # 5분
+    resend-cooldown-seconds: 60
+    max-attempts: 5
+    # confirmCode() 성공 후 실제 signup() 호출까지 허용하는 유예 시간 - 코드 유효시간(5분)보다 넉넉하게 둬,
+    # 인증엔 성공했지만 나머지 폼(비밀번호/닉네임)을 마저 입력하는 데 시간이 걸려도 처음부터 다시 인증할
+    # 필요가 없게 한다.
+    verified-ticket-validity-seconds: 1800 # 30분
+  password-reset:
+    token-validity-seconds: 1800 # 30분
+    request-cooldown-seconds: 60
+  login:
+    max-attempts: 10
+    lockout-window-seconds: 300 # 5분 - 윈도우 내 시도 횟수가 이 값을 넘으면 이후 시도를 거부한다.
+
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   cookie:
@@ -107,7 +156,6 @@ risk-policy:
   jeonse-ratio-caution-from: 80
   jeonse-ratio-warn-from: 100
   jeonse-ratio-warn-to: 150
-  jeonse-ratio-alert-over: 150
   multi-account-detection-enabled: false
   same-account-threshold-count: 3
   same-account-window-days: 7
@@ -118,10 +166,22 @@ risk-policy:
 
 aws:
   s3:
-    bucket: 3team-storage-495264909330-ap-northeast-2-an
+    bucket: ${AWS_S3_BUCKET:dummy-bucket-for-local}
     region: ap-northeast-2
     access-key: ${AWS_ACCESS_KEY:dummy-access-key-for-local}
     secret-key: ${AWS_SECRET_KEY:dummy-secret-key-for-local}
+
+# 매물 이미지 고아 객체 정리 배치(PropertyImageOrphanCleanupJob, #214) 정책값. 서버가 24시간
+# 상시 기동이 아니라 09~18시에만 켜져 있어서(비용 절감), 새벽 시간대로 잡으면 서버가 꺼져 있어
+# @Scheduled 자체가 절대 실행되지 않는다 - 대신 서버가 켜지는 시각(09:00) 이후 애플리케이션
+# 컨텍스트가 완전히 뜰 시간을 감안해 09:30으로 잡았다.
+property:
+  image-cleanup:
+    cron: 0 30 9 * * *
+    grace-period-hours: 24
+    # 삭제 후보가 전체 S3 객체의 50%를 넘으면 이번 실행을 건너뛰고 경고만 남긴다(서킷브레이커,
+    # PropertyImageCleanupProperties 참고).
+    max-delete-ratio: 0.5
 
 # Prometheus
 management:

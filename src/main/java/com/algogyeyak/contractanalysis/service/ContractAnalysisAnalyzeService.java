@@ -6,6 +6,8 @@ import com.algogyeyak.contractanalysis.client.dto.GeminiGenerateContentResponse;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisAnalyzeRequest;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisAnalyzeResponse;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisClause;
+import com.algogyeyak.contractanalysis.entity.ContractRequest;
+import com.algogyeyak.contractanalysis.repository.ContractRequestRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -24,18 +26,24 @@ public class ContractAnalysisAnalyzeService {
 
     private final GeminiClient geminiClient;
     private final ContractAnalysisMaskingService maskingService;
+    private final ContractRequestRepository contractRequestRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ContractAnalysisAnalyzeService(GeminiClient geminiClient, ContractAnalysisMaskingService maskingService) {
+    public ContractAnalysisAnalyzeService(
+            GeminiClient geminiClient,
+            ContractAnalysisMaskingService maskingService,
+            ContractRequestRepository contractRequestRepository
+    ) {
         this.geminiClient = geminiClient;
         this.maskingService = maskingService;
+        this.contractRequestRepository = contractRequestRepository;
     }
 
-    public ContractAnalysisAnalyzeResponse analyze(ContractAnalysisAnalyzeRequest request) {
+    public ContractAnalysisAnalyzeResponse analyze(Long userId, ContractAnalysisAnalyzeRequest request) {
         if (!Boolean.TRUE.equals(request.userConfirmed())) {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_MASKING_NOT_CONFIRMED);
         }
-        if (!StringUtils.hasText(request.maskedText())) {
+        if (!StringUtils.hasText(request.maskedText()) || request.inputType() == null) {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_INVALID_INPUT);
         }
         // userConfirmed만으로는 클라이언트가 /masking을 실제로 거쳤는지 보장할 수 없으므로,
@@ -49,7 +57,21 @@ public class ContractAnalysisAnalyzeService {
         GeminiClauseAnalysisResult result = parseAndValidateSchema(responseText);
         validateNoHallucination(result.clauses(), request.maskedText());
 
-        return ContractAnalysisAnalyzeResponse.of(result.clauses(), sanitizeAiSummary(result.summary()));
+        ContractAnalysisAnalyzeResponse analyzeResponse =
+                ContractAnalysisAnalyzeResponse.of(result.clauses(), sanitizeAiSummary(result.summary()));
+
+        ContractRequest contractRequest = ContractRequest.create(
+                userId,
+                request.propertyId(),
+                request.inputType(),
+                analyzeResponse.summary(),
+                analyzeResponse.disclaimer(),
+                analyzeResponse.aiGeneratedNotice(),
+                analyzeResponse.clauses()
+        );
+        contractRequestRepository.save(contractRequest);
+
+        return analyzeResponse;
     }
 
     // clauses.isEmpty()일 때만 사용되는 summary라 원문 대조(환각 검증)는 애초에 성립하지 않는다 -
@@ -113,7 +135,11 @@ public class ContractAnalysisAnalyzeService {
 
     // \s는 ASCII 공백류만 잡아 U+3000(전각 공백) 등 한글 문서에 흔한 유니코드 공백을
     // 정규화하지 못하므로, 공백 분리자 카테고리(\p{Zs})와 전각 공백을 함께 포함한다.
-    private static final Pattern WHITESPACE_RUN = Pattern.compile("[\\s\\u3000\\p{Zs}]+");
+    // 밑줄(_)은 서식 문서에서 빈칸 표시(____)로 흔히 쓰여 실질적으로 공백류이므로 함께 포함한다.
+    // 따옴표(중첩 예시 문장을 감싸는 용도)는 AI가 반환할 때 보통 빠지는데, 원문에서 앞뒤 단어에
+    // 공백 없이 붙어 있으면("있다"는) 그 단어가 통째로 달라져 n-gram 비교가 깨진다. 삭제가 아니라
+    // 공백으로 치환해야 따옴표로 붙어 있던 단어("있다"+"는")가 원래 경계대로 다시 분리된다.
+    private static final Pattern WHITESPACE_RUN = Pattern.compile("[\\s\\u3000\\p{Zs}_\"'“”‘’]+");
     // "제10조(비용의 정산)"처럼 조 제목 뒤에 AI가 ①이 아닌 다른 항을 이어붙이는 경우,
     // 원문에서는 제목 바로 뒤에 오는 항이 ①뿐이라 "제목+그 외 항" 조합은 연속된 문자열로
     // 존재하지 않는다. 이런 경우까지 환각으로 오판하지 않도록 선행 조 제목은 비교에서 제외한다.

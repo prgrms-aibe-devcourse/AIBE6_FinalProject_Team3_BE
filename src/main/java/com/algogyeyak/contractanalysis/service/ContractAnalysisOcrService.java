@@ -24,15 +24,18 @@ public class ContractAnalysisOcrService {
     );
 
     private final ClovaOcrClient clovaOcrClient;
+    private final ImagePreprocessor imagePreprocessor;
 
-    public ContractAnalysisOcrService(ClovaOcrClient clovaOcrClient) {
+    public ContractAnalysisOcrService(ClovaOcrClient clovaOcrClient, ImagePreprocessor imagePreprocessor) {
         this.clovaOcrClient = clovaOcrClient;
+        this.imagePreprocessor = imagePreprocessor;
     }
 
     public ContractAnalysisOcrResponse recognize(MultipartFile image) {
         String format = validateAndResolveFormat(image);
+        MultipartFile preprocessedImage = imagePreprocessor.preprocess(image, format);
 
-        ClovaOcrResponse response = clovaOcrClient.recognize(image, format);
+        ClovaOcrResponse response = clovaOcrClient.recognize(preprocessedImage, format);
         List<ClovaOcrResponse.Field> fields = extractFields(response);
 
         if (fields.isEmpty()) {

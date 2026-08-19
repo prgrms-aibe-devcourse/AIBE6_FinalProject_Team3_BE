@@ -13,14 +13,19 @@ import java.time.LocalDateTime;
 public record ChecklistOverviewResponse(
         Long propertyId,
         Long checklistId,
+        String title,
         String roadAddress,
         String jibunAddress,
         String propertyType,
         String transactionType,
         ChecklistStatus status,
-        LocalDateTime lastCheckedAt
+        LocalDateTime lastCheckedAt,
+        Integer progressPercent, // 체크리스트를 아직 시작 안 했으면 null (0%와 구분)
+        Integer cautionCount     // 위와 동일한 이유로 시작 전이면 null
 ) {
-    public static ChecklistOverviewResponse from(Property property, Checklist checklist) {
+    public static ChecklistOverviewResponse from(
+            Property property, Checklist checklist, Integer progressPercent, Integer cautionCount
+    ) {
         var address = property.getAddress();
         // 체크리스트가 있으면 마지막으로 항목을 수정한 시각을, 아직 시작 전이면 매물 자체의
         // 마지막 수정 시각으로 대체한다 - "최종 점검일"이 항상 비어있지 않도록.
@@ -28,12 +33,15 @@ public record ChecklistOverviewResponse(
         return new ChecklistOverviewResponse(
                 property.getId(),
                 checklist != null ? checklist.getId() : null,
+                property.getTitle(),
                 address != null ? address.getRoadAddress() : null,
                 address != null ? address.getJibunAddress() : null,
                 property.getPropertyType().name(),
                 property.getTransactionType().name(),
                 checklist != null ? checklist.getStatus() : ChecklistStatus.NOT_STARTED,
-                lastCheckedAt
+                lastCheckedAt,
+                progressPercent,
+                cautionCount
         );
     }
 }

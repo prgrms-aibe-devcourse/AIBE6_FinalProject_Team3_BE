@@ -3,6 +3,7 @@ package com.algogyeyak.checklist.config;
 import com.algogyeyak.checklist.entity.ChecklistCategory;
 import com.algogyeyak.checklist.entity.ChecklistItemCode;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
+import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.property.entity.PropertyType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,14 +19,18 @@ class ChecklistTemplateSeedDataTest {
 
     private final List<ChecklistItemTemplate> templates = ChecklistTemplateSeedData.initialTemplates();
 
+    // (2026-08-14 갱신) 실사용 피드백(누수/콘센트/누전/차단기 확인 방법 구체화, 보안·단열 항목 보완)을
+    // 반영해 버전 3에서 20~24개였던 상한이 20~30개로 늘어났다 - 세분화된 항목을 병합해 개수를
+    // 맞추기보다(예: 콘센트+누전+차단기를 하나로 합치면 "어느 부분이 문제인지" 구분이 안 됨),
+    // 항목 수 증가를 감수하고 명확성을 우선하기로 결정.
     @Test
-    @DisplayName("매물유형별로 적용되는 문항 수는 20~24개다 (전체 템플릿 목록은 매물유형별 변형 문항 때문에 그보다 많을 수 있다)")
-    void eachPropertyTypeHasBetween20And24ApplicableItems() {
+    @DisplayName("매물유형별로 적용되는 문항 수는 20~30개다 (전체 템플릿 목록은 매물유형별 변형 문항 때문에 그보다 많을 수 있다)")
+    void eachPropertyTypeHasBetween20And30ApplicableItems() {
         for (PropertyType propertyType : PropertyType.values()) {
             long applicableCount = templates.stream()
                     .filter(template -> template.isApplicableTo(propertyType))
                     .count();
-            assertThat(applicableCount).as("propertyType=%s", propertyType).isBetween(20L, 24L);
+            assertThat(applicableCount).as("propertyType=%s", propertyType).isBetween(20L, 30L);
         }
     }
 
@@ -60,12 +65,71 @@ class ChecklistTemplateSeedDataTest {
     }
 
     @Test
-    @DisplayName("모든 문항은 버전 2, active=true로 생성된다")
-    void allItemsAreVersionTwoAndActive() {
+    @DisplayName("모든 문항은 버전 3, active=true로 생성된다")
+    void allItemsAreVersionThreeAndActive() {
         assertThat(templates).allSatisfy(template -> {
-            assertThat(template.getVersion()).isEqualTo(2);
+            assertThat(template.getVersion()).isEqualTo(3);
             assertThat(template.isActive()).isTrue();
         });
+    }
+
+    @Test
+    @DisplayName("(2026-08-14 신규) 단창/이중창·누전·차단기·보일러종류·냉난방방식 문항이 포함된다")
+    void containsNewlyAddedItems() {
+        List<String> expectedNewContents = List.of(
+                "창문이 이중창(두 겹 유리)인가요?",
+                "콘센트·전기 배선에 누전 위험이 없나요?",
+                "차단기함 상태를 확인했나요?",
+                "보일러 종류가 무엇인가요?",
+                "냉난방 방식이 무엇인가요?"
+        );
+        for (String content : expectedNewContents) {
+            assertThat(templates.stream().anyMatch(t -> t.getContent().equals(content)))
+                    .as("content=%s", content)
+                    .isTrue();
+        }
+    }
+
+    @Test
+    @DisplayName("(2026-08-14 갱신) 외부 소음 문항은 저층/고층 케이스를 구분한 guideText를 갖는다")
+    void outdoorNoiseItemHasFloorAwareGuideText() {
+        ChecklistItemTemplate outdoorNoise = templates.stream()
+                .filter(t -> t.getContent().equals("외부 소음(도로·상가 등)이 심하지 않나요?"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("외부 소음 문항을 찾을 수 없음"));
+
+        assertThat(outdoorNoise.getGuideText()).contains("저층").contains("고층");
+    }
+
+    @Test
+    @DisplayName("(2026-08-14 신규) 방범창 문항은 연립다세대·단독다가구에만 적용된다")
+    void securityWindowBarsItemOnlyAppliesToNonOfficetel() {
+        ChecklistItemTemplate securityBars = templates.stream()
+                .filter(t -> t.getContent().contains("방범창"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("방범창 문항을 찾을 수 없음"));
+
+        assertThat(securityBars.isApplicableTo(PropertyType.OFFICETEL)).isFalse();
+        assertThat(securityBars.isApplicableTo(PropertyType.MULTI_FAMILY)).isTrue();
+        assertThat(securityBars.isApplicableTo(PropertyType.DETACHED_HOUSE)).isTrue();
+    }
+
+    @Test
+    @DisplayName("(2026-08-14 신규) 보일러 종류/냉난방 방식은 MULTIPLE_CHOICE 타입이고 선택지를 갖는다")
+    void newMultipleChoiceItemsHaveOptions() {
+        ChecklistItemTemplate boilerType = templates.stream()
+                .filter(t -> t.getContent().equals("보일러 종류가 무엇인가요?"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("보일러 종류 문항을 찾을 수 없음"));
+        ChecklistItemTemplate heatingType = templates.stream()
+                .filter(t -> t.getContent().equals("냉난방 방식이 무엇인가요?"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("냉난방 방식 문항을 찾을 수 없음"));
+
+        assertThat(boilerType.getItemType()).isEqualTo(ChecklistItemType.MULTIPLE_CHOICE);
+        assertThat(boilerType.getOptions()).isEqualTo("가스보일러,기름보일러,전기보일러,지역난방");
+        assertThat(heatingType.getItemType()).isEqualTo(ChecklistItemType.MULTIPLE_CHOICE);
+        assertThat(heatingType.getOptions()).isEqualTo("중앙난방,개별난방,지역난방");
     }
 
     @Test

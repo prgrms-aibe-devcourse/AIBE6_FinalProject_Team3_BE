@@ -31,6 +31,9 @@ public class PropertyRisk {
     @Column(columnDefinition = "TEXT", nullable = false)
     private String description;
 
+    @Version
+    private Long version;
+
     @Builder
     private PropertyRisk(Property property, RiskSignalType signalType, String description) {
         this.property = property;

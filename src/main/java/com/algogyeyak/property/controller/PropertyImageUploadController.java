@@ -1,6 +1,8 @@
 package com.algogyeyak.property.controller;
 
 import com.algogyeyak.auth.jwt.JwtUserPrincipal;
+import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.ApiResponse;
 import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.global.s3.util.S3ImagePurpose;
@@ -52,8 +54,17 @@ public class PropertyImageUploadController {
 
     @PostMapping("/confirm")
     public ResponseEntity<ApiResponse<PropertyImageConfirmResponse>> confirm(
+            @AuthenticationPrincipal JwtUserPrincipal principal,
             @Valid @RequestBody PropertyImageConfirmRequest request
     ) {
+        // issueUploadUrl()이 발급한 key는 항상 principal.userId() 네임스페이스 아래에만 존재한다 -
+        // 검증 없이 confirm을 그대로 태우면 다른 사용자의 key(혹은 profile-images/, contract-images/
+        // 같은 다른 도메인 key)를 넘겨서 확정시키는 것을 막을 수 없다 (UserService.confirmProfileImageUpload와
+        // 동일한 이유).
+        if (!S3KeyGenerator.isPropertyImageOwnedBy(principal.userId(), request.key())) {
+            throw new BusinessException(ErrorCode.FILE_KEY_ACCESS_DENIED);
+        }
+
         s3PresignService.confirmUpload(request.key(), S3ImagePurpose.PROPERTY);
         String imageUrl = s3PresignService.generateDownloadUrl(request.key(), S3ImagePurpose.PROPERTY);
 

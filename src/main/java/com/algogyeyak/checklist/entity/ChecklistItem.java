@@ -20,6 +20,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.Arrays;
 
 /**
  * 체크리스트 문항 하나의 상태. 생성 시점에 ChecklistItemTemplate의 내용을 스냅샷으로 복사해두므로,
@@ -41,6 +42,12 @@ public class ChecklistItem {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "checklist_id", nullable = false)
     private Checklist checklist;
+
+    // 예시 이미지를 조회할 때만 쓰는 참조 - 원본 템플릿이 삭제되거나(관리자 기능 없음, 발생 안 함)
+    // null일 수 있는 과거 데이터(이 컬럼 추가 이전에 생성된 체크리스트)를 감안해 nullable로 둔다.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "template_id")
+    private ChecklistItemTemplate template;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -71,6 +78,11 @@ public class ChecklistItem {
     @Column(name = "display_order", nullable = false)
     private int displayOrder;
 
+    // MULTIPLE_CHOICE 타입 문항의 선택지를 콤마로 구분해 담는다(예: "가스보일러,기름보일러,전기보일러,지역난방").
+    // 다른 타입은 사용하지 않는다. 생성 시점에 템플릿의 options를 스냅샷 복사한다(content/guideText와 동일한 방식) -
+    // 문항 내용 자체이므로 이미지와 달리 시점 고정이 필요하다.
+    private String options;
+
     @Column(nullable = false)
     private boolean checked;
 
@@ -87,6 +99,7 @@ public class ChecklistItem {
     @Builder
     private ChecklistItem(
             Checklist checklist,
+            ChecklistItemTemplate template,
             ChecklistCategory category,
             String content,
             String guideText,
@@ -94,9 +107,11 @@ public class ChecklistItem {
             ChecklistImportance importance,
             ChecklistItemType itemType,
             ChecklistItemCode code,
-            int displayOrder
+            int displayOrder,
+            String options
     ) {
         this.checklist = checklist;
+        this.template = template;
         this.category = category;
         this.content = content;
         this.guideText = guideText;
@@ -105,6 +120,7 @@ public class ChecklistItem {
         this.itemType = itemType;
         this.code = code;
         this.displayOrder = displayOrder;
+        this.options = options;
         this.checked = false;
         this.issueFound = false;
     }
@@ -145,8 +161,24 @@ public class ChecklistItem {
             case YES_NO -> answerYesNo(rawValue);
             case DATE -> answerDate(rawValue);
             case DOCUMENT_REQUEST -> answerDocumentRequest(rawValue);
+            case MULTIPLE_CHOICE -> answerMultipleChoice(rawValue);
             case CHECK -> throw new BusinessException(ErrorCode.BAD_REQUEST, "이 항목은 값 입력 방식이 아닙니다.");
         }
+    }
+
+    private void answerMultipleChoice(String rawValue) {
+        boolean validOption = options != null
+                && Arrays.stream(options.split(","))
+                        .map(String::trim)
+                        .anyMatch(option -> option.equals(rawValue));
+        if (!validOption) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "선택지에 없는 값입니다.");
+        }
+
+        // "미흡"은 문항마다 이름이 다른 선택지들(양호/보통/미흡 등) 중에서도 항상 같은 의미(주의 필요)로
+        // 쓰기로 했다(채광/수압/냉난방시설 CHECK→MULTIPLE_CHOICE 전환 예정 - answerYesNo()처럼 문항별
+        // code로 분기할 필요 없이 값 자체로 판단 가능).
+        markAnswered(rawValue, "미흡".equals(rawValue));
     }
 
     private void answerDocumentRequest(String rawValue) {

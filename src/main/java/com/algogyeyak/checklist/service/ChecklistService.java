@@ -6,6 +6,8 @@ import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.entity.ChecklistItem;
 import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
 import com.algogyeyak.checklist.entity.ChecklistResult;
+import com.algogyeyak.checklist.repository.ChecklistItemRepository;
+import com.algogyeyak.checklist.repository.ChecklistItemRepository.ChecklistProgressProjection;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
@@ -26,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -34,6 +37,7 @@ public class ChecklistService {
 
     private final ChecklistRepository checklistRepository;
     private final ChecklistItemTemplateRepository checklistItemTemplateRepository;
+    private final ChecklistItemRepository checklistItemRepository;
     private final UserRepository userRepository;
     private final PropertyRepository propertyRepository;
 
@@ -159,7 +163,34 @@ public class ChecklistService {
 
         Page<Object[]> page = checklistRepository.findOverviewByUserId(userId, PropertyStatus.ACTIVE, fixedSortPageable);
 
-        return PageResponse.from(page.map(row ->
-                ChecklistOverviewResponse.from((Property) row[0], (Checklist) row[1])));
+        // ChecklistItemRepository.findProgressByUserId()와 동일한 이유로(PropertyService의
+        // checklistProgressByPropertyId 참고) 유저 전체 진행률을 쿼리 하나로 배치 조회한다 -
+        // 이 응답도 매물별 진행 상태 목록이라 페이지 크기와 무관하게 N+1 없이 끝나야 한다.
+        Map<Long, ChecklistProgressProjection> progressByPropertyId = checklistItemRepository.findProgressByUserId(userId)
+                .stream()
+                .collect(Collectors.toMap(ChecklistProgressProjection::getPropertyId, p -> p));
+
+        return PageResponse.from(page.map(row -> {
+            Property property = (Property) row[0];
+            Checklist checklist = (Checklist) row[1];
+            ChecklistProgressProjection progress = progressByPropertyId.get(property.getId());
+            return ChecklistOverviewResponse.from(
+                    property, checklist,
+                    progress != null ? toProgressPercent(progress) : null,
+                    progress != null ? (int) progress.getIssueCount() : null
+            );
+        }));
+    }
+
+    /**
+     * totalCount가 0이면(이론상 생기지 않아야 하지만, 체크리스트는 생성 시점에 항상 템플릿 문항을
+     * 함께 복사하므로) 0으로 나누는 대신 진행률을 0%로 취급한다. PropertyService.toProgressPercent()와
+     * 동일한 로직 - 계산 자체는 사소해서 공유 유틸리티를 두기보다 각자 유지한다.
+     */
+    private static Integer toProgressPercent(ChecklistProgressProjection projection) {
+        if (projection.getTotalCount() == 0) {
+            return 0;
+        }
+        return (int) Math.round(projection.getCheckedCount() * 100.0 / projection.getTotalCount());
     }
 }
