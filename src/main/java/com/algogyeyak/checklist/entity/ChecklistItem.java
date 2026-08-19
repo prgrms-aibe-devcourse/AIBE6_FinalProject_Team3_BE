@@ -175,7 +175,10 @@ public class ChecklistItem {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "선택지에 없는 값입니다.");
         }
 
-        markAnswered(rawValue, false);
+        // "미흡"은 문항마다 이름이 다른 선택지들(양호/보통/미흡 등) 중에서도 항상 같은 의미(주의 필요)로
+        // 쓰기로 했다(채광/수압/냉난방시설 CHECK→MULTIPLE_CHOICE 전환 예정 - answerYesNo()처럼 문항별
+        // code로 분기할 필요 없이 값 자체로 판단 가능).
+        markAnswered(rawValue, "미흡".equals(rawValue));
     }
 
     private void answerDocumentRequest(String rawValue) {
