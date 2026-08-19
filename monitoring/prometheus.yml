@@ -4,5 +4,12 @@ global:
 scrape_configs:
   - job_name: 'spring-backend'
     metrics_path: '/actuator/prometheus'
+    # /actuator/prometheus는 MetricsScrapeTokenFilter(backend)가 이 값을 검사한다(공유 비밀 -
+    # backend/.env의 METRICS_SCRAPE_TOKEN과 반드시 같아야 함). 이 파일은 docker-compose.monitoring.yml이
+    # 정적 파일로 그대로 마운트만 하고(:ro), .env 값을 이 파일 안으로 치환해주는 절차가 없어서(다른
+    # 값들처럼 ${VAR} 문법을 못 씀) 아래 값은 하드코딩된 상태다 - METRICS_SCRAPE_TOKEN을 바꾸면
+    # 이 값도 반드시 수동으로 같이 바꿀 것. 로컬 기본값(local-dev-only-scrape-token-please-override)과
+    # 동일하게 맞춰둬서, .env를 안 건드린 로컬 환경에서는 별도 설정 없이도 스크래핑이 바로 된다.
+    bearer_token: 'local-dev-only-scrape-token-please-override'
     static_configs:
       - targets: ['algogyeyak-backend:8080']  # docker-compose.yml의 backend 서비스명과 일치해야 함

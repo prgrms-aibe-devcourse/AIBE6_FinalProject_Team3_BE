@@ -65,6 +65,10 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
 
+    // /actuator/prometheus 전용 공유 비밀 - MetricsScrapeTokenFilter 참고.
+    @Value("${app.metrics.scrape-token}")
+    private String metricsScrapeToken;
+
     // CORS_ALLOWED_ORIGINS가 ""/공백/","처럼 값은 있지만 파싱 후 남는 origin이 없는 경우를 막는다 -
     // fail-fast(placeholder 필수화)는 env 자체가 없는 경우만 잡아주고, 이런 값은 그대로 통과시켜
     // CORS 설정이 빈 리스트로 조용히 뜬 채 모든 브라우저 인증 요청이 CORS 차단으로 실패하게 만든다.
@@ -106,7 +110,10 @@ public class SecurityConfig {
                         // 인증 정보 자체가 없어지는 건 아니다.
                         .requestMatchers("/users/nickname-check", "/users/nickname-policy").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
-                        // Actuator(헬스체크 + Prometheus) - health는 위 목록에도 있었던 중복 항목을 여기로 합침
+                        // Actuator(헬스체크 + Prometheus) - health는 위 목록에도 있었던 중복 항목을 여기로 합침.
+                        // prometheus는 여기서는 permitAll(Spring Security 레벨의 JWT 인증은 면제)이지만,
+                        // MetricsScrapeTokenFilter가 별도로 공유 비밀(app.metrics.scrape-token)을 검사해
+                        // 리버스 프록시 설정과 무관하게 한 번 더 막는다 - health는 대상이 아니다.
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .anyRequest().authenticated()
                 )
@@ -140,7 +147,9 @@ public class SecurityConfig {
                         .accessDeniedHandler((request, response, accessDeniedException) ->
                                 writeErrorResponse(response, ErrorCode.FORBIDDEN))
                 )
-                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository), UsernamePasswordAuthenticationFilter.class)
+                // /actuator/prometheus만 검사하고 그 외 경로는 그대로 통과시킨다 - MetricsScrapeTokenFilter 참고.
+                .addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

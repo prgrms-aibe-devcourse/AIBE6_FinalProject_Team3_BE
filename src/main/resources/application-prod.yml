@@ -73,6 +73,10 @@ app:
   dev-login:
     enabled: ${DEV_LOGIN_ENABLED:false}
     secret: ${DEV_LOGIN_SECRET:}
+  # MetricsScrapeTokenFilter - 다른 운영 비밀값과 같은 이유로 기본값을 두지 않는다(깜빡하면 기동
+  # 자체가 실패해야, /actuator/prometheus가 이 검사 없이 뜨는 상황을 막을 수 있다).
+  metrics:
+    scrape-token: ${METRICS_SCRAPE_TOKEN}
 
 # 아래 외부 연동 시크릿들도 JWT_SECRET 등과 같은 이유로 기본값을 없앤다(2026-08-12) - application.yml의
 # dummy-*-for-local 기본값이 운영에도 그대로 살아있으면, 배포 시 해당 환경변수를 깜빡해도 앱은

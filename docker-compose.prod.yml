@@ -7,7 +7,9 @@ services:
       - "127.0.0.1:8080:8080"
 
   nginx-proxy-manager:
-    image: 'jc21/nginx-proxy-manager:latest'
+    # :latest는 재기동할 때마다 다른 버전이 조용히 올라올 수 있어(호환성 깨짐/보안 리그레션 위험)
+    # 특정 릴리스에 고정한다 - 실제 운영 중인 버전과 다르면 확인 후 맞춰서 올릴 것.
+    image: 'jc21/nginx-proxy-manager:2.11.3'
     container_name: npm
     restart: unless-stopped
     ports:
