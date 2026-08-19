@@ -594,6 +594,29 @@ class AdminChecklistTemplateServiceTest {
         verifyNoAuditLog();
     }
 
+    // 회귀 테스트 - ChecklistItemTemplateImage의 (template_id, display_order) 유니크 제약(체크리스트
+    // 시더의 동시 기동 중복 삽입을 막기 위해 추가됨)이 관리자 두 명이 거의 동시에 이미지를 추가하는
+    // 레이스도 함께 막는다. 그 예외가 그대로 새어나가면 사용자 친화적인 응답 없이 500으로 올라가므로,
+    // 재시도를 안내하는 409(ADMIN_CHECKLIST_TEMPLATE_IMAGE_ORDER_CONFLICT)로 변환돼야 한다.
+    @Test
+    @DisplayName("동시에 같은 표시순서로 이미지가 저장되면(다른 관리자와의 레이스) 재시도를 안내하는 409로 변환된다")
+    void addImageTranslatesDisplayOrderConflictToBusinessException() {
+        ChecklistItemTemplate template = template(1L, 3, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        when(checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(1L))
+                .thenReturn(List.of(image(10L, template, "https://example.com/1.jpg", 1)));
+        when(checklistItemTemplateImageRepository.save(any(ChecklistItemTemplateImage.class)))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException(
+                        "Duplicate entry for key 'uk_checklist_item_template_image_template_display_order'"));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.addImage(
+                ACTOR_ID, ACTOR_EMAIL, 1L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/2.jpg")))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_ORDER_CONFLICT));
+        verifyNoAuditLog();
+    }
+
     @Test
     @DisplayName("이미지를 삭제한다")
     void deleteImageRemovesImage() {

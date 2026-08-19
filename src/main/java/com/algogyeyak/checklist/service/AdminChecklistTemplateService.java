@@ -20,6 +20,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -275,11 +276,13 @@ public class AdminChecklistTemplateService {
     }
 
     /**
-     * 알려진 한계(조회 후 저장 방식이라 원자적이지 않음): 같은 문항에 관리자 두 명이 거의 동시에
-     * 이미지를 추가하면 둘 다 같은 nextDisplayOrder를 읽어 같은 값으로 저장할 수 있다 - 정렬이
-     * 뒤섞이는 정도의 문제이지 데이터 손상은 아니다. validateCode()/delete()와 동일한 이유
-     * (관리자 전용, 저빈도)로 지금은 감수한다 - 실제로 문제가 되면 그때 DB unique
-     * 제약(template_id, display_order)이나 재시도를 추가한다.
+     * 조회 후 저장 방식이라 원자적이지 않다 - 같은 문항에 관리자 두 명이 거의 동시에 이미지를
+     * 추가하면 둘 다 같은 nextDisplayOrder를 읽어 같은 값으로 저장을 시도할 수 있다.
+     * ChecklistItemTemplateImage의 (template_id, display_order) DB 유니크 제약(2026-08-19,
+     * ChecklistTemplateSeeder의 동시 기동 시더 이미지 중복 삽입을 막기 위해 추가됨 - 그 제약이
+     * 이 경로의 레이스도 함께 막아준다)이 이제 이 경합을 실제로 막는다 - 뒤늦게 커밋하는 쪽은
+     * DataIntegrityViolationException을 받는데, 그대로 두면 사용자 친화적인 응답 없이 500으로
+     * 올라가므로 여기서 잡아 재시도를 안내하는 409로 변환한다.
      */
     @Transactional
     public AdminChecklistItemTemplateImageResponse addImage(
@@ -291,11 +294,16 @@ public class AdminChecklistTemplateService {
                 .max()
                 .orElse(0) + 1;
 
-        ChecklistItemTemplateImage saved = checklistItemTemplateImageRepository.save(ChecklistItemTemplateImage.builder()
-                .template(template)
-                .imageUrl(request.imageUrl())
-                .displayOrder(nextDisplayOrder)
-                .build());
+        ChecklistItemTemplateImage saved;
+        try {
+            saved = checklistItemTemplateImageRepository.save(ChecklistItemTemplateImage.builder()
+                    .template(template)
+                    .imageUrl(request.imageUrl())
+                    .displayOrder(nextDisplayOrder)
+                    .build());
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_ORDER_CONFLICT);
+        }
         adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE, saved.getId(),
                 Map.of("templateId", templateId, "imageUrl", saved.getImageUrl()));
         return AdminChecklistItemTemplateImageResponse.from(saved);
