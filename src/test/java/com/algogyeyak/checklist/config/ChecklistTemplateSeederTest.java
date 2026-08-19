@@ -208,4 +208,30 @@ class ChecklistTemplateSeederTest {
         verify(imageRepository, never()).save(argThat(
                 image -> image.getTemplate() != null && image.getTemplate().getContent().equals(LIGHT_CONTENT)));
     }
+
+    // 회귀 테스트 - 템플릿 저장(seedKey)뿐 아니라 이미지 저장도 같은 종류의 레이스를 겪는다: 두
+    // 인스턴스가 동시에 "이 문항엔 아직 이미지가 없다"고 읽으면 둘 다 같은 이미지 세트를 붙이려
+    // 시도할 수 있다. ChecklistItemTemplateImage의 (template_id, display_order) 유니크 제약이
+    // 그 가드다 - 한 이미지(예: 2번째)만 다른 인스턴스가 먼저 커밋해 유니크 제약 위반이 나도, 그
+    // 예외 하나 때문에 앱 기동 전체가 실패하거나 같은 문항의 나머지 이미지 삽입까지 중단돼서는
+    // 안 된다.
+    @Test
+    @DisplayName("동시 기동 중인 다른 인스턴스가 이미 붙인 이미지는 유니크 제약 위반을 잡아 조용히 건너뛰고, 같은 문항의 나머지 이미지는 계속 저장한다")
+    void skipsImageThatAnotherInstanceAlreadyAttachedConcurrently() throws Exception {
+        List<ChecklistItemTemplate> allExisting = otherImagedTemplatesAlreadyHaveImages(LEAK_CONTENT);
+        when(repository.findAllWithImages()).thenReturn(allExisting);
+        stubSaveToReturnArgument();
+        when(s3PresignService.generateDownloadUrl(any(), eq(S3ImagePurpose.CHECKLIST_TEMPLATE)))
+                .thenReturn("https://bucket.s3.ap-northeast-2.amazonaws.com/dummy.jpg");
+        // displayOrder=2로 저장을 시도하는 이미지만 다른 인스턴스가 이미 심어둔 상황을 흉내낸다.
+        when(imageRepository.save(argThat(image -> image != null && image.getDisplayOrder() == 2)))
+                .thenThrow(new DataIntegrityViolationException(
+                        "Duplicate entry for key 'uk_checklist_item_template_image_template_display_order'"));
+
+        assertThatCode(() -> seeder.run(new DefaultApplicationArguments())).doesNotThrowAnyException();
+
+        // LEAK_CONTENT엔 이미지가 3장(순서 1,2,3) 있다 - 2번만 실패해도 1번/3번은 그대로 저장 시도된다.
+        verify(imageRepository).save(argThat(image -> image != null && image.getDisplayOrder() == 1));
+        verify(imageRepository).save(argThat(image -> image != null && image.getDisplayOrder() == 3));
+    }
 }

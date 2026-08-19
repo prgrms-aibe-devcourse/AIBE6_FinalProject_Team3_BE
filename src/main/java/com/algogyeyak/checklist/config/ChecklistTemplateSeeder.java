@@ -148,13 +148,30 @@ public class ChecklistTemplateSeeder implements ApplicationRunner {
             int displayOrder = 1;
             for (String imageKey : imageKeys) {
                 String imageUrl = s3PresignService.generateDownloadUrl(imageKey, S3ImagePurpose.CHECKLIST_TEMPLATE);
-                checklistItemTemplateImageRepository.save(ChecklistItemTemplateImage.builder()
-                        .template(template)
-                        .imageUrl(imageUrl)
-                        .displayOrder(displayOrder)
-                        .build());
+                insertImageIfNotAlreadyAttachedConcurrently(template, imageUrl, displayOrder);
                 displayOrder++;
             }
+        }
+    }
+
+    // 여기서도 template 저장과 같은 문제가 있다 - "이 문항엔 아직 이미지가 없다"는 판단이
+    // resyncToLatestSeed()의 findAllWithImages() 조회 결과 하나로 이뤄지는데, 두 인스턴스가 동시에
+    // 같은 결과를 읽으면 둘 다 같은 문항에 같은 이미지 세트를 중복 삽입하려 시도할 수 있다.
+    // ChecklistItemTemplateImage의 (template_id, display_order) 유니크 제약이 그 가드다 - 먼저
+    // 커밋한 쪽만 성공하고, 나머지는 이 예외를 잡아 조용히 건너뛴다(이미 다른 인스턴스가 같은
+    // 이미지를 붙여뒀으므로 안전하게 건너뛸 수 있다).
+    private void insertImageIfNotAlreadyAttachedConcurrently(ChecklistItemTemplate template, String imageUrl, int displayOrder) {
+        try {
+            checklistItemTemplateImageRepository.save(ChecklistItemTemplateImage.builder()
+                    .template(template)
+                    .imageUrl(imageUrl)
+                    .displayOrder(displayOrder)
+                    .build());
+        } catch (DataIntegrityViolationException e) {
+            log.warn(
+                    "체크리스트 시드 이미지(문항='{}', 순서={}) 저장 실패 - 동시 기동 중인 다른 인스턴스가"
+                            + " 이미 같은 이미지를 붙였을 수 있습니다(이 경우 정상). 원인은 cause 메시지를 확인하세요.",
+                    template.getContent(), displayOrder, e);
         }
     }
 }
