@@ -75,7 +75,7 @@ class DepositSafetyControllerTest {
         DepositSafetyCheckResponse response = new DepositSafetyCheckResponse(
                 10L, DepositSafetyStatus.CALCULATED, 82, false, null, null,
                 "이 집 전세가율은 82%예요.", java.time.LocalDate.of(2026, 7, 31), 5, 300, null,
-                LocalDateTime.now(), DepositSafetyCheckResponse.DISCLAIMER, false, 80, 100, 150);
+                LocalDateTime.now(), DepositSafetyCheckResponse.DISCLAIMER, false, false, 80, 100, 150);
         when(depositSafetyCheckService.get(1L, 10L)).thenReturn(response);
 
         mockMvc.perform(get("/properties/10/deposit-safety")
@@ -97,7 +97,7 @@ class DepositSafetyControllerTest {
         DepositSafetyCheckResponse response = new DepositSafetyCheckResponse(
                 10L, DepositSafetyStatus.CALCULATED, 87, true, 50_000_000L, 10_000_000L,
                 "이 집 전세가율은 87%예요.", java.time.LocalDate.of(2026, 7, 31), 5, 300, null,
-                LocalDateTime.now(), DepositSafetyCheckResponse.DISCLAIMER, false, 80, 100, 150);
+                LocalDateTime.now(), DepositSafetyCheckResponse.DISCLAIMER, false, false, 80, 100, 150);
         when(depositSafetyCheckService.recalculate(1L, 10L, 50_000_000L, 10_000_000L)).thenReturn(response);
 
         mockMvc.perform(post("/properties/10/deposit-safety/recalculate")
