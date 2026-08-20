@@ -19,11 +19,12 @@ export const options = {
   scenarios: {
     // 체크리스트 생성 동시 요청 - ChecklistService.createOrGetChecklist()에 REQUIRES_NEW +
     // DataIntegrityViolationException 복구 패턴을 적용해(2026-08-20) 이제는 몇 명이 동시에
-    // 요청해도 항상 200/201로 정상 처리돼야 한다.
+    // 요청해도 항상 200/201로 정상 처리돼야 한다. 5명으로는 REQUIRES_NEW 격리 자체가 도는지만
+    // 확인되고 실제 경쟁 강도는 약해서, 더 확실히 검증하려고 50명으로 올림.
     checklistCreate: {
       executor: 'per-vu-iterations',
       exec: 'checklistCreateScenario',
-      vus: 5,
+      vus: 50,
       iterations: 1,
       startTime: '0s',
       maxDuration: '30s',
