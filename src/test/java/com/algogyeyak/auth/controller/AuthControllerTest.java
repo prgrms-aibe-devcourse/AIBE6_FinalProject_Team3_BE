@@ -613,9 +613,13 @@ class AuthControllerTest {
                     .andExpect(header().string("Set-Cookie",
                             containsString(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "=")));
         } finally {
-            // 다른 테스트에 영향이 없도록 기본값으로 되돌린다.
+            // 다른 테스트에 영향이 없도록 기본값으로 되돌린다 - email/user-email도 함께 리셋해야
+            // 한다(2026-08-20 전수조사에서 지적: 리셋 누락 시 테스트 실행 순서에 따라 다른 테스트의
+            // 단언이 의도와 무관하게 우연히 통과/실패할 수 있었다).
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
             ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+            ReflectionTestUtils.setField(authController, "devLoginEmail", "");
+            ReflectionTestUtils.setField(authController, "devLoginUserEmail", "");
         }
     }
 
@@ -634,6 +638,8 @@ class AuthControllerTest {
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
             ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+            ReflectionTestUtils.setField(authController, "devLoginEmail", "");
+            ReflectionTestUtils.setField(authController, "devLoginUserEmail", "");
         }
     }
 
@@ -655,6 +661,8 @@ class AuthControllerTest {
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
             ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+            ReflectionTestUtils.setField(authController, "devLoginEmail", "");
+            ReflectionTestUtils.setField(authController, "devLoginUserEmail", "");
         }
     }
 
@@ -669,6 +677,9 @@ class AuthControllerTest {
     @Test
     void devLoginWithUserRoleIssuesAuthCookiesForSeededTestUser() throws Exception {
         ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        // "admin@algogyeyak.local로는 조회하지 않는다" 단언이 다른 테스트의 리셋 여부/실행 순서에
+        // 기대지 않도록, 이 테스트 안에서 직접 설정한다(2026-08-20 전수조사에서 지적).
+        ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
         ReflectionTestUtils.setField(authController, "devLoginUserEmail", "tester@algogyeyak.local");
         ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
         try {
@@ -690,6 +701,27 @@ class AuthControllerTest {
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
             ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+            ReflectionTestUtils.setField(authController, "devLoginEmail", "");
+            ReflectionTestUtils.setField(authController, "devLoginUserEmail", "");
+        }
+    }
+
+    // 회귀 테스트(2026-08-20 전수조사) - role을 Role enum으로 직접 바인딩받으면 시크릿 검사보다
+    // 먼저 파싱이 실패해 400을 반환했다 - "존재 자체를 드러내지 않는다"는 설계와 달리 이 엔드포인트가
+    // 존재한다는 걸 알려주는 오라클이 됐었다. 잘못된 role 값도 나머지 실패 사유와 동일하게 404여야 한다.
+    @Test
+    void devLoginReturnsNotFoundForInvalidRoleValueInsteadOfBadRequest() throws Exception {
+        ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        ReflectionTestUtils.setField(authController, "devLoginEmail", "admin@algogyeyak.local");
+        ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
+        try {
+            mockMvc.perform(post("/auth/dev-login?role=bogus").header("X-Dev-Login-Key", "test-secret"))
+                    .andExpect(status().isNotFound());
+        } finally {
+            ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+            ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+            ReflectionTestUtils.setField(authController, "devLoginEmail", "");
+            ReflectionTestUtils.setField(authController, "devLoginUserEmail", "");
         }
     }
 
@@ -709,6 +741,8 @@ class AuthControllerTest {
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
             ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+            ReflectionTestUtils.setField(authController, "devLoginEmail", "");
+            ReflectionTestUtils.setField(authController, "devLoginUserEmail", "");
         }
     }
 
@@ -729,6 +763,8 @@ class AuthControllerTest {
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
             ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+            ReflectionTestUtils.setField(authController, "devLoginEmail", "");
+            ReflectionTestUtils.setField(authController, "devLoginUserEmail", "");
         }
     }
 
@@ -749,6 +785,8 @@ class AuthControllerTest {
         } finally {
             ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
             ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+            ReflectionTestUtils.setField(authController, "devLoginEmail", "");
+            ReflectionTestUtils.setField(authController, "devLoginUserEmail", "");
         }
     }
 

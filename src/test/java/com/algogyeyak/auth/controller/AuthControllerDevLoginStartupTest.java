@@ -68,4 +68,29 @@ class AuthControllerDevLoginStartupTest {
                         "app.dev-login.secret=")
                 .run(context -> assertThat(context).hasNotFailed());
     }
+
+    // 회귀 테스트(2026-08-20 전수조사) - email/user-email이 빈 값이면 EmailNormalizer.normalize("")가
+    // ""를 그대로 돌려주고, DevTestUserSeeder/AdminAccountSeeder가 findByEmail("")로 실제 email=""
+    // 계정을 시딩해버릴 수 있었다 - secret과 동일하게 기동 자체를 막아야 한다.
+    @Test
+    void failsToStartWhenDevLoginEnabledWithBlankEmail() {
+        contextRunner
+                .withPropertyValues(
+                        "app.dev-login.enabled=true",
+                        "app.dev-login.email=",
+                        "app.dev-login.user-email=tester@algogyeyak.local",
+                        "app.dev-login.secret=some-secret")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void failsToStartWhenDevLoginEnabledWithBlankUserEmail() {
+        contextRunner
+                .withPropertyValues(
+                        "app.dev-login.enabled=true",
+                        "app.dev-login.email=admin@algogyeyak.local",
+                        "app.dev-login.user-email=",
+                        "app.dev-login.secret=some-secret")
+                .run(context -> assertThat(context).hasFailed());
+    }
 }

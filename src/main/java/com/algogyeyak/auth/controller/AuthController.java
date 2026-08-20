@@ -94,9 +94,20 @@ public class AuthController {
     // 켜고 DEV_LOGIN_SECRET을 깜빡하는 실수를 막기 위함).
     @PostConstruct
     private void validateDevLoginConfig() {
-        if (devLoginEnabled && !StringUtils.hasText(devLoginSecret)) {
+        if (!devLoginEnabled) {
+            return;
+        }
+        if (!StringUtils.hasText(devLoginSecret)) {
             throw new IllegalStateException(
                     "app.dev-login.enabled=true requires app.dev-login.secret to be set");
+        }
+        // secret과 같은 이유 - email/user-email이 빈 값이면 EmailNormalizer.normalize("")가 ""를
+        // 돌려주고, DevTestUserSeeder/AdminAccountSeeder가 findByEmail("")로 실제 계정을 시딩해버릴
+        // 수 있다(2026-08-20 전수조사에서 지적). enabled=true인데 둘 중 하나라도 비어있으면 기동
+        // 자체를 막는다.
+        if (!StringUtils.hasText(devLoginEmail) || !StringUtils.hasText(devLoginUserEmail)) {
+            throw new IllegalStateException(
+                    "app.dev-login.enabled=true requires app.dev-login.email and app.dev-login.user-email to be set");
         }
     }
 
@@ -282,9 +293,20 @@ public class AuthController {
     @PostMapping("/dev-login")
     public ResponseEntity<ApiResponse<MeResponse>> devLogin(
             @RequestHeader(value = "X-Dev-Login-Key", required = false) String key,
-            @RequestParam(value = "role", required = false, defaultValue = "ADMIN") Role role,
+            @RequestParam(value = "role", required = false, defaultValue = "ADMIN") String roleParam,
             HttpServletResponse response) {
         if (!devLoginEnabled || !constantTimeEquals(devLoginSecret, key)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+
+        // role을 Role enum으로 직접 받으면 Spring이 시크릿 검사보다 먼저 바인딩을 시도해, 잘못된
+        // 값(예: role=bogus)이 404가 아니라 400을 반환해버린다 - "존재 자체를 드러내지 않는다"는
+        // 위 설계를 무력화하는 존재 오라클이 된다(2026-08-20 전수조사에서 지적). String으로 받아
+        // 시크릿 검사를 통과한 뒤에만 파싱해, 잘못된 값도 나머지 실패 사유와 동일하게 404로 묶는다.
+        Role role;
+        try {
+            role = Role.valueOf(roleParam);
+        } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.NOT_FOUND);
         }
 
