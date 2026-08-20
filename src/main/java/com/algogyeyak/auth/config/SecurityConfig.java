@@ -7,6 +7,7 @@ import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CustomOAuth2UserService;
+import com.algogyeyak.global.config.RequestIdLoggingFilter;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.response.ApiError;
 import com.algogyeyak.global.response.ApiResponse;
@@ -173,6 +174,9 @@ public class SecurityConfig {
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
+        // 프론트가 CORS 환경(별도 도메인)이라 응답 헤더는 Access-Control-Expose-Headers에 없으면
+        // JS에서 아예 못 읽는다 - X-Request-Id를 클라이언트 로그/문의와 대조하려면 명시적으로 열어줘야 한다.
+        configuration.setExposedHeaders(List.of(RequestIdLoggingFilter.REQUEST_ID_HEADER));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
