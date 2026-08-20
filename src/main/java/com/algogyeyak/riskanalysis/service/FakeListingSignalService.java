@@ -242,7 +242,16 @@ public class FakeListingSignalService {
     // 결과 1건만 유지한다. insert 경쟁 대비는 upsertCheck()와 동일한 이유·동일한 패턴.
     private void upsertRisk(Property property, RiskSignalType signalType, SignalCheckResult result) {
         if (result.status() != RiskCheckStatus.SUCCESS || result.description() == null) {
-            riskRepository.deleteByPropertyIdAndSignalType(property.getId(), signalType);
+            // 이 메서드의 다른 모든 쓰기(update/insert)는 REQUIRES_NEW로 격리돼 있는데 이 delete만
+            // 바깥(ambient) 트랜잭션에서 그대로 실행되고 있었다 - checkAndSave(Property) 안에서 이
+            // 호출 "이후"에 실행되는 다른 코드(예: depositSafetyCheckService.checkAndSave())가 예외를
+            // 던지면, 그 예외를 밖에서 잡아 흡수하더라도 Spring이 이미 공유 트랜잭션을
+            // rollback-only로 표시해버려 이 delete까지 통째로 롤백된다 - "신호가 해소돼서 사라져야
+            // 하는 리스크가 DB에 그대로 남는" 버그로 실제 재현됨(신호가 새로 발견되는 insert/update
+            // 케이스는 이미 REQUIRES_NEW라 이 문제가 없었음). insert/update와 동일하게 REQUIRES_NEW로
+            // 격리해 바깥 트랜잭션의 이후 실패와 무관하게 항상 커밋되게 한다.
+            requiresNewTransactionTemplate.executeWithoutResult(status ->
+                    riskRepository.deleteByPropertyIdAndSignalType(property.getId(), signalType));
             return;
         }
 
