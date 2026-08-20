@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.slf4j.MDC;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -20,6 +21,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * 그대로 이어받아 - 여러 홉을 거치는 요청도 같은 ID로 추적할 수 있게 하고, 없으면 새로 발급한다.
  * 응답에도 같은 헤더로 돌려줘 클라이언트/프론트 로그와도 대조할 수 있게 한다.
  *
+ * <p>단, 들어온 값을 무조건 신뢰하면 클라이언트가 임의 문자열(예: 다른 사용자가 실제로 받은 값을
+ * 관찰/추측한 값)을 넣어 자기 요청의 로그를 다른 요청과 같은 상관관계 ID로 보이게 하거나, 아주 긴
+ * 값으로 로그를 부풀릴 수 있다 - 그래서 영숫자/하이픈/언더스코어로만 이뤄진 적당한 길이의 값만
+ * 그대로 이어받고, 형식이 안 맞으면 새로 발급한다.
+ *
  * <p>Spring Security 필터체인보다 앞서 항상 실행돼야 하므로(그래야 인증 관련 로그에도 ID가 붙는다)
  * SecurityConfig의 addFilterBefore가 아니라 별도 서블릿 필터로 등록한다({@link RequestIdFilterConfig}
  * 참고) - 스레드가 스레드풀에서 재사용되므로 요청이 끝나면 반드시 MDC에서 지운다.
@@ -28,6 +34,9 @@ public class RequestIdLoggingFilter extends OncePerRequestFilter {
 
     public static final String REQUEST_ID_HEADER = "X-Request-Id";
     public static final String MDC_KEY = "requestId";
+
+    private static final int MAX_LENGTH = 128;
+    private static final Pattern ALLOWED_FORMAT = Pattern.compile("^[A-Za-z0-9_-]+$");
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -44,6 +53,9 @@ public class RequestIdLoggingFilter extends OncePerRequestFilter {
 
     private String resolveRequestId(HttpServletRequest request) {
         String incoming = request.getHeader(REQUEST_ID_HEADER);
-        return StringUtils.hasText(incoming) ? incoming : UUID.randomUUID().toString();
+        boolean isValid = StringUtils.hasText(incoming)
+                && incoming.length() <= MAX_LENGTH
+                && ALLOWED_FORMAT.matcher(incoming).matches();
+        return isValid ? incoming : UUID.randomUUID().toString();
     }
 }
