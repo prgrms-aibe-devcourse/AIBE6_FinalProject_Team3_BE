@@ -441,7 +441,7 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
@@ -472,7 +472,7 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
@@ -515,7 +515,7 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(propertyWithChecklist, propertyWithoutChecklist), pageable, 2));
 
@@ -555,7 +555,7 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(checkedWithRisks, checkedClean, neverChecked), pageable, 3));
 
@@ -593,7 +593,7 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(calculated, unavailable), pageable, 2));
 
@@ -626,7 +626,7 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(withImages, withoutImages), pageable, 2));
 
@@ -679,11 +679,11 @@ class PropertyServiceTest {
     void 지역_검색어로_필터링하면_repository_search에_region이_전달된다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                "역삼동", null, null, null, null, null, null, null, null
+                "역삼동", null, null, null, null, null, null, null, null, null
         );
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                eq("역삼동"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq("역삼동"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
 
@@ -697,13 +697,13 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
                 null, 20.0, 30.0, TransactionType.JEONSE, PropertyType.OFFICETEL,
-                10_000_000L, 50_000_000L, null, null
+                10_000_000L, 50_000_000L, null, null, null
         );
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), eq(20.0), eq(30.0),
                 eq(TransactionType.JEONSE), eq(PropertyType.OFFICETEL),
-                eq(10_000_000L), eq(50_000_000L), isNull(), isNull(),
+                eq(10_000_000L), eq(50_000_000L), isNull(), isNull(), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
 
@@ -716,13 +716,13 @@ class PropertyServiceTest {
     void 월세_범위_조건이_repository_search에_그대로_전달된다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                null, null, null, TransactionType.MONTHLY_RENT, null, null, null, 300_000L, 800_000L
+                null, null, null, TransactionType.MONTHLY_RENT, null, null, null, 300_000L, 800_000L, null
         );
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), isNull(), isNull(),
                 eq(TransactionType.MONTHLY_RENT), isNull(),
-                isNull(), isNull(), eq(300_000L), eq(800_000L),
+                isNull(), isNull(), eq(300_000L), eq(800_000L), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
 
@@ -735,7 +735,7 @@ class PropertyServiceTest {
     void 면적_최소값이_최대값보다_크면_예외가_발생한다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                null, 30.0, 20.0, null, null, null, null, null, null
+                null, 30.0, 20.0, null, null, null, null, null, null, null
         );
 
         assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, condition))
@@ -748,7 +748,7 @@ class PropertyServiceTest {
     void 보증금_최소값이_최대값보다_크면_예외가_발생한다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                null, null, null, null, null, 50_000_000L, 10_000_000L, null, null
+                null, null, null, null, null, 50_000_000L, 10_000_000L, null, null, null
         );
 
         assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, condition))
@@ -761,13 +761,66 @@ class PropertyServiceTest {
     void 월세_최소값이_최대값보다_크면_예외가_발생한다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                null, null, null, null, null, null, null, 800_000L, 300_000L
+                null, null, null, null, null, null, null, 800_000L, 300_000L, null
         );
 
         assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, condition))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION);
+    }
+
+    @Test
+    void hasSignal이_true이면_확인_필요_신호가_있는_매물_id만_repository_search에_전달된다() {
+        Property signaled = Property.builder()
+                .userId(USER_ID).title("신호 있는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(30_000_000L).area(23.5).build();
+        ReflectionTestUtils.setField(signaled, "id", 1L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                null, null, null, null, null, null, null, null, null, true
+        );
+
+        // 매물 1번은 신호 2개, 2번은 신호 0개(=필터링에서 제외돼야 함) - id 1번만 담긴 리스트가
+        // repository.search()로 넘어가는지 확인한다.
+        when(propertyRiskSummaryProvider.getSummariesByUserId(USER_ID)).thenReturn(Map.of(
+                1L, new PropertyRiskSummary(2, "시세 대비 높은 가격", null),
+                2L, new PropertyRiskSummary(0, null, null)
+        ));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(List.of(1L)),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(signaled), pageable, 1));
+
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable, condition);
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).checkSignalCount()).isEqualTo(2);
+    }
+
+    @Test
+    void hasSignal이_true인데_신호_있는_매물이_없으면_repository_조회_없이_빈_페이지를_반환한다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                null, null, null, null, null, null, null, null, null, true
+        );
+
+        when(propertyRiskSummaryProvider.getSummariesByUserId(USER_ID)).thenReturn(Map.of(
+                1L, new PropertyRiskSummary(0, null, null)
+        ));
+
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable, condition);
+
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isEqualTo(0);
+        // 신호 있는 매물이 없으면 DB 조회 자체를 건너뛰어야 한다 - 호출됐다면 이 mock은 스텁이 안 돼
+        // 있어 Mockito가 기본값(null)을 반환하고 NPE가 나거나, strict stubbing이면 여기서 실패한다.
+        verify(propertyRepository, org.mockito.Mockito.never()).search(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()
+        );
     }
 
     @Test
