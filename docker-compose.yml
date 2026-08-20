@@ -30,7 +30,7 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: prod
       # JVM 힙 크기
-      JAVA_OPTS: "-Xms512m -Xmx1024m"
+      JAVA_OPTS: "-Xms512m -Xmx768m"
       # Redis
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
