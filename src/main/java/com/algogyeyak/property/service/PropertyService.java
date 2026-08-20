@@ -131,6 +131,28 @@ public class PropertyService {
         PageableUtils.validateMaxSize(pageable);
         validateSearchCondition(condition);
 
+        // 위험신호 개수·전세가율 배지는 risk-analysis가 유지하는 데이터라 property는 그 내부(리포지토리·
+        // 엔티티)를 직접 알지 못하고, 조회 전용 어댑터(PropertyRiskSummaryProvider)를 통해서만 받는다
+        // (risk-analysis-design.md 전수조사 결과 코드 품질 1번 - 매물 수정 시 재계산 트리거는 이벤트로
+        // 이미 분리돼 있었는데, 이 목록 조회 경로만 반대 방향으로 직접 결합돼 있던 걸 정리함).
+        // hasSignal 필터(#233)를 걸려면 이 호출을 페이지네이션보다 먼저 해야 한다 - 필터링 자체가
+        // "신호 있는 매물 id 목록"을 미리 알아야 DB 쿼리 조건으로 넘길 수 있기 때문. 이 호출은 필터
+        // 여부와 무관하게 원래도 매 목록 조회마다 하던 것이라 새로운 비용은 아니다.
+        Map<Long, PropertyRiskSummary> riskSummaryByPropertyId = propertyRiskSummaryProvider.getSummariesByUserId(userId);
+
+        List<Long> signalPropertyIds = null;
+        if (Boolean.TRUE.equals(condition.hasSignal())) {
+            signalPropertyIds = riskSummaryByPropertyId.entrySet().stream()
+                    .filter(entry -> entry.getValue().checkSignalCount() != null && entry.getValue().checkSignalCount() > 0)
+                    .map(Map.Entry::getKey)
+                    .toList();
+
+            // 신호 있는 매물이 하나도 없으면 DB에 빈 IN 절을 굳이 넘기지 않고 바로 빈 페이지로 응답한다.
+            if (signalPropertyIds.isEmpty()) {
+                return PageResponse.from(Page.<PropertyListResponse>empty(pageable));
+            }
+        }
+
         Page<Property> properties = propertyRepository.search(
                 userId,
                 PropertyStatus.ACTIVE,
@@ -143,6 +165,7 @@ public class PropertyService {
                 condition.maxDeposit(),
                 condition.minMonthlyRent(),
                 condition.maxMonthlyRent(),
+                signalPropertyIds,
                 pageable
         );
 
@@ -152,12 +175,6 @@ public class PropertyService {
                         ChecklistProgressProjection::getPropertyId,
                         PropertyService::toProgressPercent
                 ));
-
-        // 위험신호 개수·전세가율 배지는 risk-analysis가 유지하는 데이터라 property는 그 내부(리포지토리·
-        // 엔티티)를 직접 알지 못하고, 조회 전용 어댑터(PropertyRiskSummaryProvider)를 통해서만 받는다
-        // (risk-analysis-design.md 전수조사 결과 코드 품질 1번 - 매물 수정 시 재계산 트리거는 이벤트로
-        // 이미 분리돼 있었는데, 이 목록 조회 경로만 반대 방향으로 직접 결합돼 있던 걸 정리함).
-        Map<Long, PropertyRiskSummary> riskSummaryByPropertyId = propertyRiskSummaryProvider.getSummariesByUserId(userId);
 
         // 대표 이미지는 다른 필드들과 달리 "유저 전체 매물" 스코프가 아니라 "현재 페이지 매물"
         // 스코프로만 배치 조회한다 - 이미지는 매물당 여러 장(최대 10장)이라 유저 전체로 긁으면

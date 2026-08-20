@@ -9,11 +9,11 @@ import com.algogyeyak.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.mail.MailException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 로그아웃 상태의 비밀번호 재설정("비밀번호를 잊으셨나요?"). RefreshTokenService와 동일한 패턴 —
@@ -46,6 +47,19 @@ public class PasswordResetService {
     private static final String BY_HASH_KEY_PREFIX = "auth:password-reset:by-hash:";
     private static final String BY_USER_KEY_PREFIX = "auth:password-reset:by-user:";
     private static final String COOLDOWN_KEY_PREFIX = "auth:password-reset:cooldown:";
+
+    // 쿨다운 키를 조건 없이 DEL하면 TOCTOU가 생긴다: 이 요청이 setIfAbsent로 쿨다운을 건 뒤(t=0),
+    // SMTP가 타임아웃 없이 오래 걸리다(application.yml에 mail.smtp.*.timeout이 없어 무한대) 실패하는
+    // 사이에(t=90s 등) 쿨다운이 자연 TTL(60s)로 만료되고 같은 이메일의 새 요청이 새 쿨다운을 걸 수
+    // 있다 - 그 뒤늦게 도착한 실패 콜백이 조건 없이 DEL하면 방금 건 새 쿨다운(관계없는 요청 것)이
+    // 잘못 풀려버린다. 이 요청이 실제로 세운 값(cooldownToken)과 현재 키 값이 같을 때만 지우는
+    // compare-and-delete로 막는다 - 아래 REVOKE_SCRIPT 등과 동일한 패턴.
+    private static final RedisScript<Long> RELEASE_COOLDOWN_IF_MATCHES_SCRIPT = new DefaultRedisScript<>("""
+            if redis.call('GET', KEYS[1]) == ARGV[1] then
+              return redis.call('DEL', KEYS[1])
+            end
+            return 0
+            """, Long.class);
 
     // RefreshTokenService.ISSUE_SCRIPT와 동일한 구조 - 이전 세션(by-user가 가리키던 hash)의 by-hash를
     // 지우고 새 by-hash/by-user를 같은 스크립트 안에서 원자적으로 갱신한다.
@@ -109,10 +123,13 @@ public class PasswordResetService {
         // 계정 존재 여부와 무관하게 동일한 쿨다운을 적용한다 - 존재하는 이메일만 쿨다운에 걸린다면
         // 그 자체로 계정 존재 여부가 새어나간다.
         String cooldownKey = COOLDOWN_KEY_PREFIX + normalizedEmail;
+        // 각 요청이 자기만의 토큰을 쿨다운 값으로 세운다 - releaseCooldownBestEffort()가 나중에
+        // "지금 이 요청이 세운 값이 아직 그대로 남아있을 때만" 지우도록(compare-and-delete) 하기 위함.
+        String cooldownToken = UUID.randomUUID().toString();
         Boolean cooldownSet;
         try {
             cooldownSet = redisTemplate.opsForValue()
-                    .setIfAbsent(cooldownKey, "1", Duration.ofSeconds(requestCooldownSeconds));
+                    .setIfAbsent(cooldownKey, cooldownToken, Duration.ofSeconds(requestCooldownSeconds));
         } catch (DataAccessException e) {
             throw redisUnavailable(e);
         }
@@ -150,22 +167,36 @@ public class PasswordResetService {
             return;
         }
 
+        // 발송은 EmailService에서 비동기로 처리된다(SMTP 왕복 동안 이 요청 스레드를 붙잡아두지
+        // 않기 위함, com.algogyeyak.auth.config.AsyncConfig 참고) - 응답 자체는 원래도 계정 존재
+        // 여부 비노출을 위해 발송 성공 여부와 무관하게 항상 동일한 성공으로 나가므로, 발송이
+        // 비동기라는 사실이 응답에 영향을 주지는 않는다. 다만 쿨다운은 실제 발송 성공을 전제로 한
+        // 제한이므로(여기서 쿨다운을 풀어도 외부에서 관찰 가능한 응답 차이는 없다), 발송이 서버 쪽
+        // 이유(SMTP 일시 장애 등)로 실패하면 콜백에서 쿨다운을 풀어 사용자가 링크를 받지도 못한 채
+        // 서버 잘못으로 60초를 그냥 기다리는 일이 없게 한다.
+        //
+        // emailTaskExecutor의 큐가 가득 차면 @Async 프록시가 Future를 반환하기도 전에
+        // TaskRejectedException을 동기로 던진다 - .exceptionally()가 걸리기 전에 예외가 이 메서드
+        // 밖으로 그대로 나가면, 이 지점에 도달한다는 사실 자체가 "존재하는 활성 로컬 계정"이라는
+        // 뜻이라(위 eligibleUser 검사를 통과해야만 여기 옴) 존재하지 않는 이메일/소셜 전용 계정과
+        // 응답이 갈려 계정 존재 여부가 노출된다 - 반드시 이 메서드 안에서 흡수해야 한다.
         String resetLink = frontendBaseUrl + "/reset-password?token=" + rawToken;
         try {
-            emailService.sendPasswordResetLink(normalizedEmail, resetLink);
-        } catch (MailException e) {
-            log.error("비밀번호 재설정 메일 발송 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
-            // 쿨다운은 실제 발송 성공을 전제로 한 제한이다 - 응답 자체는 계정 존재 여부 비노출을
-            // 위해 항상 동일한 성공으로 유지하지만(여기서 쿨다운을 풀어도 외부에서 관찰 가능한
-            // 차이는 없다), 발송이 서버 쪽 이유로 실패했는데 쿨다운만 남으면 사용자가 링크를
-            // 받지도 못한 채 서버 잘못으로 60초를 그냥 기다려야 한다.
-            releaseCooldownBestEffort(cooldownKey, normalizedEmail);
+            emailService.sendPasswordResetLink(normalizedEmail, resetLink)
+                    .exceptionally(e -> {
+                        log.error("비밀번호 재설정 메일 발송 실패 - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
+                        releaseCooldownBestEffort(cooldownKey, cooldownToken, normalizedEmail);
+                        return null;
+                    });
+        } catch (TaskRejectedException e) {
+            log.error("비밀번호 재설정 메일 발송 작업 제출 실패(큐 포화) - 계정 존재 여부 비노출을 위해 성공으로 응답합니다 email={}", normalizedEmail, e);
+            releaseCooldownBestEffort(cooldownKey, cooldownToken, normalizedEmail);
         }
     }
 
-    private void releaseCooldownBestEffort(String cooldownKey, String normalizedEmail) {
+    private void releaseCooldownBestEffort(String cooldownKey, String cooldownToken, String normalizedEmail) {
         try {
-            redisTemplate.delete(cooldownKey);
+            redisTemplate.execute(RELEASE_COOLDOWN_IF_MATCHES_SCRIPT, List.of(cooldownKey), cooldownToken);
         } catch (DataAccessException e) {
             log.warn("메일 발송 실패 후 쿨다운 해제 실패(TTL로 자연 정리됨) email={}", normalizedEmail, e);
         }

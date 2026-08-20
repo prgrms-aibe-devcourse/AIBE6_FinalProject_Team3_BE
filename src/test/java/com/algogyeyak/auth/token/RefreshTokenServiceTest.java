@@ -176,6 +176,22 @@ class RefreshTokenServiceTest {
         assertCleansUpBothOrphanedKeysFor("1");
     }
 
+    // rotateThrowsAndCleansUpOrphanedSessionWhenUserWithdrawn()의 형제 케이스 - rotate()의 사용자
+    // 상태 가드(user == null || user.isWithdrawn() || user.isSuspended())는 지금까지 withdrawn
+    // 분기만 테스트가 있었다. suspended 분기도 동일하게 거부되고 고아 세션이 정리되어야 한다.
+    @Test
+    void rotateThrowsAndCleansUpOrphanedSessionWhenUserSuspended() {
+        User user = user(1L);
+        user.suspend();
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> refreshTokenService.rotate("token"));
+        assertEquals(ErrorCode.AUTH_REFRESH_TOKEN_INVALID, exception.getErrorCode());
+        assertCleansUpBothOrphanedKeysFor("1");
+    }
+
     @Test
     void rotateThrowsAndCleansUpOrphanedSessionWhenUserNoLongerExists() {
         doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());

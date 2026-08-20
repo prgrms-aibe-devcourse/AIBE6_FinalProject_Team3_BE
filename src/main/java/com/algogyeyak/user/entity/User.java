@@ -25,7 +25,13 @@ import java.time.temporal.ChronoUnit;
 // email/nickname/passwordHash/status를 탈퇴 전 값으로 되돌려 PII를 되살릴 수 있었다). 실제로
 // 변경된 컬럼만 UPDATE에 포함시켜 이 클래스를 막는다.
 @Entity
-@Table(name = "users")
+@Table(name = "users", indexes = {
+        // 관리자 페이지 유저 목록 조회(UserRepository.search)의 role+status 필터, 마지막 관리자
+        // 보호 카운트(countByRoleAndStatus/findAllByRoleAndStatusForUpdate)가 이 조합으로 조회한다.
+        @Index(name = "idx_user_role_status", columnList = "role, status"),
+        // 관리자 통계 대시보드 기간 조회(countByCreatedAtBetween/findCreatedAtBetween/findIdsByCreatedAtBetween)용.
+        @Index(name = "idx_user_created_at", columnList = "created_at")
+})
 @EntityListeners(AuditingEntityListener.class)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

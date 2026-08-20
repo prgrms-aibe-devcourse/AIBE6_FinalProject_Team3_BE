@@ -41,7 +41,7 @@ class AdminAuditLoggerIntegrationTest {
         User admin = userRepository.saveAndFlush(User.createLocalUser("actor@example.com", "hash", "행위자"));
         User target = userRepository.saveAndFlush(User.createLocalUser("target@example.com", "hash", "대상유저"));
 
-        adminUserService.updateRole(admin.getId(), target.getId(), Role.ADMIN);
+        adminUserService.updateRole(admin.getId(), admin.getEmail(), target.getId(), Role.ADMIN);
 
         // 같은 @SpringBootTest 컨텍스트를 공유하는 다른 테스트도 이 테이블에 행을 남길 수 있어
         // findAll() 전체 개수가 아니라, 이 테스트가 만든 target.getId()(새로 생성된 유저라 다른
