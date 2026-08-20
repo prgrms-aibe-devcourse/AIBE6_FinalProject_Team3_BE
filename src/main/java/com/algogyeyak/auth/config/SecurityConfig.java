@@ -84,9 +84,9 @@ public class SecurityConfig {
 
     // METRICS_SCRAPE_TOKEN=(빈 값)처럼 env 자체는 있지만 내용이 비어있는 경우를 막는다 - placeholder
     // 필수화(${METRICS_SCRAPE_TOKEN}, 기본값 없음)는 env가 아예 없는 경우만 fail-fast로 잡아주고,
-    // 빈 문자열은 그대로 통과시킨다. MetricsScrapeTokenFilter가 "Bearer " 뒤 토큰을 이 값과 단순
-    // equals로 비교하므로, 둘 다 빈 문자열이면 Authorization: Bearer  (토큰 없이 공백만) 요청이
-    // 인증을 그대로 통과해버린다.
+    // 빈 문자열은 그대로 통과시킨다. MetricsScrapeTokenFilter가 "Bearer " 뒤 토큰을 이 값과
+    // 상수시간(MessageDigest.isEqual)으로 비교하므로, 둘 다 빈 문자열이면 Authorization: Bearer
+    // (토큰 없이 공백만) 요청이 인증을 그대로 통과해버린다.
     @PostConstruct
     void validateMetricsScrapeToken() {
         if (!StringUtils.hasText(metricsScrapeToken)) {
