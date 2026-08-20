@@ -1,5 +1,6 @@
 package com.algogyeyak.checklist.service;
 
+import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageCreateRequest;
@@ -26,6 +27,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -598,7 +600,9 @@ class AdminChecklistTemplateServiceTest {
 
         assertThat(result.imageUrl()).isEqualTo("https://example.com/2.jpg");
         assertThat(result.displayOrder()).isEqualTo(2);
-        verify(adminAuditLogger).log(any(), any(), any(), any(), any());
+        // 회귀 테스트(2026-08-20) - targetType이 CHECKLIST_TEMPLATE이므로 targetId는 새로 생성된
+        // 이미지 id(20L)가 아니라 소속 템플릿 id(1L)여야 한다.
+        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE), eq(1L), any());
     }
 
     @Test
@@ -648,6 +652,8 @@ class AdminChecklistTemplateServiceTest {
         adminChecklistTemplateService.deleteImage(ACTOR_ID, ACTOR_EMAIL, 1L, 10L);
 
         verify(checklistItemTemplateImageRepository).delete(image);
+        // 회귀 테스트(2026-08-20) - targetId는 삭제된 이미지 id(10L)가 아니라 소속 템플릿 id(1L)여야 한다.
+        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE), eq(1L), any());
     }
 
     @Test
