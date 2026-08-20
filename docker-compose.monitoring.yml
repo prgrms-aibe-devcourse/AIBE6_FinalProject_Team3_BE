@@ -1,8 +1,6 @@
 services:
   prometheus:
-    # :latest는 재기동할 때마다 다른 버전이 조용히 올라올 수 있어(호환성 깨짐/보안 리그레션 위험)
-    # 특정 릴리스에 고정한다 - 실제 운영 중인 버전과 다르면 확인 후 맞춰서 올릴 것.
-    image: prom/prometheus:v2.55.1
+    image: prom/prometheus:latest
     container_name: prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -17,9 +15,7 @@ services:
     # ports 노출 안 함 — 내부 네트워크에서만 접근
 
   grafana:
-    # :latest는 재기동할 때마다 다른 버전이 조용히 올라올 수 있어(호환성 깨짐/보안 리그레션 위험)
-    # 특정 릴리스에 고정한다 - 실제 운영 중인 버전과 다르면 확인 후 맞춰서 올릴 것.
-    image: grafana/grafana:11.3.0
+    image: grafana/grafana:latest
     container_name: grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD를 .env에 설정해야 합니다 - 비워두면 Grafana 기본 관리자 비밀번호(admin)가 그대로 남습니다}
