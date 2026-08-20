@@ -35,30 +35,52 @@ function cookieHeader(cookies) {
     .join('; ');
 }
 
-export default function (data) {
-  const headers = { Cookie: cookieHeader(data.cookies) };
+// VU별로 유지되는 현재 세션 쿠키 - setup()에서 전달받은 값으로 첫 iteration에서 초기화되고,
+// 이후 401을 만나면 이 VU 안에서 재로그인한 값으로 갱신된다(module-scope 변수라 같은 VU의
+// 다음 iteration에도 그대로 이어짐).
+let currentCookies;
 
-  const listRes = http.get(`${BASE_URL}/properties?page=0&size=20`, { headers });
+// access token(30분)이 SOAK_DURATION(기본 30분) 근처에서 만료될 수 있는데, 30개 VU가
+// setup()에서 만든 세션 하나를 공유하는 구조라 /auth/refresh로 갱신하면 안 된다 - 이 앱은
+// "유저당 세션 1개" 정책이라(RefreshTokenService), 한 VU가 refresh하면 나머지 VU가 들고 있는
+// refresh token이 그 즉시 무효화된다(02-auth-session.js의 concurrentRefresh 시나리오와 동일한
+// 경쟁). 대신 재로그인을 쓴다 - access token은 로그아웃 전엔 다른 로그인/refresh와 무관하게
+// 독립적으로 유효하므로, 각 VU가 401을 만날 때마다 따로 재로그인해도 서로 방해하지 않는다.
+function authenticatedGet(url) {
+  let res = http.get(url, { headers: { Cookie: cookieHeader(currentCookies) } });
+  if (res.status === 401) {
+    currentCookies = login(TEST_EMAIL, TEST_PASSWORD).cookies;
+    res = http.get(url, { headers: { Cookie: cookieHeader(currentCookies) } });
+  }
+  return res;
+}
+
+export default function (data) {
+  if (!currentCookies) {
+    currentCookies = data.cookies;
+  }
+
+  const listRes = authenticatedGet(`${BASE_URL}/properties?page=0&size=20`);
   check(listRes, { '매물 목록 200': (r) => r.status === 200 });
 
   const properties = listRes.json('data.content');
   if (properties && properties.length > 0) {
     const propertyId = properties[0].propertyId;
-    const detailRes = http.get(`${BASE_URL}/properties/${propertyId}`, { headers });
+    const detailRes = authenticatedGet(`${BASE_URL}/properties/${propertyId}`);
     check(detailRes, { '매물 상세 200': (r) => r.status === 200 });
   }
 
-  const checklistListRes = http.get(`${BASE_URL}/checklists?page=0&size=20`, { headers });
+  const checklistListRes = authenticatedGet(`${BASE_URL}/checklists?page=0&size=20`);
   check(checklistListRes, { '체크리스트 목록 200': (r) => r.status === 200 });
 
   const checklists = checklistListRes.json('data.content');
   const started = checklists && checklists.find((c) => Boolean(c.checklistId));
   if (started) {
-    const checklistDetailRes = http.get(`${BASE_URL}/properties/${started.propertyId}/checklists`, { headers });
+    const checklistDetailRes = authenticatedGet(`${BASE_URL}/properties/${started.propertyId}/checklists`);
     check(checklistDetailRes, { '체크리스트 상세 200': (r) => r.status === 200 });
   }
 
-  const meRes = http.get(`${BASE_URL}/auth/me`, { headers });
+  const meRes = authenticatedGet(`${BASE_URL}/auth/me`);
   check(meRes, { '내 정보 조회 200': (r) => r.status === 200 });
 
   sleep(1);
