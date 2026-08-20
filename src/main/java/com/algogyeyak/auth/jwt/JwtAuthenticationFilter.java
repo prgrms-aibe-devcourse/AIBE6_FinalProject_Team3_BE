@@ -1,6 +1,7 @@
 package com.algogyeyak.auth.jwt;
 
 import com.algogyeyak.global.error.ErrorCode;
+import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import io.jsonwebtoken.Claims;
@@ -80,7 +81,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 로그아웃으로 jti가 블랙리스트에 오른 access token은 서명/만료가 아직 유효해도
         // 인증 처리하지 않는다 — 로그아웃 즉시 무효화되어야 하는 이유는 팀 결정 사항 참고.
         // 재사용 불가능해졌다는 점에서 "무효한 토큰"과 같은 사유로 취급한다.
-        if (accessTokenRevocationService.isRevoked(claims.getId())) {
+        boolean revoked;
+        try {
+            revoked = accessTokenRevocationService.isRevoked(claims.getId());
+        } catch (BusinessException e) {
+            // Redis 장애로 블랙리스트 여부를 확신할 수 없는 경우다(AccessTokenRevocationService
+            // 참고) - 진짜 무효화된 토큰(401)과 구분해 저장소 장애(503)로 응답해야, 클라이언트가
+            // "로그아웃됨"이 아니라 "잠시 후 다시 시도"로 정확히 안내받는다.
+            request.setAttribute(AUTH_FAILURE_REASON_ATTRIBUTE, e.getErrorCode());
+            return;
+        }
+        if (revoked) {
             request.setAttribute(AUTH_FAILURE_REASON_ATTRIBUTE, ErrorCode.AUTH_TOKEN_INVALID);
             return;
         }

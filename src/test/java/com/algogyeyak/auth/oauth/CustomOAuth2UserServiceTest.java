@@ -273,6 +273,30 @@ class CustomOAuth2UserServiceTest {
     }
 
     @Test
+    void wrapsUnrecoverableSocialAccountConflictInsteadOfCrashingWhenNeitherKnownConstraintExplainsIt() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+
+        // INSERT는 유니크 제약 위반으로 실패했는데, 복구 재조회에서는 두 알려진 원인
+        // (uk_social_provider_provider_id/uk_social_user_provider) 어느 쪽으로도 설명되지 않는
+        // 극단적인 경우(예: 그 사이 재조회 대상 행이 삭제됨, 또는 전혀 다른 제약 위반) - 회귀
+        // 전에는 이 경우만 raw DataIntegrityViolationException을 그대로 던져 loadUser()가
+        // OAuth2 로그인 필터 체인 밖으로 크래시했다.
+        User existingLocalUser = User.createLocalUser("shared@example.com", "encoded-hash", "로컬유저");
+        ReflectionTestUtils.setField(existingLocalUser, "id", 1L);
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.empty());
+        when(repository.findByEmail("shared@example.com")).thenReturn(Optional.of(existingLocalUser));
+        when(socialAccountRepository.saveAndFlush(any(UserSocialAccount.class)))
+                .thenThrow(new DataIntegrityViolationException("unexplained constraint violation"));
+        when(socialAccountRepository.existsByUserIdAndProvider(1L, AuthProvider.KAKAO)).thenReturn(false);
+
+        assertThrows(OAuth2AuthenticationException.class,
+                () -> service.processOAuth2User(
+                        "kakao", kakaoOAuth2User(123L, "카카오닉네임", "http://img", "shared@example.com")));
+    }
+
+    @Test
     void linksToExistingAccountWhenOAuthEmailDiffersOnlyByCaseOrWhitespace() {
         UserRepository repository = mock(UserRepository.class);
         UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);

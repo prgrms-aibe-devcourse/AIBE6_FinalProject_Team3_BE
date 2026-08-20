@@ -179,8 +179,8 @@ class AdminUserControllerTest {
                         .content("""
                                 {"role":"USER"}
                                 """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_USER_SELF_ACTION_FORBIDDEN"));
     }
 
     @Test
@@ -302,8 +302,8 @@ class AdminUserControllerTest {
                         .content("""
                                 {"status":"SUSPENDED"}
                                 """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_USER_SELF_ACTION_FORBIDDEN"));
     }
 
     @Test

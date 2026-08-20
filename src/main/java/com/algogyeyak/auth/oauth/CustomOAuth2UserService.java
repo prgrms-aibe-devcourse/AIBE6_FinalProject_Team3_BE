@@ -165,7 +165,15 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                 case LINKED_TO_DIFFERENT_USER, USER_ALREADY_HAS_DIFFERENT_ACCOUNT_FOR_PROVIDER ->
                         throw new OAuth2AuthenticationException(new OAuth2Error(
                                 "social_account_conflict", "이 계정에는 이미 다른 소셜 계정이 연동되어 있습니다.", null), e);
-                case UNRECOVERABLE -> throw e;
+                // 이 raw DataIntegrityViolationException을 그대로 던지면 안 된다 - loadUser()는
+                // Spring Security의 OAuth2 로그인 필터 체인 안에서(DispatcherServlet 이전) 실행되는데,
+                // 그 체인은 OAuth2AuthenticationException(과 그 상위 AuthenticationException)만
+                // OAuth2AuthenticationFailureHandler로 넘긴다 - 다른 예외 타입은 이 체인이 못 잡고
+                // 그대로 컨테이너 기본 에러 페이지로 새어나가, 프론트로의 실패 리다이렉트 자체가
+                // 일어나지 않는다.
+                case UNRECOVERABLE ->
+                        throw new OAuth2AuthenticationException(
+                                new OAuth2Error("oauth_login_failed", "로그인에 실패했습니다. 잠시 후 다시 시도해주세요.", null), e);
             }
         }
     }

@@ -10,6 +10,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
@@ -31,7 +32,13 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
  * (User 엔티티가 생기면 연관관계로 바꿀지 팀과 논의 필요).
  */
 @Entity
-@Table(name = "property")
+@Table(name = "property", indexes = {
+        // 관리자 통계 대시보드의 기간별 매물 등록 조회(PropertyRepository.countByCreatedAtBetween/
+        // findCreatedAtBetween, AdminStatsService 참고)가 이 컬럼으로 조회한다 - User/PropertyReport는
+        // 같은 이유로 이미 created_at 인덱스가 있는데 Property만 빠져 있어 이 조회만 풀스캔이었다
+        // (2026-08-20 멘토링 피드백에서 지적).
+        @Index(name = "idx_property_created_at", columnList = "created_at")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)

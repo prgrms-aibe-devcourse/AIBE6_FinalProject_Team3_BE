@@ -197,7 +197,7 @@ public class AdminUserService {
     // 우회될 수 있다.
     private void rejectSelf(Long actorId, Long targetUserId) {
         if (actorId.equals(targetUserId)) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "자기 자신의 권한/상태는 변경할 수 없습니다.");
+            throw new BusinessException(ErrorCode.ADMIN_USER_SELF_ACTION_FORBIDDEN);
         }
     }
 
