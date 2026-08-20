@@ -25,6 +25,7 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
@@ -48,7 +49,8 @@ class ChecklistServiceTest {
     private final UserRepository userRepository = mock(UserRepository.class);
     private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final ChecklistService checklistService =
-            new ChecklistService(checklistRepository, templateRepository, checklistItemRepository, userRepository, propertyRepository);
+            new ChecklistService(checklistRepository, templateRepository, checklistItemRepository, userRepository, propertyRepository,
+                    mock(PlatformTransactionManager.class));
 
     private User user(Long id) {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
@@ -99,13 +101,13 @@ class ChecklistServiceTest {
                         .active(true)
                         .build()
         ));
-        when(checklistRepository.save(any(Checklist.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(checklistRepository.saveAndFlush(any(Checklist.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Checklist result = checklistService.createOrGetChecklist(1L, 10L);
 
         assertThat(result.getTemplateVersion()).isEqualTo(3);
         assertThat(result.getItems()).hasSize(1);
-        verify(checklistRepository).save(any(Checklist.class));
+        verify(checklistRepository).saveAndFlush(any(Checklist.class));
     }
 
     @Test
