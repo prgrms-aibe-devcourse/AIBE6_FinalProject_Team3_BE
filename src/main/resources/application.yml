@@ -118,6 +118,9 @@ app:
   dev-login:
     enabled: ${DEV_LOGIN_ENABLED:false}
     email: ${DEV_LOGIN_EMAIL:admin@algogyeyak.local}
+    # 관리자 계정과 별개로, 일반(USER) 역할로 로그인해 화면을 확인할 수 있는 테스트 계정 -
+    # DevTestUserSeeder가 시딩한다.
+    user-email: ${DEV_LOGIN_USER_EMAIL:tester@algogyeyak.local}
     secret: ${DEV_LOGIN_SECRET:local-dev-secret}
   # /actuator/prometheus 전용 공유 비밀(MetricsScrapeTokenFilter) - Prometheus의 bearer_token
   # 스크래핑 옵션과 짝을 맞춘다(monitoring/prometheus.yml 참고). 로컬은 팀 전체가 같은 더미 값을
