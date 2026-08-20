@@ -275,6 +275,28 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    void failsClosedWithStoreUnavailableWhenRevocationCheckThrows() throws Exception {
+        // 회귀 테스트 - Redis 장애로 isRevoked()가 예전엔 "블랙리스트에 있음"(true)과 똑같이
+        // 처리돼 AUTH_TOKEN_INVALID(401)로 응답했다. 진짜 로그아웃된 토큰과 장애 상황을 구분해
+        // failsClosedWithStoreUnavailableWhenDbLookupThrows()와 동일하게 503으로 응답해야 한다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        Claims claims = jwtProvider.parseClaims(token);
+        when(redisTemplate.hasKey("auth:revoked-access-token:" + claims.getId()))
+                .thenThrow(new org.springframework.dao.QueryTimeoutException("redis down"));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, filterChain);
+
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
     void doesNotSetAuthenticationWhenTokenJtiIsRevoked() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         Claims claims = jwtProvider.parseClaims(token);

@@ -129,6 +129,10 @@ public enum ErrorCode {
     ADMIN_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "ADMIN_INVALID_STATUS_TRANSITION", "허용되지 않는 상태 변경입니다."),
     ADMIN_INVALID_ROLE_TRANSITION(HttpStatus.CONFLICT, "ADMIN_INVALID_ROLE_TRANSITION", "허용되지 않는 권한 변경입니다."),
     ADMIN_LAST_ADMIN_ACCOUNT(HttpStatus.CONFLICT, "ADMIN_LAST_ADMIN_ACCOUNT", "마지막 남은 관리자 계정은 강등하거나 정지할 수 없습니다."),
+    // ADMIN_PROPERTY_REPORT_SELF_REVIEW와 같은 성격(관리자 자기 대상 액션 금지)의 코드를 유저
+    // 쪽에도 맞춘다 - 예전엔 이 경로만 BAD_REQUEST(400, 코드 없이 메시지만)로 응답해, 프론트가
+    // "본인 계정이라 막힘"을 구분해 처리하려면 문자열 메시지를 비교해야 했다.
+    ADMIN_USER_SELF_ACTION_FORBIDDEN(HttpStatus.CONFLICT, "ADMIN_USER_SELF_ACTION_FORBIDDEN", "자기 자신의 권한/상태는 변경할 수 없습니다."),
     ADMIN_PROPERTY_REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_PROPERTY_REPORT_NOT_FOUND", "존재하지 않는 신고입니다."),
     ADMIN_PROPERTY_REPORT_SELF_REVIEW(HttpStatus.CONFLICT, "ADMIN_PROPERTY_REPORT_SELF_REVIEW", "본인이 등록한 신고는 직접 처리할 수 없습니다."),
     ADMIN_INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "ADMIN_INVALID_DATE_RANGE", "조회 기간이 올바르지 않습니다."),

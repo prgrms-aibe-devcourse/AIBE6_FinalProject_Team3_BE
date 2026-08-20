@@ -254,6 +254,10 @@ public class AdminChecklistTemplateService {
         validateNotDeactivatingLastActiveTemplate(template, false);
         // 삭제 후에는 다시 조회할 수 없으니, 감사 로그에 남길 내용을 삭제 전에 미리 캡처해둔다.
         Map<String, Object> deletedSummary = Map.of("content", template.getContent(), "category", template.getCategory());
+        // template_id는 nullable=false FK라(ChecklistItemTemplateImage 참고), cascade/orphanRemoval
+        // 없이 템플릿만 지우면 예시 이미지가 하나라도 있는 템플릿에서 FK 제약 위반이 난다 - 템플릿
+        // 삭제 전에 딸린 이미지부터 지운다.
+        checklistItemTemplateImageRepository.deleteByTemplateId(templateId);
         checklistItemTemplateRepository.delete(template);
         adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE, templateId, deletedSummary);
     }

@@ -85,7 +85,7 @@ class AdminUserServiceTest {
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> adminUserService.updateRole(ACTOR_ID, ACTOR_EMAIL, ACTOR_ID, Role.USER));
 
-        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        assertEquals(ErrorCode.ADMIN_USER_SELF_ACTION_FORBIDDEN, exception.getErrorCode());
         verify(userRepository, never()).findById(any());
     }
 
@@ -94,7 +94,7 @@ class AdminUserServiceTest {
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> adminUserService.updateStatus(ACTOR_ID, ACTOR_EMAIL, ACTOR_ID, UserStatus.SUSPENDED));
 
-        assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
+        assertEquals(ErrorCode.ADMIN_USER_SELF_ACTION_FORBIDDEN, exception.getErrorCode());
         verify(userRepository, never()).findById(any());
     }
 
