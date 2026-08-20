@@ -52,9 +52,18 @@ public class AdminStatsService {
                 distributions(resolvedStart, resolvedEnd));
     }
 
+    // summary()/trends()/distributions()가 전부 end.plusDays(1)을 계산한다 - LocalDate.MAX
+    // (+999999999-12-31) 근처의 날짜가 들어오면 그 덧셈 자체가 DateTimeException으로 오버플로되어
+    // 잘못된 요청(400)이 아니라 처리되지 않은 예외로 500까지 올라간다(2026-08-20 전수조사에서
+    // 지적). 관리자 대시보드가 실제로 필요로 할 리 없는 범위이므로 넉넉히 상한을 둔다.
+    private static final LocalDate MAX_ALLOWED_DATE = LocalDate.of(9999, 12, 31);
+
     private void validateRange(LocalDate start, LocalDate end) {
         if (start.isAfter(end)) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_DATE_RANGE, "조회 시작일은 종료일보다 이후일 수 없습니다.");
+        }
+        if (end.isAfter(MAX_ALLOWED_DATE)) {
+            throw new BusinessException(ErrorCode.ADMIN_INVALID_DATE_RANGE, "조회 종료일이 너무 먼 미래입니다.");
         }
         if (ChronoUnit.DAYS.between(start, end) + 1 > MAX_TREND_DAYS) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_DATE_RANGE, "조회 기간은 최대 " + MAX_TREND_DAYS + "일까지 가능합니다.");

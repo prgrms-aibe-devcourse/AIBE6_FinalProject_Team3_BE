@@ -209,4 +209,18 @@ class AdminStatsControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("ADMIN_INVALID_DATE_RANGE"));
     }
+
+    // 회귀 테스트(2026-08-20 전수조사) - summary()/trends()/distributions()가 전부 end.plusDays(1)을
+    // 계산하는데, LocalDate.MAX(+999999999-12-31) 근처 날짜가 들어오면 그 덧셈 자체가
+    // DateTimeException으로 오버플로되어 잘못된 요청(400)이 아니라 처리되지 않은 예외로 500까지
+    // 올라갔다. 종료일 상한 검증이 그 계산에 도달하기 전에 먼저 막아야 한다.
+    @Test
+    void 종료일이_너무_먼_미래이면_500이_아니라_400이다() throws Exception {
+        mockMvc.perform(get("/admin/stats/dashboard")
+                        .param("startDate", "+999999999-12-31")
+                        .param("endDate", "+999999999-12-31")
+                        .cookie(adminCookie()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("ADMIN_INVALID_DATE_RANGE"));
+    }
 }
