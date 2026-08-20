@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { BASE_URL } from './common/config.js';
-import { login } from './common/auth.js';
+import { login, extractAuthCookies, authCookieHeader } from './common/auth.js';
 
 // stress test: 정상 트래픽(baseline 20명)을 넘어서 VU를 50 -> 100 -> 150까지 단계적으로
 // 올려가며 언제부터 응답시간/에러율이 무너지기 시작하는지 확인한다. t3.small에서
@@ -29,17 +29,11 @@ const TEST_PASSWORD = __ENV.TEST_PASSWORD;
 
 export function setup() {
   const res = login(TEST_EMAIL, TEST_PASSWORD);
-  return { cookies: res.cookies };
-}
-
-function cookieHeader(cookies) {
-  return Object.entries(cookies)
-    .map(([name, jar]) => `${name}=${jar[0].value}`)
-    .join('; ');
+  return { authCookies: extractAuthCookies(res) };
 }
 
 export default function (data) {
-  const headers = { Cookie: cookieHeader(data.cookies) };
+  const headers = { Cookie: authCookieHeader(data.authCookies) };
 
   const listRes = http.get(`${BASE_URL}/properties?page=0&size=20`, { headers });
   check(listRes, { '매물 목록 200': (r) => r.status === 200 });

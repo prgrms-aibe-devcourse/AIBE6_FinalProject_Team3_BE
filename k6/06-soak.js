@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { BASE_URL } from './common/config.js';
-import { login } from './common/auth.js';
+import { login, extractAuthCookies, authCookieHeader } from './common/auth.js';
 
 // soak(endurance) test: 중간 부하(80명)를 길게(기본 30분) 유지해서, 짧은 테스트로는 안 보이는
 // 문제 - 커넥션/메모리 누수, 시간이 지날수록 응답시간이 서서히 늘어나는 현상 - 를 찾는다.
@@ -28,19 +28,13 @@ const TEST_PASSWORD = __ENV.TEST_PASSWORD;
 
 export function setup() {
   const res = login(TEST_EMAIL, TEST_PASSWORD);
-  return { cookies: res.cookies };
-}
-
-function cookieHeader(cookies) {
-  return Object.entries(cookies)
-    .map(([name, jar]) => `${name}=${jar[0].value}`)
-    .join('; ');
+  return { authCookies: extractAuthCookies(res) };
 }
 
 // VU별로 유지되는 현재 세션 쿠키 - setup()에서 전달받은 값으로 첫 iteration에서 초기화되고,
 // 이후 401을 만나면 이 VU 안에서 재로그인한 값으로 갱신된다(module-scope 변수라 같은 VU의
 // 다음 iteration에도 그대로 이어짐).
-let currentCookies;
+let currentAuthCookies;
 
 // access token(30분)이 SOAK_DURATION(기본 30분) 근처에서 만료될 수 있는데, 30개 VU가
 // setup()에서 만든 세션 하나를 공유하는 구조라 /auth/refresh로 갱신하면 안 된다 - 이 앱은
@@ -49,17 +43,17 @@ let currentCookies;
 // 경쟁). 대신 재로그인을 쓴다 - access token은 로그아웃 전엔 다른 로그인/refresh와 무관하게
 // 독립적으로 유효하므로, 각 VU가 401을 만날 때마다 따로 재로그인해도 서로 방해하지 않는다.
 function authenticatedGet(url) {
-  let res = http.get(url, { headers: { Cookie: cookieHeader(currentCookies) } });
+  let res = http.get(url, { headers: { Cookie: authCookieHeader(currentAuthCookies) } });
   if (res.status === 401) {
-    currentCookies = login(TEST_EMAIL, TEST_PASSWORD).cookies;
-    res = http.get(url, { headers: { Cookie: cookieHeader(currentCookies) } });
+    currentAuthCookies = extractAuthCookies(login(TEST_EMAIL, TEST_PASSWORD));
+    res = http.get(url, { headers: { Cookie: authCookieHeader(currentAuthCookies) } });
   }
   return res;
 }
 
 export default function (data) {
-  if (!currentCookies) {
-    currentCookies = data.cookies;
+  if (!currentAuthCookies) {
+    currentAuthCookies = data.authCookies;
   }
 
   const listRes = authenticatedGet(`${BASE_URL}/properties?page=0&size=20`);

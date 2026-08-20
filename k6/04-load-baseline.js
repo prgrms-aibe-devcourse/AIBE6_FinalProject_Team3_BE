@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { BASE_URL } from './common/config.js';
-import { login } from './common/auth.js';
+import { login, extractAuthCookies, authCookieHeader } from './common/auth.js';
 
 // baseline load test: 예상 실사용 트래픽(60명 동시접속) 수준을 5분간 유지했을 때
 // 응답시간/에러율이 정상 범위인지 확인한다. 01-read-endpoints.js와 같은 엔드포인트
@@ -25,17 +25,11 @@ const TEST_PASSWORD = __ENV.TEST_PASSWORD;
 
 export function setup() {
   const res = login(TEST_EMAIL, TEST_PASSWORD);
-  return { cookies: res.cookies };
-}
-
-function cookieHeader(cookies) {
-  return Object.entries(cookies)
-    .map(([name, jar]) => `${name}=${jar[0].value}`)
-    .join('; ');
+  return { authCookies: extractAuthCookies(res) };
 }
 
 export default function (data) {
-  const headers = { Cookie: cookieHeader(data.cookies) };
+  const headers = { Cookie: authCookieHeader(data.authCookies) };
 
   const listRes = http.get(`${BASE_URL}/properties?page=0&size=20`, { headers });
   check(listRes, { '매물 목록 200': (r) => r.status === 200 });
