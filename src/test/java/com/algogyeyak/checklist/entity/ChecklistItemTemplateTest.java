@@ -140,4 +140,14 @@ class ChecklistItemTemplateTest {
         // active는 관리자가 수동으로 비활성화했을 수 있으니 시더 재동기화가 되돌리면 안 된다.
         assertThat(template.isActive()).isFalse();
     }
+
+    @Test
+    @DisplayName("markAsSeeded()는 seedKey를 현재 content와 동일하게 채운다")
+    void markAsSeededCopiesContentIntoSeedKey() {
+        ChecklistItemTemplate template = baseBuilder().build();
+
+        template.markAsSeeded();
+
+        assertThat(template.getSeedKey()).isEqualTo(template.getContent());
+    }
 }

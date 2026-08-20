@@ -87,6 +87,16 @@ public class ChecklistItemTemplate {
     @OneToMany(mappedBy = "template")
     private List<ChecklistItemTemplateImage> images = new ArrayList<>();
 
+    // ChecklistTemplateSeeder가 심은 행인지 구분하는 값(markAsSeeded() 참고) - content와 같은
+    // 값을 담지만 일부러 별도 컬럼으로 둔다. 관리자 페이지에서 만드는 일반 문항(AdminChecklistTemplateService)은
+    // content에 어떤 값이 와도 이 컬럼을 채우지 않으므로(null), content 자체에 전역 유니크 제약을
+    // 거는 것과 달리 관리자가 우연히 시드 문항과 같은 문구를 입력해도 걸리지 않는다. 오직 이 컬럼에만
+    // 유니크 제약을 걸어, 앱 인스턴스 두 개가 동시에 기동하며 같은 시드 문항을 각자 "아직 없다"고
+    // 판단해 둘 다 저장을 시도해도 DB가 하나만 통과시키고 나머지는 제약 위반으로 걸러낸다
+    // (ChecklistTemplateSeeder 클래스 주석 참고 - AdminAccountSeeder와 동일한 패턴).
+    @Column(name = "seed_key", unique = true, length = 200)
+    private String seedKey;
+
     @Builder
     private ChecklistItemTemplate(
             int version,
@@ -114,6 +124,18 @@ public class ChecklistItemTemplate {
         this.displayOrder = displayOrder;
         this.active = active;
         this.applicablePropertyTypes = applicablePropertyTypes;
+    }
+
+    /**
+     * ChecklistTemplateSeeder 전용. 시더가 이 행을 실제로 저장(신규 삽입 또는 재동기화)하기 직전에
+     * 호출해 seedKey를 content와 동일하게 채운다 - 시드 데이터(ChecklistTemplateSeedData)의 수십 개
+     * builder 호출 지점을 전부 고칠 필요 없이, 시더가 저장 직전에 이 메서드 하나만 호출하면 된다.
+     * update()(관리자 페이지 수정)는 이 값을 건드리지 않는다 - 관리자가 시드 문항의 문구를 고쳐도
+     * "원래 시더가 심은 행"이라는 표식 자체는 남아 있어야, 다른 인스턴스가 같은 시드 문항을 다시
+     * 심으려는 시도를 유니크 제약으로 계속 막을 수 있다.
+     */
+    public void markAsSeeded() {
+        this.seedKey = this.content;
     }
 
     public boolean isApplicableTo(PropertyType propertyType) {

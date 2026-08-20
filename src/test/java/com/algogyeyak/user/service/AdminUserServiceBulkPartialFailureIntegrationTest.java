@@ -54,10 +54,10 @@ class AdminUserServiceBulkPartialFailureIntegrationTest {
         // succeeds 대상은 정상적으로 감사 로그가 남고, fails 대상만 감사 로그 저장 시점에 실패한다
         // (예: JSON 직렬화 실패 등 - AdminAuditLogger.toJson()이 실제로 던지는 예외와 같은 종류).
         doThrow(new IllegalStateException("감사 로그 직렬화 실패"))
-                .when(adminAuditLogger).log(eq(actorId), eq(AdminAuditAction.UPDATE_STATUS), eq(fails.getId()), any());
+                .when(adminAuditLogger).log(eq(actorId), any(), eq(AdminAuditAction.UPDATE_STATUS), eq(fails.getId()), any());
 
         AdminBulkActionResponse result = adminUserService.bulkUpdateStatus(
-                actorId, java.util.List.of(succeeds.getId(), fails.getId()), UserStatus.SUSPENDED);
+                actorId, "actor@example.com", java.util.List.of(succeeds.getId(), fails.getId()), UserStatus.SUSPENDED);
 
         assertThat(result.succeededIds()).containsExactly(succeeds.getId());
         assertThat(result.failures()).hasSize(1);
