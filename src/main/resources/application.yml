@@ -119,6 +119,11 @@ app:
     enabled: ${DEV_LOGIN_ENABLED:false}
     email: ${DEV_LOGIN_EMAIL:admin@algogyeyak.local}
     secret: ${DEV_LOGIN_SECRET:local-dev-secret}
+  # /actuator/prometheus 전용 공유 비밀(MetricsScrapeTokenFilter) - Prometheus의 bearer_token
+  # 스크래핑 옵션과 짝을 맞춘다(monitoring/prometheus.yml 참고). 로컬은 팀 전체가 같은 더미 값을
+  # 쓰도록 기본값을 둔다(운영은 application-prod.yml에서 기본값 없이 강제).
+  metrics:
+    scrape-token: ${METRICS_SCRAPE_TOKEN:local-dev-only-scrape-token-please-override}
 
 kakao:
   rest-api-key: ${KAKAO_REST_API_KEY:dummy-key-for-local}
@@ -200,6 +205,11 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+      # roles를 안 두면 Boot는 "인증된 사용자면 누구나"를 authorized로 취급한다 - health는
+      # permitAll(SecurityConfig)이지만 JWT가 유효하면 어떤 role이든 SecurityContext가 채워지므로,
+      # 일반(비관리자) 로그인 사용자도 컴포넌트별 상세(DB/Redis 연결 상태 등)를 볼 수 있었다.
+      # ADMIN만 상세를 보게 제한한다(둘 다 permitAll이라 미인증 요청은 원래도 상세 없이 UP/DOWN만 봄).
+      roles: ADMIN
   metrics:
     tags:
       application: algogyeyak-backend
