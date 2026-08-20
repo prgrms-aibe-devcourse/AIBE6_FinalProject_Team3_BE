@@ -65,6 +65,14 @@ public class SessionLogoutService {
     private void revokeAccessToken(String accessToken) {
         try {
             Claims claims = jwtProvider.parseClaims(accessToken);
+            // exp는 JWT 스펙상 사실상 항상 있고 JwtProvider도 항상 채워서 발급하므로 오늘 기준으로는
+            // 도달 불가능에 가깝지만, 이게 null이면 바로 아래 toInstant()가 NPE를 던져 로그아웃
+            // 자체가 실패한다 - jti 없는 경우와 마찬가지로 방어적으로 건너뛴다(2026-08-20 전수조사에서
+            // 지적).
+            if (claims.getExpiration() == null) {
+                log.warn("access token에 만료 시각(exp)이 없어 블랙리스트에 등록할 수 없습니다");
+                return;
+            }
             LocalDateTime expiresAt = claims.getExpiration().toInstant()
                     .atZone(ZoneId.systemDefault())
                     .toLocalDateTime();

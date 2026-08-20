@@ -31,6 +31,13 @@ public class AccessTokenRevocationService {
 
     public void revoke(String jti, LocalDateTime expiresAt) {
         if (jti == null) {
+            // 이 클래스의 나머지 설계는 철저히 fail-closed(Redis 장애 시 로그아웃 자체를 실패시킴)인데,
+            // jti가 없는 경우만 예외적으로 무음 fail-open이었다 - 로그아웃은 여전히 성공해야 하지만
+            // (jti 없는 access token은 애초에 블랙리스트에 올릴 수단이 없으므로 실패시킬 이유가
+            // 없음), 이 access token이 결국 자연 만료 전까지 계속 유효하게 남는다는 사실 자체는
+            // 운영에서 관측 가능해야 한다(2026-08-20 전수조사에서 지적 - 롤링 배포 중 jti 없는
+            // 구버전 토큰이 섞이는 좁은 창에서만 발생).
+            log.warn("access token에 jti가 없어 블랙리스트에 등록할 수 없습니다 - 이 토큰은 자연 만료 전까지 계속 유효합니다");
             return;
         }
 
