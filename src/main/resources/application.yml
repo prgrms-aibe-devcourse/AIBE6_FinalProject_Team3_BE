@@ -1,6 +1,10 @@
 spring:
   application:
     name: algogyeyak
+  datasource:
+    hikari:
+      # RDS max_connections=60, 백엔드 인스턴스는 현재 1개뿐이라 20이면 여유 있게 안전(2026-08-20 확인).
+      maximum-pool-size: 20
   jpa:
     properties:
       hibernate:
