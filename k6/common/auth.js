@@ -22,9 +22,11 @@ export function login(email, password) {
 /**
  * 로그인 응답(res.cookies)에서 access/refresh 토큰 값만 순수 문자열로 뽑아낸다.
  * res.cookies를 setup()의 리턴값으로 그대로 넘기면, k6가 setup() → 각 VU의 default()로
- * 데이터를 전달할 때 거치는 직렬화 과정에서 이 중첩 객체 구조가 유지되지 않아 사실상 빈 값이
- * 되고, 이후 요청엔 쿠키가 전혀 안 실려가는 문제가 있었다(회귀 테스트로 확인됨). 원시 문자열은
- * 이 직렬화를 안전하게 통과하므로, login() 직후(같은 함수 실행 컨텍스트) 여기서 미리 뽑아둔다.
+ * 데이터를 전달할 때 거치는 직렬화 과정(Go 구조체를 거쳐 재직렬화됨)에서 각 쿠키 객체의
+ * 프로퍼티 키가 소문자(name/value/...)에서 대문자(Name/Value/...)로 바뀐다 - 객체 구조 자체는
+ * 남아있지만 기존 코드가 쓰던 소문자 키로는 더 이상 접근이 안 돼 전부 undefined가 되고, 이후
+ * 요청엔 쿠키가 전혀 안 실려가는 문제가 있었다(로컬 재현으로 확인됨). 원시 문자열은 이 직렬화를
+ * 안전하게 통과하므로, login() 직후(같은 함수 실행 컨텍스트) 여기서 미리 뽑아둔다.
  */
 export function extractAuthCookies(res) {
   const cookies = res.cookies || {};
