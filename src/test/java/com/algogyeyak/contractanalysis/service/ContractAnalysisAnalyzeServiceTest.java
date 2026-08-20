@@ -10,6 +10,8 @@ import com.algogyeyak.contractanalysis.client.GeminiClient;
 import com.algogyeyak.contractanalysis.client.dto.GeminiGenerateContentResponse;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisAnalyzeRequest;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisAnalyzeResponse;
+import com.algogyeyak.contractanalysis.entity.InputType;
+import com.algogyeyak.contractanalysis.repository.ContractRequestRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import java.util.List;
@@ -21,13 +23,16 @@ class ContractAnalysisAnalyzeServiceTest {
             "제3조 임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다. "
                     + "제5조 보증금은 계약 종료 후 즉시 반환하지 않고 다음 세입자 입주 시 반환한다.";
 
+    private static final Long USER_ID = 1L;
+
     private final GeminiClient geminiClient = mock(GeminiClient.class);
     private final ContractAnalysisMaskingService maskingService = new ContractAnalysisMaskingService();
+    private final ContractRequestRepository contractRequestRepository = mock(ContractRequestRepository.class);
     private final ContractAnalysisAnalyzeService service =
-            new ContractAnalysisAnalyzeService(geminiClient, maskingService);
+            new ContractAnalysisAnalyzeService(geminiClient, maskingService, contractRequestRepository);
 
     private ContractAnalysisAnalyzeResponse analyze(String maskedText, Boolean userConfirmed) {
-        return service.analyze(new ContractAnalysisAnalyzeRequest(maskedText, userConfirmed, null));
+        return service.analyze(USER_ID, new ContractAnalysisAnalyzeRequest(maskedText, userConfirmed, null, InputType.TEXT));
     }
 
     private GeminiGenerateContentResponse responseWithText(String text) {

@@ -38,16 +38,18 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
 
     /**
      * risk-analysis의 중복매물 탐지용 - 위 두 메서드와 달리 userId 조건이 없다(다른 계정이 올린
-     * 매물도 잡아야 함). 본인 자신은 idNot으로 제외한다.
+     * 매물도 잡아야 함). 본인 자신은 idNot으로 제외한다. exists 대신 엔티티를 직접 가져오는 이유는
+     * DuplicateListingDetector가 가격·등록일을 비교 정보로 보여줘야 하기 때문(단순 존재 여부만으로는
+     * 부족함) - 여러 건이 있을 수 있어 가장 최근 것을 비교 대상으로 쓰도록 정렬해서 반환한다.
      */
-    boolean existsByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddress(
+    List<Property> findAllByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddressOrderByCreatedAtDesc(
             Long id,
             TransactionType transactionType,
             PropertyStatus status,
             String roadAddress
     );
 
-    boolean existsByIdNotAndTransactionTypeAndStatusAndAddress_JibunAddress(
+    List<Property> findAllByIdNotAndTransactionTypeAndStatusAndAddress_JibunAddressOrderByCreatedAtDesc(
             Long id,
             TransactionType transactionType,
             PropertyStatus status,

@@ -6,6 +6,8 @@ import com.algogyeyak.contractanalysis.client.dto.GeminiGenerateContentResponse;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisAnalyzeRequest;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisAnalyzeResponse;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisClause;
+import com.algogyeyak.contractanalysis.entity.ContractRequest;
+import com.algogyeyak.contractanalysis.repository.ContractRequestRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -24,18 +26,24 @@ public class ContractAnalysisAnalyzeService {
 
     private final GeminiClient geminiClient;
     private final ContractAnalysisMaskingService maskingService;
+    private final ContractRequestRepository contractRequestRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ContractAnalysisAnalyzeService(GeminiClient geminiClient, ContractAnalysisMaskingService maskingService) {
+    public ContractAnalysisAnalyzeService(
+            GeminiClient geminiClient,
+            ContractAnalysisMaskingService maskingService,
+            ContractRequestRepository contractRequestRepository
+    ) {
         this.geminiClient = geminiClient;
         this.maskingService = maskingService;
+        this.contractRequestRepository = contractRequestRepository;
     }
 
-    public ContractAnalysisAnalyzeResponse analyze(ContractAnalysisAnalyzeRequest request) {
+    public ContractAnalysisAnalyzeResponse analyze(Long userId, ContractAnalysisAnalyzeRequest request) {
         if (!Boolean.TRUE.equals(request.userConfirmed())) {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_MASKING_NOT_CONFIRMED);
         }
-        if (!StringUtils.hasText(request.maskedText())) {
+        if (!StringUtils.hasText(request.maskedText()) || request.inputType() == null) {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_INVALID_INPUT);
         }
         // userConfirmed만으로는 클라이언트가 /masking을 실제로 거쳤는지 보장할 수 없으므로,
@@ -49,7 +57,21 @@ public class ContractAnalysisAnalyzeService {
         GeminiClauseAnalysisResult result = parseAndValidateSchema(responseText);
         validateNoHallucination(result.clauses(), request.maskedText());
 
-        return ContractAnalysisAnalyzeResponse.of(result.clauses(), sanitizeAiSummary(result.summary()));
+        ContractAnalysisAnalyzeResponse analyzeResponse =
+                ContractAnalysisAnalyzeResponse.of(result.clauses(), sanitizeAiSummary(result.summary()));
+
+        ContractRequest contractRequest = ContractRequest.create(
+                userId,
+                request.propertyId(),
+                request.inputType(),
+                analyzeResponse.summary(),
+                analyzeResponse.disclaimer(),
+                analyzeResponse.aiGeneratedNotice(),
+                analyzeResponse.clauses()
+        );
+        contractRequestRepository.save(contractRequest);
+
+        return analyzeResponse;
     }
 
     // clauses.isEmpty()일 때만 사용되는 summary라 원문 대조(환각 검증)는 애초에 성립하지 않는다 -
