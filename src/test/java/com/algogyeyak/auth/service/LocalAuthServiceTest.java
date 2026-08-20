@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.service;
 
+import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
@@ -36,9 +37,10 @@ class LocalAuthServiceTest {
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     @SuppressWarnings("unchecked")
     private final ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+    private final RefreshTokenService refreshTokenService = mock(RefreshTokenService.class);
     private final LocalAuthService localAuthService = new LocalAuthService(
             userRepository, passwordEncoder, emailVerificationService, mock(PlatformTransactionManager.class),
-            redisTemplate);
+            redisTemplate, refreshTokenService);
 
     {
         // 대부분의 테스트는 로그인 시도 횟수 제한과 무관하므로, opsForValue().increment()가
@@ -417,6 +419,38 @@ class LocalAuthServiceTest {
         ReflectionTestUtils.setField(user, "id", 1L);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+
+        localAuthService.setPassword(1L, null, "newPassword1");
+
+        assertEquals("new-encoded-hash", user.getPasswordHash());
+    }
+
+    // 회귀 테스트(2026-08-20 전수조사) - PasswordResetService.confirmReset()은 비밀번호 재설정 후
+    // 기존 refresh token(세션)을 전부 끊는데, 로그인 상태에서 직접 바꾸는 setPassword()는 그러지
+    // 않았다 - 탈취된 refresh token이 비밀번호 변경 후에도 계속 새 access token을 발급받을 수 있었다.
+    @Test
+    void setPasswordRevokesExistingRefreshTokensAfterChange() {
+        User user = User.createOAuthUser("social@example.com", "소셜유저", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+
+        localAuthService.setPassword(1L, null, "newPassword1");
+
+        verify(refreshTokenService).revokeAllForUser(1L);
+    }
+
+    // 회귀 테스트 - PasswordResetService.confirmReset()과 동일하게 best-effort여야 한다. 세션 정리가
+    // Redis 장애로 실패해도 이미 반영된 비밀번호 변경 자체는 그대로 성공해야 한다(핵심 동작보다
+    // 부가적인 세션 정리가 우선순위가 높아지는 역전을 막기 위함).
+    @Test
+    void setPasswordSucceedsEvenWhenSessionRevocationFails() {
+        User user = User.createOAuthUser("social@example.com", "소셜유저", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+        doThrow(new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE))
+                .when(refreshTokenService).revokeAllForUser(1L);
 
         localAuthService.setPassword(1L, null, "newPassword1");
 

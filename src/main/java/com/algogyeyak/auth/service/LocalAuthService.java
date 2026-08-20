@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.service;
 
+import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -39,6 +40,7 @@ public class LocalAuthService {
     private final EmailVerificationService emailVerificationService;
     private final TransactionTemplate requiresNewTransactionTemplate;
     private final StringRedisTemplate redisTemplate;
+    private final RefreshTokenService refreshTokenService;
 
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
@@ -54,13 +56,15 @@ public class LocalAuthService {
             PasswordEncoder passwordEncoder,
             EmailVerificationService emailVerificationService,
             PlatformTransactionManager transactionManager,
-            StringRedisTemplate redisTemplate) {
+            StringRedisTemplate redisTemplate,
+            RefreshTokenService refreshTokenService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailVerificationService = emailVerificationService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.redisTemplate = redisTemplate;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @Transactional
@@ -235,5 +239,16 @@ public class LocalAuthService {
         }
 
         user.updatePasswordHash(passwordEncoder.encode(newPassword));
+
+        // PasswordResetService.confirmReset()과 동일한 이유 - 탈취된 refresh token은 access token의
+        // passwordChangedAt 검사를 거치지 않으므로(RefreshTokenService.rotate()는 탈퇴/정지 여부만
+        // 재확인한다), 비밀번호를 바꾼 뒤에도 그 refresh token으로 계속 새 access token을 발급받을 수
+        // 있었다(2026-08-20 전수조사에서 지적). best-effort로 호출 - 세션 정리 실패가 비밀번호 변경
+        // 자체를 롤백시켜서는 안 된다(핵심 동작보다 부가적인 세션 정리가 우선순위가 높아지는 역전).
+        try {
+            refreshTokenService.revokeAllForUser(userId);
+        } catch (BusinessException e) {
+            log.warn("비밀번호 변경 후 기존 세션 정리 실패(TTL로 자연 만료됨) userId={}", userId, e);
+        }
     }
 }
