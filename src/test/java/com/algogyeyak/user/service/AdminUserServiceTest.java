@@ -80,10 +80,16 @@ class AdminUserServiceTest {
     // 있어서, 이 서비스를 직접 호출하는 다른 경로가 생기면 조용히 우회될 수 있었다. 지금은
     // updateRole()/updateStatus() 자신이 강제하므로, 컨트롤러를 거치지 않고 직접 호출해도 막혀야
     // 한다.
+    // 회귀 테스트(2026-08-20 전수조사) - 두 테스트 모두 원래는 같은 ACTOR_ID 변수(100L, Long 캐시
+    // 범위 -128~127 안)를 actor/target 양쪽에 그대로 재사용했다. 같은 참조를 두 번 넘기면 실무 코드의
+    // .equals()를 ==로 잘못 바꿔도(자기 자신과의 참조 동일성은 항상 참이므로) 테스트가 여전히
+    // 통과한다. 캐시 범위 밖의 값을 리터럴로 두 번 따로 적어(오토박싱이 매번 새 Long 인스턴스를
+    // 만듦) 값은 같지만 참조는 다른 두 Long으로 실제 프로덕션 시나리오(JWT principal vs 경로
+    // 변수)를 재현한다.
     @Test
     void updateRoleRejectsSelfEvenWhenCalledDirectly() {
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateRole(ACTOR_ID, ACTOR_EMAIL, ACTOR_ID, Role.USER));
+                () -> adminUserService.updateRole(500L, ACTOR_EMAIL, 500L, Role.USER));
 
         assertEquals(ErrorCode.ADMIN_USER_SELF_ACTION_FORBIDDEN, exception.getErrorCode());
         verify(userRepository, never()).findById(any());
@@ -92,7 +98,7 @@ class AdminUserServiceTest {
     @Test
     void updateStatusRejectsSelfEvenWhenCalledDirectly() {
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateStatus(ACTOR_ID, ACTOR_EMAIL, ACTOR_ID, UserStatus.SUSPENDED));
+                () -> adminUserService.updateStatus(500L, ACTOR_EMAIL, 500L, UserStatus.SUSPENDED));
 
         assertEquals(ErrorCode.ADMIN_USER_SELF_ACTION_FORBIDDEN, exception.getErrorCode());
         verify(userRepository, never()).findById(any());

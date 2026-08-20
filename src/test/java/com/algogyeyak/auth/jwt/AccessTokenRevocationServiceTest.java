@@ -3,6 +3,7 @@ package com.algogyeyak.auth.jwt;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.error.ErrorCode;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -39,7 +40,15 @@ class AccessTokenRevocationServiceTest {
 
         accessTokenRevocationService.revoke("some-jti", expiresAt);
 
-        verify(valueOperations).set(eq("auth:revoked-access-token:some-jti"), anyString(), any(Duration.class));
+        // 회귀 테스트(2026-08-20 전수조사) - "TTL == 토큰 만료시각까지"가 이 클래스의 핵심 계약인데
+        // any(Duration.class)만으로는 TTL이 1초든 100일이든 통과한다. 실제 값을 캡처해 기대값(30분)과
+        // 오차범위(테스트 실행 시간차) 내에서 일치하는지 확인한다.
+        ArgumentCaptor<Duration> ttlCaptor = ArgumentCaptor.forClass(Duration.class);
+        verify(valueOperations).set(eq("auth:revoked-access-token:some-jti"), anyString(), ttlCaptor.capture());
+        Duration actualTtl = ttlCaptor.getValue();
+        assertTrue(actualTtl.compareTo(Duration.ofMinutes(30).minusSeconds(5)) > 0
+                        && actualTtl.compareTo(Duration.ofMinutes(30)) <= 0,
+                "TTL이 만료시각까지의 시간과 거의 일치해야 하는데 실제로는 " + actualTtl + "이었다");
     }
 
     @Test

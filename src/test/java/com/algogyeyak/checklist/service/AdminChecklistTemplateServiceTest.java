@@ -18,6 +18,7 @@ import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -601,8 +602,11 @@ class AdminChecklistTemplateServiceTest {
         assertThat(result.imageUrl()).isEqualTo("https://example.com/2.jpg");
         assertThat(result.displayOrder()).isEqualTo(2);
         // 회귀 테스트(2026-08-20) - targetType이 CHECKLIST_TEMPLATE이므로 targetId는 새로 생성된
-        // 이미지 id(20L)가 아니라 소속 템플릿 id(1L)여야 한다.
-        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE), eq(1L), any());
+        // 이미지 id(20L)가 아니라 소속 템플릿 id(1L)여야 한다. detail map도 any()가 아니라 구체적인
+        // 값으로 고정한다 - 안 그러면 같은 종류의 잘못된 id가 map 안에 들어가도(예: imageId 대신
+        // templateId를 넣는 실수) 못 잡는다(2026-08-20 전수조사에서 지적).
+        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE), eq(1L),
+                eq(Map.of("imageId", 20L, "imageUrl", "https://example.com/2.jpg")));
     }
 
     @Test
@@ -652,8 +656,10 @@ class AdminChecklistTemplateServiceTest {
         adminChecklistTemplateService.deleteImage(ACTOR_ID, ACTOR_EMAIL, 1L, 10L);
 
         verify(checklistItemTemplateImageRepository).delete(image);
-        // 회귀 테스트(2026-08-20) - targetId는 삭제된 이미지 id(10L)가 아니라 소속 템플릿 id(1L)여야 한다.
-        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE), eq(1L), any());
+        // 회귀 테스트(2026-08-20) - targetId는 삭제된 이미지 id(10L)가 아니라 소속 템플릿 id(1L)여야
+        // 한다. detail map도 구체적인 값으로 고정한다(위 addImage 테스트와 동일한 이유).
+        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE), eq(1L),
+                eq(Map.of("imageId", 10L)));
     }
 
     @Test

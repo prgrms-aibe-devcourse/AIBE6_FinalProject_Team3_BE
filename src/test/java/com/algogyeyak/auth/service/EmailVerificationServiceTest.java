@@ -5,6 +5,7 @@ import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -99,8 +100,17 @@ class EmailVerificationServiceTest {
 
         service.requestCode("  Test@Example.COM  ");
 
-        verify(emailService).sendVerificationCode(eq("test@example.com"), anyString());
-        verify(valueOps).set(eq("auth:email-verify:code-hash:test@example.com"), anyString(), any(Duration.class));
+        // 회귀 테스트(2026-08-20 전수조사) - 발송 코드/저장 해시가 둘 다 anyString()이라, 실수로
+        // 원문 코드를 저장하고 해시를 이메일로 보내도(또는 그 반대) 이 테스트는 그대로 통과했다.
+        // 실제로 보낸 코드를 캡처해 저장된 해시가 hash(그 코드)와 일치하는지, TTL이 설정값(300초)과
+        // 정확히 일치하는지 구체적으로 확인한다.
+        ArgumentCaptor<String> sentCodeCaptor = ArgumentCaptor.forClass(String.class);
+        verify(emailService).sendVerificationCode(eq("test@example.com"), sentCodeCaptor.capture());
+        String sentCode = sentCodeCaptor.getValue();
+
+        String expectedHash = ReflectionTestUtils.invokeMethod(EmailVerificationService.class, "hash", sentCode);
+        verify(valueOps).set(eq("auth:email-verify:code-hash:test@example.com"), eq(expectedHash),
+                eq(Duration.ofSeconds(300)));
     }
 
     // 발송이 비동기(EmailService의 @Async)로 바뀌면서, 발송 실패는 더 이상 requestCode() 호출
