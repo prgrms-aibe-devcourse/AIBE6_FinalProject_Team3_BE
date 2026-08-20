@@ -39,6 +39,22 @@ class MetricsScrapeTokenFilterTest {
         assertThat(response.getStatus()).isEqualTo(401);
     }
 
+    // 회귀 테스트(2026-08-20, 외부 리뷰 지적) - RFC 7235상 auth-scheme(Bearer)은 대소문자를
+    // 구분하지 않는데, 이 필터만 "Bearer "를 고정 대소문자로 비교해 JwtAuthenticationFilter.
+    // resolveToken()과 정책이 갈려있었다 - 소문자 "bearer "로 보내는 스크래퍼는 유효한 토큰을
+    // 들고도 거부당했을 것이다.
+    @Test
+    void bearer_스킴이_소문자여도_통과시킨다() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/prometheus");
+        request.addHeader("Authorization", "bearer " + TOKEN);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+    }
+
     @Test
     void 틀린_토큰이면_막는다() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/prometheus");

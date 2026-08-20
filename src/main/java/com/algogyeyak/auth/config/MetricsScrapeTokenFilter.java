@@ -63,7 +63,10 @@ public class MetricsScrapeTokenFilter extends OncePerRequestFilter {
 
     private boolean hasValidToken(HttpServletRequest request) {
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (!StringUtils.hasText(header) || !header.startsWith(BEARER_PREFIX)) {
+        // RFC 7235상 auth-scheme 토큰(Bearer)은 대소문자를 구분하지 않는다 - JwtAuthenticationFilter.
+        // resolveToken()과 동일한 이유로 startsWith(고정 대소문자)가 아니라 regionMatches(true, ...)로
+        // 검사한다(2026-08-20 전수조사 외부 리뷰에서 두 필터의 정책이 갈려있다는 지적을 받아 통일).
+        if (!StringUtils.hasText(header) || !header.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
             return false;
         }
         String token = header.substring(BEARER_PREFIX.length());
