@@ -2,6 +2,7 @@ package com.algogyeyak.riskanalysis.service;
 
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
@@ -40,6 +41,7 @@ import java.util.stream.Collectors;
 public class FakeListingSignalService {
     private final List<SignalDetector> detectors;
     private final MarketDataClient marketDataClient;
+    private final MarketComparisonService marketComparisonService;
     private final PropertyRiskCheckRepository riskCheckRepository;
     private final PropertyRiskRepository riskRepository;
     private final PropertyRepository propertyRepository;
@@ -50,6 +52,7 @@ public class FakeListingSignalService {
     public FakeListingSignalService(
             List<SignalDetector> detectors,
             MarketDataClient marketDataClient,
+            MarketComparisonService marketComparisonService,
             PropertyRiskCheckRepository riskCheckRepository,
             PropertyRiskRepository riskRepository,
             PropertyRepository propertyRepository,
@@ -58,6 +61,7 @@ public class FakeListingSignalService {
             PlatformTransactionManager transactionManager) {
         this.detectors = detectors;
         this.marketDataClient = marketDataClient;
+        this.marketComparisonService = marketComparisonService;
         this.riskCheckRepository = riskCheckRepository;
         this.riskRepository = riskRepository;
         this.propertyRepository = propertyRepository;
@@ -141,6 +145,13 @@ public class FakeListingSignalService {
      */
     @Transactional
     public int checkAndSave(Property property) {
+        // marketDataClient.getComparison()이 내부적으로 쓰는 MarketComparisonService.compare()는
+        // propertyId만 키로 Redis에 캐싱된다(TTL 30분). PropertyService.update()가 자기 응답을
+        // 만들 때는 스스로 evictCache()를 부르지만, 이 메서드는 그 호출자에 의존하지 않고 여기서도
+        // 직접 한 번 더 비운다 - 그래야 이 메서드가 PropertyService.update() 경로를 거치지 않고
+        // 호출되는 모든 경우(재계산 배치, 다른 트리거 등)에도 PRICE_ANOMALY가 항상 최신 보증금 기준
+        // 시세비교 결과를 보게 된다. evict는 멱등이라 이미 최신이어도 다시 불러 안전하다.
+        marketComparisonService.evictCache(property.getId());
         MarketComparison comparison = marketDataClient.getComparison(property.getId())
                 .orElse(null);
 
