@@ -154,7 +154,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     // 클라이언트는 로그아웃해도 access token이 무효화되지 않던 버그)가 재발하기 쉽다.
     public static String resolveToken(HttpServletRequest request) {
         String bearer = request.getHeader("Authorization");
-        if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
+        // RFC 7235상 auth-scheme 토큰(Bearer)은 대소문자를 구분하지 않는다 - startsWith("Bearer ")만
+        // 검사하면 스펙을 준수해 소문자 "bearer "로 보내는 클라이언트가 유효한 토큰을 들고도 이
+        // 검사를 통과 못 해 쿠키 폴백으로 떨어지고, 쿠키가 없으면 AUTH_TOKEN_MISSING으로 막힌다.
+        if (StringUtils.hasText(bearer) && bearer.regionMatches(true, 0, "Bearer ", 0, 7)) {
             return bearer.substring(7);
         }
 

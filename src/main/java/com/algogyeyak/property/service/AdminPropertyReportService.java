@@ -98,7 +98,8 @@ public class AdminPropertyReportService {
      * 판단했다.
      */
     @Transactional
-    public AdminPropertyReportDetailResponse review(Long reviewerId, Long reportId, PropertyReportStatus status, String memo) {
+    public AdminPropertyReportDetailResponse review(
+            Long reviewerId, String reviewerEmail, Long reportId, PropertyReportStatus status, String memo) {
         if (status != PropertyReportStatus.RESOLVED && status != PropertyReportStatus.REJECTED) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "RESOLVED/REJECTED로만 처리할 수 있습니다.");
         }
@@ -118,7 +119,7 @@ public class AdminPropertyReportService {
             report.reject(reviewerId, memo);
         }
 
-        adminAuditLogger.log(reviewerId, AdminAuditAction.REVIEW_PROPERTY_REPORT, reportId, Map.of(
+        adminAuditLogger.log(reviewerId, reviewerEmail, AdminAuditAction.REVIEW_PROPERTY_REPORT, reportId, Map.of(
                 "beforeStatus", previousStatus, "afterStatus", status,
                 "memo", memo == null ? "" : memo));
         return toDetailResponse(report);
@@ -142,12 +143,17 @@ public class AdminPropertyReportService {
      * RESOLVED/REJECTED로 확정된 신고가 두 번째 시도에서 "이미 검토 완료"로 다시 걸려 같은 id가
      * 성공/실패 양쪽에 나타날 수 있다 - 순서를 보존한 채 중복만 제거해 이 문제를 없앤다.
      */
-    public AdminBulkActionResponse bulkReview(Long reviewerId, List<Long> reportIds, PropertyReportStatus status, String memo) {
+    public AdminBulkActionResponse bulkReview(
+            Long reviewerId, String reviewerEmail, List<Long> reportIds, PropertyReportStatus status, String memo) {
         List<Long> succeededIds = new ArrayList<>();
         List<AdminBulkActionResponse.Failure> failures = new ArrayList<>();
         for (Long reportId : new LinkedHashSet<>(reportIds)) {
             try {
-                requiresNewTransactionTemplate.executeWithoutResult(status_ -> review(reviewerId, reportId, status, memo));
+                // reviewerEmail도 루프 밖(컨트롤러)에서 한 번만 확보한 값을 그대로 전달한다 -
+                // 행위자는 이 벌크 처리 전체에서 항상 같은 관리자이므로, 항목마다 다시 조회할
+                // 이유가 없다(AdminAuditLogger.log() 참고).
+                requiresNewTransactionTemplate.executeWithoutResult(
+                        status_ -> review(reviewerId, reviewerEmail, reportId, status, memo));
                 succeededIds.add(reportId);
             } catch (BusinessException e) {
                 failures.add(new AdminBulkActionResponse.Failure(reportId, e.getMessage()));

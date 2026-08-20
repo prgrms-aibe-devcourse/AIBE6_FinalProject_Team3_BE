@@ -55,6 +55,7 @@ import static org.mockito.Mockito.when;
 class AdminUserServiceTest {
 
     private static final Long ACTOR_ID = 100L;
+    private static final String ACTOR_EMAIL = "actor@example.com";
 
     private final UserRepository userRepository = mock(UserRepository.class);
     private final AdminAuditLogger adminAuditLogger = mock(AdminAuditLogger.class);
@@ -82,7 +83,7 @@ class AdminUserServiceTest {
     @Test
     void updateRoleRejectsSelfEvenWhenCalledDirectly() {
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateRole(ACTOR_ID, ACTOR_ID, Role.USER));
+                () -> adminUserService.updateRole(ACTOR_ID, ACTOR_EMAIL, ACTOR_ID, Role.USER));
 
         assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
         verify(userRepository, never()).findById(any());
@@ -91,7 +92,7 @@ class AdminUserServiceTest {
     @Test
     void updateStatusRejectsSelfEvenWhenCalledDirectly() {
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateStatus(ACTOR_ID, ACTOR_ID, UserStatus.SUSPENDED));
+                () -> adminUserService.updateStatus(ACTOR_ID, ACTOR_EMAIL, ACTOR_ID, UserStatus.SUSPENDED));
 
         assertEquals(ErrorCode.BAD_REQUEST, exception.getErrorCode());
         verify(userRepository, never()).findById(any());
@@ -119,11 +120,11 @@ class AdminUserServiceTest {
                 .thenReturn(List.of(admin));
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateRole(ACTOR_ID, 1L, Role.USER));
+                () -> adminUserService.updateRole(ACTOR_ID, ACTOR_EMAIL, 1L, Role.USER));
 
         assertEquals(ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT, exception.getErrorCode());
         verify(userRepository, never()).updateRoleIfNotWithdrawn(any(), any(), any(), any());
-        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -136,10 +137,10 @@ class AdminUserServiceTest {
         when(userRepository.updateRoleIfNotWithdrawn(eq(1L), eq(Role.USER), eq(UserStatus.WITHDRAWN), any(LocalDateTime.class)))
                 .thenReturn(1);
 
-        AdminUserDetailResponse response = adminUserService.updateRole(ACTOR_ID, 1L, Role.USER);
+        AdminUserDetailResponse response = adminUserService.updateRole(ACTOR_ID, ACTOR_EMAIL, 1L, Role.USER);
 
         assertEquals(Role.USER, response.role());
-        verify(adminAuditLogger).log(ACTOR_ID, AdminAuditAction.UPDATE_ROLE, 1L,
+        verify(adminAuditLogger).log(ACTOR_ID, ACTOR_EMAIL, AdminAuditAction.UPDATE_ROLE, 1L,
                 Map.of("beforeRole", Role.ADMIN, "afterRole", Role.USER));
     }
 
@@ -155,10 +156,10 @@ class AdminUserServiceTest {
                 .thenReturn(0);
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateRole(ACTOR_ID, 1L, Role.ADMIN));
+                () -> adminUserService.updateRole(ACTOR_ID, ACTOR_EMAIL, 1L, Role.ADMIN));
 
         assertEquals(ErrorCode.ADMIN_INVALID_ROLE_TRANSITION, exception.getErrorCode());
-        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -169,11 +170,11 @@ class AdminUserServiceTest {
                 .thenReturn(List.of(admin));
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED));
+                () -> adminUserService.updateStatus(ACTOR_ID, ACTOR_EMAIL, 1L, UserStatus.SUSPENDED));
 
         assertEquals(ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT, exception.getErrorCode());
         verify(userRepository, never()).updateStatusIfNotWithdrawn(any(), any(), any(), any());
-        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -186,10 +187,10 @@ class AdminUserServiceTest {
         when(userRepository.updateStatusIfNotWithdrawn(eq(1L), eq(UserStatus.SUSPENDED), eq(UserStatus.WITHDRAWN), any(LocalDateTime.class)))
                 .thenReturn(1);
 
-        AdminUserDetailResponse response = adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED);
+        AdminUserDetailResponse response = adminUserService.updateStatus(ACTOR_ID, ACTOR_EMAIL, 1L, UserStatus.SUSPENDED);
 
         assertEquals(UserStatus.SUSPENDED, response.status());
-        verify(adminAuditLogger).log(ACTOR_ID, AdminAuditAction.UPDATE_STATUS, 1L,
+        verify(adminAuditLogger).log(ACTOR_ID, ACTOR_EMAIL, AdminAuditAction.UPDATE_STATUS, 1L,
                 Map.of("beforeStatus", UserStatus.ACTIVE, "afterStatus", UserStatus.SUSPENDED));
     }
 
@@ -204,10 +205,10 @@ class AdminUserServiceTest {
                 .thenReturn(0);
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED));
+                () -> adminUserService.updateStatus(ACTOR_ID, ACTOR_EMAIL, 1L, UserStatus.SUSPENDED));
 
         assertEquals(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, exception.getErrorCode());
-        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any(), any());
     }
 
     // 강등/정지 대상이 이미 ADMIN+ACTIVE가 아니면(예: 일반 유저 정지) 마지막 관리자와 무관하므로
@@ -219,7 +220,7 @@ class AdminUserServiceTest {
         when(userRepository.updateStatusIfNotWithdrawn(eq(1L), eq(UserStatus.SUSPENDED), eq(UserStatus.WITHDRAWN), any(LocalDateTime.class)))
                 .thenReturn(1);
 
-        AdminUserDetailResponse response = adminUserService.updateStatus(ACTOR_ID, 1L, UserStatus.SUSPENDED);
+        AdminUserDetailResponse response = adminUserService.updateStatus(ACTOR_ID, ACTOR_EMAIL, 1L, UserStatus.SUSPENDED);
 
         assertEquals(UserStatus.SUSPENDED, response.status());
         verify(userRepository, never()).findAllByRoleAndStatusForUpdate(any(), any());
@@ -235,7 +236,7 @@ class AdminUserServiceTest {
                 .thenReturn(1);
 
         AdminBulkActionResponse result =
-                adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, ACTOR_ID), UserStatus.SUSPENDED);
+                adminUserService.bulkUpdateStatus(ACTOR_ID, ACTOR_EMAIL, List.of(1L, ACTOR_ID), UserStatus.SUSPENDED);
 
         verify(userRepository).updateStatusIfNotWithdrawn(eq(1L), eq(UserStatus.SUSPENDED), eq(UserStatus.WITHDRAWN), any(LocalDateTime.class));
         assertEquals(List.of(1L), result.succeededIds());
@@ -254,7 +255,7 @@ class AdminUserServiceTest {
                 .thenReturn(1);
 
         AdminBulkActionResponse result =
-                adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, 1L), UserStatus.SUSPENDED);
+                adminUserService.bulkUpdateStatus(ACTOR_ID, ACTOR_EMAIL, List.of(1L, 1L), UserStatus.SUSPENDED);
 
         assertEquals(List.of(1L), result.succeededIds());
         assertEquals(0, result.failures().size());
@@ -274,7 +275,7 @@ class AdminUserServiceTest {
                 .thenReturn(1);
 
         AdminBulkActionResponse result =
-                adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, 2L), UserStatus.SUSPENDED);
+                adminUserService.bulkUpdateStatus(ACTOR_ID, ACTOR_EMAIL, List.of(1L, 2L), UserStatus.SUSPENDED);
 
         verify(userRepository, never()).updateStatusIfNotWithdrawn(eq(1L), any(), any(), any());
         verify(userRepository).updateStatusIfNotWithdrawn(eq(2L), eq(UserStatus.SUSPENDED), eq(UserStatus.WITHDRAWN), any(LocalDateTime.class));
@@ -301,7 +302,7 @@ class AdminUserServiceTest {
                 .thenThrow(new CannotAcquireLockException("lock wait timeout"));
 
         AdminBulkActionResponse result =
-                adminUserService.bulkUpdateStatus(ACTOR_ID, List.of(1L, 2L), UserStatus.SUSPENDED);
+                adminUserService.bulkUpdateStatus(ACTOR_ID, ACTOR_EMAIL, List.of(1L, 2L), UserStatus.SUSPENDED);
 
         assertEquals(List.of(1L), result.succeededIds());
         assertEquals(1, result.failures().size());

@@ -138,6 +138,7 @@ public class LocalAuthService {
         // 가용성을 우선해 로그인 자체를 막지 않는다(무차별대입 방지가 로그인 가용성보다 우선순위가
         // 높지 않다는 판단).
         String attemptsKeyName = loginAttemptsKey(normalizedEmail);
+        Long attempts = null;
         try {
             // increment() 후 attempts == 1일 때만 expire()를 별도 호출하면, increment는 성공하고
             // expire만 실패하는 경우(네트워크 순간 장애 등) 그 키가 TTL 없이 영구히 남아 이후
@@ -145,8 +146,12 @@ public class LocalAuthService {
             // setIfAbsent로 키 생성과 동시에 TTL을 확정해두면, increment가 그 뒤에 실패하더라도
             // 이미 설정된 TTL로 자연 정리되므로 이 경합이 생기지 않는다.
             redisTemplate.opsForValue().setIfAbsent(attemptsKeyName, "0", Duration.ofSeconds(loginLockoutWindowSeconds));
-            Long attempts = redisTemplate.opsForValue().increment(attemptsKeyName);
+            attempts = redisTemplate.opsForValue().increment(attemptsKeyName);
             if (attempts != null && attempts > loginMaxAttempts) {
+                // 브루트포스 의심 신호 - Redis TTL 카운터는 만료되면 사라져 사후 조사가 불가능하므로,
+                // 잠금이 실제로 걸리는 시점만큼은 반드시 로그로 남겨 나중에 "이 계정이 언제/몇 번
+                // 공격받았는지" 추적할 수 있게 한다. 비밀번호는 절대 로그에 남기지 않는다.
+                log.warn("로그인 시도 횟수 초과로 잠금 처리 email={} attempts={}", normalizedEmail, attempts);
                 throw new BusinessException(ErrorCode.AUTH_TOO_MANY_LOGIN_ATTEMPTS);
             }
         } catch (DataAccessException e) {
@@ -166,6 +171,13 @@ public class LocalAuthService {
         boolean matches = passwordEncoder.matches(
                 rawPassword, passwordHash != null ? passwordHash : DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY);
         if (user == null || passwordHash == null || !matches) {
+            // 최초 1회 실패(오타 등)는 흔한 정상 케이스라 매번 WARN을 남기면 노이즈만 커지지만,
+            // 같은 이메일에 연속으로 실패가 쌓이는 것은 브루트포스를 의심할 신호이므로 그때만
+            // WARN으로 남긴다. attempts는 위에서 Redis 장애로 못 구한 경우 null일 수 있다.
+            // 비밀번호는 절대 로그에 남기지 않는다.
+            if (attempts != null && attempts > 1) {
+                log.warn("로그인 자격 증명 반복 실패 email={} attempts={}", normalizedEmail, attempts);
+            }
             throw new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS);
         }
 
