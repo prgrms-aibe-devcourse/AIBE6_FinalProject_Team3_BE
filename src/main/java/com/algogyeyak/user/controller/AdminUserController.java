@@ -65,7 +65,7 @@ public class AdminUserController {
             @PathVariable Long userId,
             @Valid @RequestBody AdminUserRoleUpdateRequest request
     ) {
-        AdminUserDetailResponse result = adminUserService.updateRole(principal.userId(), userId, request.role());
+        AdminUserDetailResponse result = adminUserService.updateRole(principal.userId(), principal.email(), userId, request.role());
         // 권한 변경(특히 USER→ADMIN 승격)은 누가 언제 누구에게 했는지 추적 가능해야 한다 -
         // AdminUserService가 AdminAuditLogger로 영구 기록을 남기고, 이 로그는 실시간 관측용으로 별도 유지한다.
         AdminActionLog.record(principal.userId(), "UPDATE_ROLE", "targetUserId", userId, "newRole", request.role());
@@ -79,7 +79,7 @@ public class AdminUserController {
             @PathVariable Long userId,
             @Valid @RequestBody AdminUserStatusUpdateRequest request
     ) {
-        AdminUserDetailResponse result = adminUserService.updateStatus(principal.userId(), userId, request.status());
+        AdminUserDetailResponse result = adminUserService.updateStatus(principal.userId(), principal.email(), userId, request.status());
         AdminActionLog.record(principal.userId(), "UPDATE_STATUS", "targetUserId", userId, "newStatus", request.status());
         return ResponseEntity.ok(ApiResponse.success(result));
     }
@@ -91,7 +91,7 @@ public class AdminUserController {
             @Valid @RequestBody AdminUserBulkStatusUpdateRequest request
     ) {
         AdminBulkActionResponse result =
-                adminUserService.bulkUpdateStatus(principal.userId(), request.userIds(), request.status());
+                adminUserService.bulkUpdateStatus(principal.userId(), principal.email(), request.userIds(), request.status());
         // 일괄 처리는 항목별로 성공/실패가 갈릴 수 있어(AdminBulkActionResponse javadoc 참고),
         // 요청받은 id 전체가 아니라 실제로 성공한 id만 기록한다 - 안 그러면 배치가 전부 실패해도
         // (예: 이미 같은 상태이거나 마지막 관리자인 대상만 골라 보낸 경우) 이 관측용 로그에는

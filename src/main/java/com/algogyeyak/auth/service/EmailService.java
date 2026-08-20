@@ -6,12 +6,22 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 이메일 인증(회원가입)/비밀번호 재설정 메일 발송을 담당한다. 두 기능 모두 발송 실패를 fail-closed로
  * 처리한다 — 메일이 실제로 도착했는지 확신할 수 없는 상태에서 "성공"으로 응답하면, 사용자는 받지도
  * 못한 인증번호/링크를 기다리게 된다.
+ *
+ * <p>실제 발송({@code JavaMailSender.send()})은 SMTP 왕복만큼(수백ms~수 초) 걸릴 수 있는데, 이
+ * 발송 메서드들은 인증 없이 호출 가능한 엔드포인트(이메일 인증번호 발송/비밀번호 재설정 요청)에서
+ * 호출된다 - 요청 스레드에서 동기로 기다리면 부하가 몰릴 때 그 지연이 그대로 서블릿 스레드풀을
+ * 잠식한다. 그래서 {@link com.algogyeyak.auth.config.AsyncConfig}가 등록하는 전용 스레드풀
+ * (emailTaskExecutor)에서 비동기로 실행한다 - 반환된 {@link CompletableFuture}가 실패로
+ * 완료되면(발송 실패) 호출자가 fail-closed 후속 처리(쿨다운 해제 등)를 이어서 할 수 있다.
  */
 @Service
 public class EmailService {
@@ -35,7 +45,8 @@ public class EmailService {
         this.mailSender = mailSender;
     }
 
-    public void sendVerificationCode(String toEmail, String code) {
+    @Async("emailTaskExecutor")
+    public CompletableFuture<Void> sendVerificationCode(String toEmail, String code) {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(fromAddress);
         message.setTo(toEmail);
@@ -48,9 +59,11 @@ public class EmailService {
                 인증번호는 발급 후 %s간 유효합니다. 본인이 요청하지 않았다면 이 메일을 무시해주세요.
                 """.formatted(code, formatValidity(codeValiditySeconds)));
         send(message);
+        return CompletableFuture.completedFuture(null);
     }
 
-    public void sendPasswordResetLink(String toEmail, String resetLink) {
+    @Async("emailTaskExecutor")
+    public CompletableFuture<Void> sendPasswordResetLink(String toEmail, String resetLink) {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(fromAddress);
         message.setTo(toEmail);
@@ -64,6 +77,7 @@ public class EmailService {
                 이 메일을 무시해주세요 - 링크를 클릭하지 않으면 비밀번호는 변경되지 않습니다.
                 """.formatted(resetLink, formatValidity(resetTokenValiditySeconds)));
         send(message);
+        return CompletableFuture.completedFuture(null);
     }
 
     // seconds/60 정수 나눗셈만 쓰면 60의 배수가 아닌 설정값(예: 90초→"1분", 30초→"0분")에서 문구가

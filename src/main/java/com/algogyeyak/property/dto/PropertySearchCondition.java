@@ -21,9 +21,14 @@ public record PropertySearchCondition(
         // 전세는 monthlyRent가 항상 null이라 이 조건은 사실상 월세 매물에만 의미가 있다 -
         // transactionType=JEONSE와 함께 넘어와도 에러는 아니고 그냥 결과가 0건이 될 뿐이다.
         Long minMonthlyRent,
-        Long maxMonthlyRent
+        Long maxMonthlyRent,
+        // true면 확인 필요 신호(checkSignalCount > 0)가 있는 매물만 필터링한다(#233). null/false면
+        // 조건 자체를 무시(기존과 동일하게 전체 목록). risk-analysis가 유지하는 값이라 이 조건의
+        // 실제 매물 id 목록 계산은 PropertyService가 PropertyRiskSummaryProvider를 통해 수행한다 -
+        // 여기 hasSignal 자체는 그 계산을 트리거하는 사용자 의도만 표현한다.
+        Boolean hasSignal
 ) {
     public static PropertySearchCondition empty() {
-        return new PropertySearchCondition(null, null, null, null, null, null, null, null, null);
+        return new PropertySearchCondition(null, null, null, null, null, null, null, null, null, null);
     }
 }

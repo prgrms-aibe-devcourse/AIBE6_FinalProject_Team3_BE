@@ -69,7 +69,7 @@ public class AdminPropertyReportController {
             @Valid @RequestBody AdminPropertyReportReviewRequest request
     ) {
         AdminPropertyReportDetailResponse response =
-                adminPropertyReportService.review(principal.userId(), reportId, request.status(), request.memo());
+                adminPropertyReportService.review(principal.userId(), principal.email(), reportId, request.status(), request.memo());
         // 신고 처리 결과는 재조회 시 reviewerId/reviewedAt으로 남지만, 나중에 다른 관리자가 덮어쓰면
         // (review() javadoc의 알려진 한계) 이전 처리자 기록이 사라진다 - AdminPropertyReportService가
         // AdminAuditLogger로 영구 기록을 남기고, 이 로그는 실시간 관측용으로 별도 유지한다.
@@ -84,7 +84,7 @@ public class AdminPropertyReportController {
             @Valid @RequestBody AdminPropertyReportBulkReviewRequest request
     ) {
         AdminBulkActionResponse result = adminPropertyReportService.bulkReview(
-                principal.userId(), request.reportIds(), request.status(), request.memo());
+                principal.userId(), principal.email(), request.reportIds(), request.status(), request.memo());
         // 일괄 처리는 항목별로 성공/실패가 갈릴 수 있어(AdminBulkActionResponse javadoc 참고),
         // 요청받은 id 전체가 아니라 실제로 성공한 id만 기록한다 - 안 그러면 배치가 전부 실패해도
         // (예: 이미 처리됐거나 본인이 신고한 건만 골라 보낸 경우) 이 관측용 로그에는 "처리함"으로

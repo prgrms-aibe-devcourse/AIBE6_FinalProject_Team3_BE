@@ -188,6 +188,14 @@ server:
     mbeanregistry:
       enabled: true
 
+# 요청 단위 상관관계 ID(RequestIdLoggingFilter가 MDC에 심음)를 로그 라인에 붙인다 - 로그 레벨
+# 뒤에 붙이는 게 Spring Boot가 MDC/트레이싱 값을 넣으라고 제공하는 표준 확장 지점(logging.pattern.level)
+# 이라, 기본 콘솔/파일 패턴 전체를 갈아엎지 않고도 안전하게 추가할 수 있다. 요청 밖(앱 기동 로그 등)엔
+# MDC 값이 없어 '-'로 대체된다.
+logging:
+  pattern:
+    level: '%5p [%X{requestId:--}]'
+
 # Prometheus
 management:
   endpoints:

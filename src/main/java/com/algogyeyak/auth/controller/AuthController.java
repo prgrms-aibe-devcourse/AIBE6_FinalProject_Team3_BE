@@ -146,7 +146,6 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "발송 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 가입된 이메일 (AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS)")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재발송 쿨다운(" + EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS + "초) 이내 재요청 (AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS)")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "메일 발송 실패 (EMAIL_SEND_FAILED)")
     @PostMapping("/email-verification/request")
     public ResponseEntity<ApiResponse<Void>> requestEmailVerification(
             @Valid @RequestBody EmailVerificationRequest request) {

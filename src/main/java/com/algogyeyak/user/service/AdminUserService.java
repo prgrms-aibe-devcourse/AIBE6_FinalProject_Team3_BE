@@ -77,7 +77,7 @@ public class AdminUserService {
      * dirty로 남아 커밋 시점에 조건 없는 UPDATE가 한 번 더 나가 방금 막은 레이스가 되살아난다.
      */
     @Transactional
-    public AdminUserDetailResponse updateRole(Long actorId, Long userId, Role role) {
+    public AdminUserDetailResponse updateRole(Long actorId, String actorEmail, Long userId, Role role) {
         rejectSelf(actorId, userId);
         User user = findUser(userId);
         if (role != Role.ADMIN) {
@@ -93,7 +93,7 @@ public class AdminUserService {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_ROLE_TRANSITION, "탈퇴한 사용자는 권한을 변경할 수 없습니다.");
         }
 
-        adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_ROLE, userId,
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.UPDATE_ROLE, userId,
                 Map.of("beforeRole", previousRole, "afterRole", role));
         return AdminUserDetailResponse.from(user, role, updatedAt);
     }
@@ -102,7 +102,7 @@ public class AdminUserService {
     // updateRole()과 동일한 이유로 조건부 UPDATE(updateStatusIfNotWithdrawn)의 영향받은 row 수로
     // 판단한다 - User.suspend()/activate()를 더 이상 호출하지 않는다(이유는 updateRole() 참고).
     @Transactional
-    public AdminUserDetailResponse updateStatus(Long actorId, Long userId, UserStatus status) {
+    public AdminUserDetailResponse updateStatus(Long actorId, String actorEmail, Long userId, UserStatus status) {
         rejectSelf(actorId, userId);
         if (status != UserStatus.ACTIVE && status != UserStatus.SUSPENDED) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "ACTIVE/SUSPENDED로만 변경할 수 있습니다.");
@@ -125,7 +125,7 @@ public class AdminUserService {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, message);
         }
 
-        adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_STATUS, userId,
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.UPDATE_STATUS, userId,
                 Map.of("beforeStatus", previousStatus, "afterStatus", status));
         return AdminUserDetailResponse.from(user, status, updatedAt);
     }
@@ -150,7 +150,7 @@ public class AdminUserService {
      * 두 번째 시도에서 상태 전이 실패로 다시 걸려 같은 id가 성공/실패 양쪽에 나타날 수 있다 -
      * 순서를 보존한 채 중복만 제거해 이 문제를 없앤다.
      */
-    public AdminBulkActionResponse bulkUpdateStatus(Long actorId, List<Long> userIds, UserStatus status) {
+    public AdminBulkActionResponse bulkUpdateStatus(Long actorId, String actorEmail, List<Long> userIds, UserStatus status) {
         List<Long> succeededIds = new ArrayList<>();
         List<AdminBulkActionResponse.Failure> failures = new ArrayList<>();
         for (Long userId : new LinkedHashSet<>(userIds)) {
@@ -158,8 +158,10 @@ public class AdminUserService {
                 // 자기 자신 제외 가드는 updateStatus() 자신이 rejectSelf()로 이미 강제한다 -
                 // 여기서 별도로 다시 확인할 필요 없다(예전엔 이 가드가 컨트롤러/이 메서드 두 곳에
                 // 손으로 복붙돼 있어, updateStatus()를 직접 호출하는 미래의 다른 호출부가 생기면
-                // 조용히 건너뛸 위험이 있었다).
-                requiresNewTransactionTemplate.executeWithoutResult(status_ -> updateStatus(actorId, userId, status));
+                // 조용히 건너뛸 위험이 있었다). actorEmail도 루프 밖(컨트롤러)에서 한 번만 확보한
+                // 값을 그대로 전달한다 - 행위자는 이 벌크 처리 전체에서 항상 같은 관리자이므로,
+                // 항목마다 다시 조회할 이유가 없다(AdminAuditLogger.log() 참고).
+                requiresNewTransactionTemplate.executeWithoutResult(status_ -> updateStatus(actorId, actorEmail, userId, status));
                 succeededIds.add(userId);
             } catch (BusinessException e) {
                 failures.add(new AdminBulkActionResponse.Failure(userId, e.getMessage()));

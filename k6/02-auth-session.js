@@ -14,7 +14,8 @@ const TEST_PASSWORD = __ENV.TEST_PASSWORD;
 //    토큰이라 401이어야 정상 - "유저당 세션 1개" 정책이 동시 요청에서도 깨지지 않는지 확인.
 // 2) jwtFilterOverhead(0s 시작, concurrentRefresh와 병행 가능) - refresh token이 아니라
 //    access token만 쓰므로 위 refresh 경쟁과 무관하다. JwtAuthenticationFilter가 매 요청마다
-//    Redis 블랙리스트 조회를 하는 비용이 부하 상황에서 얼마나 드는지 관찰.
+//    Redis 블랙리스트 조회를 하는 비용이 부하 상황에서 얼마나 드는지 관찰. 다른 스크립트들을
+//    1차 테스트 실측 데이터 기준으로 60명대까지 올린 것과 맞춰 10 → 60명으로 상향.
 // 3) concurrentLogin(30s 시작) - 반드시 concurrentRefresh가 끝난 뒤에 시작해야 한다.
 //    같은 계정으로 재로그인하면 "재로그인 시 이전 refresh token 즉시 무효화" 정책 때문에
 //    concurrentRefresh가 테스트 중이던 토큰을 중간에 깨뜨려버릴 수 있다.
@@ -31,7 +32,7 @@ export const options = {
     jwtFilterOverhead: {
       executor: 'constant-vus',
       exec: 'meScenario',
-      vus: 10,
+      vus: 60,
       duration: '30s',
       startTime: '0s',
     },

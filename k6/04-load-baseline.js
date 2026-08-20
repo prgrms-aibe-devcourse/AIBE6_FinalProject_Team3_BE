@@ -3,14 +3,16 @@ import { check, sleep } from 'k6';
 import { BASE_URL } from './common/config.js';
 import { login, extractAuthCookies, authCookieHeader } from './common/auth.js';
 
-// baseline load test: 예상 실사용 트래픽(20명 동시접속) 수준을 5분간 유지했을 때
+// baseline load test: 예상 실사용 트래픽(60명 동시접속) 수준을 5분간 유지했을 때
 // 응답시간/에러율이 정상 범위인지 확인한다. 01-read-endpoints.js와 같은 엔드포인트
-// 조합을 쓰되, VU 1명짜리 스모크가 아니라 실제 부하를 준다는 점이 다르다.
+// 조합을 쓰되, VU 1명짜리 스모크가 아니라 실제 부하를 준다는 점이 다르다. 20명은 5번(stress)
+// 결과 기준으로 보면 여유가 너무 많아(부담은 100명부터 시작) baseline치고 가벼웠어서 60명으로
+// 올림 - 100명(부담 시작점)보다는 충분히 낮게 유지.
 export const options = {
   stages: [
-    { duration: '1m', target: 20 }, // 0 -> 20명 램프업
-    { duration: '5m', target: 20 }, // 20명 유지
-    { duration: '1m', target: 0 },  // 20 -> 0명 램프다운
+    { duration: '1m', target: 60 }, // 0 -> 60명 램프업
+    { duration: '5m', target: 60 }, // 60명 유지
+    { duration: '1m', target: 0 },  // 60 -> 0명 램프다운
   ],
   thresholds: {
     http_req_duration: ['p(95)<500'],

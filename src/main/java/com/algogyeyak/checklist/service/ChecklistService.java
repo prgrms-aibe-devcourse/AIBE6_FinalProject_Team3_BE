@@ -19,19 +19,21 @@ import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ChecklistService {
 
@@ -40,6 +42,23 @@ public class ChecklistService {
     private final ChecklistItemRepository checklistItemRepository;
     private final UserRepository userRepository;
     private final PropertyRepository propertyRepository;
+    private final TransactionTemplate requiresNewTransactionTemplate;
+
+    public ChecklistService(
+            ChecklistRepository checklistRepository,
+            ChecklistItemTemplateRepository checklistItemTemplateRepository,
+            ChecklistItemRepository checklistItemRepository,
+            UserRepository userRepository,
+            PropertyRepository propertyRepository,
+            PlatformTransactionManager transactionManager) {
+        this.checklistRepository = checklistRepository;
+        this.checklistItemTemplateRepository = checklistItemTemplateRepository;
+        this.checklistItemRepository = checklistItemRepository;
+        this.userRepository = userRepository;
+        this.propertyRepository = propertyRepository;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     /**
      * 유저-매물 조합에 이미 체크리스트가 있으면 그대로 반환하고(멱등), 없으면 현재 활성 템플릿으로
@@ -51,6 +70,16 @@ public class ChecklistService {
                 .orElseGet(() -> createChecklist(userId, propertyId));
     }
 
+    // 동일 유저-매물 조합에 대한 요청 두 개가(체크리스트 시작 버튼 더블클릭, 프론트 useEffect 중복
+    // 호출 등으로) 정말 동시에 들어오면, 둘 다 findByUserIdAndPropertyId에서 "없음"을 보고 동시에
+    // insert를 시도해 uk_checklist_user_property 유니크 제약을 위반할 수 있다(k6
+    // 03-race-conditions.js의 checklistCreate 시나리오로 실제 재현 확인함). insert를 REQUIRES_NEW로
+    // 격리해서, 위반이 나도 그 임시 트랜잭션의 세션만 버려지고 이 메서드가 속한 바깥
+    // (createOrGetChecklist()) 트랜잭션의 세션은 정상 상태로 남게 한다 - 같은 세션에서 saveAndFlush가
+    // 유니크 제약 위반으로 실패한 뒤 그 세션으로 쿼리를 이어가면 Hibernate가 예외를 던지는 문제를
+    // 피하기 위함(LocalAuthService.signup(), FakeListingSignalService.upsertCheck()와 동일한 패턴).
+    // 실패하면 그 사이 먼저 커밋된(경쟁에서 이긴) 체크리스트를 재조회해서 그대로 반환한다 - 이
+    // 메서드는 멱등이어야 하므로(createOrGetChecklist()의 계약) 예외를 그대로 전파하지 않는다.
     private Checklist createChecklist(Long userId, Long propertyId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "사용자를 찾을 수 없습니다."));
@@ -71,7 +100,21 @@ public class ChecklistService {
                 .toList();
 
         Checklist checklist = Checklist.createFrom(user, property, templateVersion, applicableTemplates);
-        return checklistRepository.save(checklist);
+
+        try {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> checklistRepository.saveAndFlush(checklist));
+            return checklist;
+        } catch (DataIntegrityViolationException e) {
+            // 재조회도 REQUIRES_NEW(새 스냅샷)에서 한다 - 바깥 트랜잭션에서 그대로 재조회하면 MySQL
+            // InnoDB의 기본 격리수준(REPEATABLE READ)에서는 이미 확보한 스냅샷에 갇혀 방금 경쟁에서
+            // 이긴 다른 트랜잭션의 커밋이 안 보일 수 있다(LocalAuthService.signup()과 동일 이유).
+            Checklist winner = requiresNewTransactionTemplate.execute(status ->
+                    checklistRepository.findByUserIdAndPropertyId(userId, propertyId).orElse(null));
+            if (winner == null) {
+                throw e;
+            }
+            return winner;
+        }
     }
 
     /**
