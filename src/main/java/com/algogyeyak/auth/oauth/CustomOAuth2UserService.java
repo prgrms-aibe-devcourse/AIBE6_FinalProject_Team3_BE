@@ -6,6 +6,7 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.entity.UserSocialAccount;
 import com.algogyeyak.user.repository.UserRepository;
 import com.algogyeyak.user.repository.UserSocialAccountRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
@@ -26,6 +27,18 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
     private final UserRepository userRepository;
     private final UserSocialAccountRepository userSocialAccountRepository;
     private final TransactionTemplate requiresNewTransactionTemplate;
+
+    // AdminAccountSeeder/DevTestUserSeeder가 만드는 dev-login 전용 계정(비밀번호 없음)의 이메일 -
+    // LocalAuthService.setPassword()가 이 이메일에 영구 비밀번호가 붙는 걸 막는 것과 동일한 이유로,
+    // OAuth 이메일 자동연동도 이 이메일로는 절대 붙을 수 없어야 한다. 안 막으면 DEV_LOGIN_EMAIL을
+    // 실제 가입 가능한 주소로 설정했을 때, 그 주소로 이메일 검증된 소셜 로그인(구글 등)을 하는
+    // 것만으로 dev-login 시크릿 없이 그 계정(ADMIN 포함)에 로그인 수단이 생겨버린다
+    // (2026-08-20 전수조사에서 지적).
+    @Value("${app.dev-login.email}")
+    private String devLoginEmail;
+
+    @Value("${app.dev-login.user-email}")
+    private String devLoginUserEmail;
 
     public CustomOAuth2UserService(
             UserRepository userRepository,
@@ -197,7 +210,19 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             return Optional.empty();
         }
         String email = EmailNormalizer.normalize(userInfo.getEmail());
-        return email == null ? Optional.empty() : userRepository.findByEmail(email);
+        if (email == null || isDevLoginEmail(email)) {
+            return Optional.empty();
+        }
+        return userRepository.findByEmail(email);
+    }
+
+    // devLoginEmail/devLoginUserEmail이 null이면(단위 테스트처럼 @Value가 주입되지 않은 경우) 이
+    // 검사 자체를 건너뛴다 - LocalAuthService.setPassword()의 동일한 가드와 같은 이유.
+    private boolean isDevLoginEmail(String normalizedEmail) {
+        String normalizedAdmin = EmailNormalizer.normalize(devLoginEmail);
+        String normalizedUser = EmailNormalizer.normalize(devLoginUserEmail);
+        return (normalizedAdmin != null && normalizedAdmin.equals(normalizedEmail))
+                || (normalizedUser != null && normalizedUser.equals(normalizedEmail));
     }
 
     private FindOrCreateResult createUser(AuthProvider provider, OAuth2UserInfo userInfo, String nickname) {

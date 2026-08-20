@@ -213,9 +213,13 @@ class CustomOAuth2UserServiceTest {
         when(socialAccountRepository.saveAndFlush(any(UserSocialAccount.class)))
                 .thenThrow(new DataIntegrityViolationException("uk_social_provider_provider_id violation"));
 
-        assertThrows(OAuth2AuthenticationException.class,
+        // 회귀 테스트(2026-08-20 전수조사) - 이웃한 UNRECOVERABLE 분기도 같은 예외 타입을 던지므로,
+        // 타입만 확인하면 잘못된 분기의 에러코드로 바뀌어도(예: DB 오류를 "이미 연동된 계정"으로
+        // 잘못 안내) 테스트가 못 잡는다. 실제 에러코드까지 단언한다.
+        OAuth2AuthenticationException exception = assertThrows(OAuth2AuthenticationException.class,
                 () -> service.processOAuth2User(
                         "kakao", kakaoOAuth2User(123L, "카카오닉네임", "http://img", "shared@example.com")));
+        assertEquals("social_account_conflict", exception.getError().getErrorCode());
     }
 
     @Test
@@ -245,6 +249,38 @@ class CustomOAuth2UserServiceTest {
         verify(socialAccountRepository).saveAndFlush(any(UserSocialAccount.class));
     }
 
+    // 회귀 테스트(2026-08-20 전수조사) - AdminAccountSeeder/DevTestUserSeeder가 만드는 dev-login
+    // 전용 계정(비밀번호 없음)의 이메일로는, 검증된 소셜 로그인이라도 절대 자동 연동되면 안 된다.
+    // 안 막으면 DEV_LOGIN_EMAIL을 실제 가입 가능한 주소로 설정했을 때 그 주소로 구글/카카오 로그인만
+    // 하면 dev-login 시크릿 없이 그 계정(ADMIN 포함)에 로그인 수단이 생겨버린다.
+    @Test
+    void neverLinksOAuthLoginIntoTheSeededDevLoginAdminEmail() {
+        UserRepository repository = mock(UserRepository.class);
+        UserSocialAccountRepository socialAccountRepository = mock(UserSocialAccountRepository.class);
+        CustomOAuth2UserService service = service(repository, socialAccountRepository);
+        ReflectionTestUtils.setField(service, "devLoginEmail", "admin@algogyeyak.local");
+        ReflectionTestUtils.setField(service, "devLoginUserEmail", "tester@algogyeyak.local");
+
+        User seededAdmin = User.createLocalUser("admin@algogyeyak.local", null, "관리자");
+        seededAdmin.grantAdminRole();
+        ReflectionTestUtils.setField(seededAdmin, "id", 1L);
+
+        when(socialAccountRepository.findByProviderAndProviderId(AuthProvider.KAKAO, "123")).thenReturn(Optional.empty());
+        // 실제로는 email의 유니크 제약 때문에 이 저장이 실패한다 - dev-login 이메일이 이미 그 계정을
+        // 점유하고 있는 상태를 시뮬레이션한다.
+        when(repository.saveAndFlush(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("uk_users_email violation"));
+
+        assertThrows(OAuth2AuthenticationException.class,
+                () -> service.processOAuth2User(
+                        "kakao", kakaoOAuth2User(123L, "카카오닉네임", "http://img", "admin@algogyeyak.local")));
+
+        // findByEmail이 dev-login 이메일 자체를 조회하는 데 쓰이면 안 된다(가드가 조회 전에 걸러야
+        // 한다) - 그 계정과 연동/복구를 시도하지 않았다는 뜻이다.
+        verify(repository, never()).findByEmail("admin@algogyeyak.local");
+        verify(socialAccountRepository, never()).saveAndFlush(any(UserSocialAccount.class));
+    }
+
     @Test
     void wrapsSocialAccountConflictInsteadOfCrashingWhenUserAlreadyHasDifferentAccountForSameProvider() {
         UserRepository repository = mock(UserRepository.class);
@@ -266,10 +302,12 @@ class CustomOAuth2UserServiceTest {
         when(socialAccountRepository.existsByUserIdAndProvider(1L, AuthProvider.KAKAO)).thenReturn(true);
 
         // raw DataIntegrityViolationException이 그대로 던져져 500으로 크래시하는 대신,
-        // 다른 실패들과 동일하게 OAuth2AuthenticationException으로 감싸져야 한다.
-        assertThrows(OAuth2AuthenticationException.class,
+        // 다른 실패들과 동일하게 OAuth2AuthenticationException으로 감싸져야 한다. 타입만으로는
+        // 이웃한 UNRECOVERABLE 분기와 구분이 안 되므로 에러코드까지 확인한다.
+        OAuth2AuthenticationException exception = assertThrows(OAuth2AuthenticationException.class,
                 () -> service.processOAuth2User(
                         "kakao", kakaoOAuth2User(123L, "카카오닉네임", "http://img", "shared@example.com")));
+        assertEquals("social_account_conflict", exception.getError().getErrorCode());
     }
 
     @Test
@@ -291,9 +329,12 @@ class CustomOAuth2UserServiceTest {
                 .thenThrow(new DataIntegrityViolationException("unexplained constraint violation"));
         when(socialAccountRepository.existsByUserIdAndProvider(1L, AuthProvider.KAKAO)).thenReturn(false);
 
-        assertThrows(OAuth2AuthenticationException.class,
+        // 이웃한 두 conflict 분기("social_account_conflict")와 달리 이 분기는 "oauth_login_failed"여야
+        // 한다 - 타입만 확인하면 잘못된 분기로 바뀌어도 구분이 안 된다.
+        OAuth2AuthenticationException exception = assertThrows(OAuth2AuthenticationException.class,
                 () -> service.processOAuth2User(
                         "kakao", kakaoOAuth2User(123L, "카카오닉네임", "http://img", "shared@example.com")));
+        assertEquals("oauth_login_failed", exception.getError().getErrorCode());
     }
 
     @Test
