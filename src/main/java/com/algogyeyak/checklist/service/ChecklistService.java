@@ -19,6 +19,7 @@ import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -80,6 +81,12 @@ public class ChecklistService {
     // 피하기 위함(LocalAuthService.signup(), FakeListingSignalService.upsertCheck()와 동일한 패턴).
     // 실패하면 그 사이 먼저 커밋된(경쟁에서 이긴) 체크리스트를 재조회해서 그대로 반환한다 - 이
     // 메서드는 멱등이어야 하므로(createOrGetChecklist()의 계약) 예외를 그대로 전파하지 않는다.
+    //
+    // DataIntegrityViolationException 외에 CannotAcquireLockException도 같이 잡는다 - 동시
+    // insert 요청 수가 많아지면(k6로 30명 가까이 동시 요청 재현) InnoDB가 단순 유니크 제약 위반이
+    // 아니라 데드락으로 감지하는 경우가 있는데, 이건 별도 예외 타입(TransientDataAccessException
+    // 계열)이라 DataIntegrityViolationException만 잡던 코드는 이 경우를 놓쳐 500으로 새어나갔다.
+    // 두 경우 모두 "누군가 이미 성공했거나 곧 성공할 것"이라는 전제는 같아 동일한 복구 로직을 쓴다.
     private Checklist createChecklist(Long userId, Long propertyId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "사용자를 찾을 수 없습니다."));
@@ -104,7 +111,7 @@ public class ChecklistService {
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status -> checklistRepository.saveAndFlush(checklist));
             return checklist;
-        } catch (DataIntegrityViolationException e) {
+        } catch (DataIntegrityViolationException | CannotAcquireLockException e) {
             // 재조회도 REQUIRES_NEW(새 스냅샷)에서 한다 - 바깥 트랜잭션에서 그대로 재조회하면 MySQL
             // InnoDB의 기본 격리수준(REPEATABLE READ)에서는 이미 확보한 스냅샷에 갇혀 방금 경쟁에서
             // 이긴 다른 트랜잭션의 커밋이 안 보일 수 있다(LocalAuthService.signup()과 동일 이유).
