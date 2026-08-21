@@ -77,6 +77,12 @@ dependencies {
 
     // Prometheus
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
+
+    // MarketComparisonService의 지오코딩 결과 캐시(geocodeCache)용. 이전에는 크기/만료 제한이
+    // 없는 순수 ConcurrentHashMap이라 서버를 오래 띄워둘수록(주소 종류가 늘어날수록) 메모리를
+    // 무한정 점유하는 구조였다(2026-08-21 멘토링 피드백에서 지적) - Caffeine으로 바꿔
+    // maximumSize/expireAfterWrite로 상한을 둔다. 버전은 Spring Boot BOM이 관리한다.
+    implementation("com.github.ben-manes.caffeine:caffeine")
 }
 
 tasks.withType<Test> {
