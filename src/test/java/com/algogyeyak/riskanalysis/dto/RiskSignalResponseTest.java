@@ -64,4 +64,42 @@ class RiskSignalResponseTest {
         assertThat(response.reason()).isEqualTo(RiskCheckReason.NO_COMPARABLE_TRANSACTION);
         assertThat(response.description()).isNull();
     }
+
+    @Test
+    @DisplayName("PRICE_ANOMALY 리스크가 발견되면 후속 행동 안내를 담는다")
+    void fromIncludesRecommendedActionsForPriceAnomalyWhenRiskFound() {
+        PropertyRiskCheck check = PropertyRiskCheck.success(property(), RiskSignalType.PRICE_ANOMALY, "v1.0");
+        PropertyRisk risk = PropertyRisk.of(property(), RiskSignalType.PRICE_ANOMALY, "시세보다 15% 낮은 가격이에요");
+
+        RiskSignalResponse response = RiskSignalResponse.from(check, risk);
+
+        assertThat(response.recommendedActions()).containsExactly(
+                "동일 지역 최근 실거래가 확인",
+                "등기부등본 확인",
+                "주변 동일 면적 매물 가격 비교",
+                "중개사에게 가격이 낮은 이유 확인",
+                "옵션/관리비 등 추가 비용 확인"
+        );
+    }
+
+    @Test
+    @DisplayName("PRICE_ANOMALY라도 리스크가 발견되지 않으면 후속 행동 안내는 빈 목록이다")
+    void fromHasEmptyRecommendedActionsWhenPriceAnomalyHasNoRisk() {
+        PropertyRiskCheck check = PropertyRiskCheck.success(property(), RiskSignalType.PRICE_ANOMALY, "v1.0");
+
+        RiskSignalResponse response = RiskSignalResponse.from(check, null);
+
+        assertThat(response.recommendedActions()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("PRICE_ANOMALY가 아닌 신호는 리스크가 발견돼도 후속 행동 안내가 빈 목록이다")
+    void fromHasEmptyRecommendedActionsForOtherSignalTypes() {
+        PropertyRiskCheck check = PropertyRiskCheck.success(property(), RiskSignalType.DUPLICATE_LISTING, "v1.0");
+        PropertyRisk risk = PropertyRisk.of(property(), RiskSignalType.DUPLICATE_LISTING, "동일 주소로 등록된 다른 매물이 있어요");
+
+        RiskSignalResponse response = RiskSignalResponse.from(check, risk);
+
+        assertThat(response.recommendedActions()).isEmpty();
+    }
 }

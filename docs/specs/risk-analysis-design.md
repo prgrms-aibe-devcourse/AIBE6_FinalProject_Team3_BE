@@ -132,3 +132,12 @@ market-data 도메인(`MarketComparisonService`, `MolitRentClientImpl` 등)은 �
 - **`SameAccountMultipleDetector`**도 원래 임대인/중개사 어뷰징 탐지 의도로 설계돼 이 서비스 구조와 안 맞는 건 동일하지만, 이건 애초에 `multiAccountDetectionEnabled: false`로 꺼져있는 상태라 이번엔 손대지 않고 admin 담당자와의 논의로 넘김(팀 결정 대기 상태 유지).
 
 FE는 변경 없음 — `description`이 원래도 자유 텍스트 필드라, 문장 내용만 바뀌었을 뿐 응답 구조(DTO)는 그대로다.
+
+## (2026-08-20) `RiskSignalResponse`에 후속 행동 안내(`recommendedActions`) 추가
+
+FE 피드백(7-1) — `PriceAnomalyDetector`의 메시지가 "시세보다 X% 낮은 가격이에요 — 왜 이렇게 저렴한지 확인해보세요"까지만 있고, **뭘 확인해야 하는지**가 없어 실제 행동으로 이어지기 어렵다는 지적. 두 가지 안(A: 문자열 하나에 다 욱여넣기, B: 구조화된 필드로 분리) 중 FE와 협의해 B안으로 결정 — 신호 카드가 이미 두 화면(`RiskAnalysisClient.tsx`, `PropertyDetailClient.tsx`)에서 공유되는 구조라 FE 작업량이 크지 않다는 판단.
+
+- `RiskSignalResponse`에 `List<String> recommendedActions` 필드 추가. PRICE_ANOMALY 전용으로 하지 않고 신호 공통 필드로 둠(FE 제안) — 나중에 다른 신호 타입에도 안내가 필요해지면 스키마를 또 안 바꿔도 됨. 지금은 `PRICE_ANOMALY`만 5개 항목(동일 지역 실거래가 확인/등기부등본 확인/주변 동일 면적 매물 가격 비교/중개사에게 가격 낮은 이유 확인/옵션·관리비 등 추가 비용 확인)이 채워지고, 나머지 3개 신호 타입은 빈 리스트.
+- **DB에 저장하지 않음** — 매물마다 달라지는 내용이 아니라 신호 타입에 고정된 일반 안내라, `PropertyRisk` 엔티티/스키마를 안 건드리고 `RiskSignalResponse.from()`에서 signalType 기준으로 정적 매핑만 한다. 리스크가 실제로 발견된 경우(`risk != null`)에만 채워지고, 판정불가/리스크 없음이면 빈 리스트.
+- 조사해본 결과, 제안된 5개 행동 중 실제로 이 앱이 지원하는 건 "관리비 확인"(`Property.maintenanceFee` 필드로 이미 등록 시점에 받고 있음)뿐이고, 나머지(실거래가 조회, 주변 매물 비교, 등기부등본, 중개사 문의)는 앱 안에 대응 기능이 없어 사용자가 앱 밖에서 직접 해야 하는 행동이다 — 그래도 "무엇을 확인해야 하는지" 구체적으로 짚어주는 것 자체가 피드백의 요구사항이라 그대로 포함시킴.
+- FE 작업(타입 추가 + 두 컴포넌트에 체크리스트 렌더링)은 이 스키마 확정 이후 별도로 진행.
