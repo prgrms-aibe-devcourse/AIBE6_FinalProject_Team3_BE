@@ -36,6 +36,11 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-restclient")
+    // Gemini/Clova 전용 RestTemplate(ContractAnalysisRestTemplateConfig)의 커넥션 풀(maxTotal/
+    // defaultMaxPerRoute)을 위해 필요 - SimpleClientHttpRequestFactory(HttpURLConnection 기반,
+    // property.config.RestTemplateConfig의 공용 빈이 쓰는 팩토리)는 풀 크기를 조정할 수 있는
+    // 개념 자체가 없다. 버전은 Spring Boot 의존성 관리 BOM이 고정한다.
+    implementation("org.apache.httpcomponents.client5:httpclient5")
     compileOnly("org.projectlombok:lombok")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     // 로컬 개발 전용: backend/.env를 자동으로 읽어 Spring 프로퍼티로 노출한다
