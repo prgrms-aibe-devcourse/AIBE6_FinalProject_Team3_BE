@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,7 +58,7 @@ class MarketDataClientImplTest {
         Property property = property(10L, 200_000_000L);
         when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(property)).thenReturn(
-                MarketComparisonResponse.available(190_000_000L, -0.05, 3, "2026-06-15", 300, 0.2, 6)
+                MarketComparisonResponse.available(190_000_000L, -0.05, 3, "2026-06-15", 300, 0.2, 6, List.of())
         );
 
         MarketComparison result = client.getComparison(10L).orElseThrow();

@@ -58,7 +58,7 @@ public class PriceAnomalyDetector implements SignalDetector {
                 .multiply(BigDecimal.valueOf(100))
                 .setScale(0, RoundingMode.HALF_UP)
                 .intValue();
-        return SignalCheckResult.success("시세보다 " + actualPercent + "% 낮은 가격이에요 — 왜 이렇게 저렴한지 확인해보세요");
+        return SignalCheckResult.success("시세보다 " + actualPercent + "% 낮은 가격이에요");
     }
 
     private RiskCheckReason mapReason(MarketUnavailableReason reason) {

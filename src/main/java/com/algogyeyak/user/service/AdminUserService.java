@@ -3,6 +3,7 @@ package com.algogyeyak.user.service;
 import com.algogyeyak.admin.dto.AdminBulkActionResponse;
 import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.pagination.PageableUtils;
@@ -37,6 +38,7 @@ public class AdminUserService {
 
     private final UserRepository userRepository;
     private final AdminAuditLogger adminAuditLogger;
+    private final UserAuthStatusCacheService userAuthStatusCacheService;
     // bulkUpdateStatus()가 항목별로 이 템플릿을 통해 updateStatus()를 REQUIRES_NEW로 감싼다 -
     // self-invocation(this.updateStatus(...))은 @Transactional 프록시를 우회하므로, 그냥
     // 호출하면 전부 bulkUpdateStatus() 자신의 트랜잭션 하나를 공유하게 된다. 그 상태에서
@@ -49,9 +51,13 @@ public class AdminUserService {
     private final TransactionTemplate requiresNewTransactionTemplate;
 
     public AdminUserService(
-            UserRepository userRepository, AdminAuditLogger adminAuditLogger, PlatformTransactionManager transactionManager) {
+            UserRepository userRepository,
+            AdminAuditLogger adminAuditLogger,
+            UserAuthStatusCacheService userAuthStatusCacheService,
+            PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.adminAuditLogger = adminAuditLogger;
+        this.userAuthStatusCacheService = userAuthStatusCacheService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -92,6 +98,9 @@ public class AdminUserService {
         if (updated == 0) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_ROLE_TRANSITION, "탈퇴한 사용자는 권한을 변경할 수 없습니다.");
         }
+        // JwtAuthenticationFilter가 매 요청 재조회 없이 최대 30초 캐싱한 role을 신뢰의 원천으로
+        // 쓰므로, 여기서 지우지 않으면 방금 회수한 권한이 그 30초 동안 여전히 통할 수 있다.
+        userAuthStatusCacheService.evictAfterCommit(userId);
 
         adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.UPDATE_ROLE, userId,
                 Map.of("beforeRole", previousRole, "afterRole", role));
@@ -124,6 +133,9 @@ public class AdminUserService {
                     : "탈퇴한 사용자는 활성화할 수 없습니다.";
             throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, message);
         }
+        // updateRole()과 동일한 이유 - 특히 정지(SUSPENDED)는 즉시 차단이 목적이므로 캐시가
+        // 남아있으면 그 목적 자체가 무의미해진다.
+        userAuthStatusCacheService.evictAfterCommit(userId);
 
         adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.UPDATE_STATUS, userId,
                 Map.of("beforeStatus", previousStatus, "afterStatus", status));

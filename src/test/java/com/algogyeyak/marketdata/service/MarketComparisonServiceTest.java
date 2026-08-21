@@ -14,6 +14,7 @@ import com.algogyeyak.marketdata.client.RentTransactionSample;
 import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
+import com.algogyeyak.marketdata.dto.SamplePriceHighlight;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
 import com.algogyeyak.property.client.KakaoRegionCodeClient;
@@ -232,6 +233,90 @@ class MarketComparisonServiceTest {
         assertThat(response.areaErrorRate()).isEqualTo(0.2);
         assertThat(response.lookbackMonths()).isEqualTo(6);
         assertThat(response.reason()).isNull();
+        // 5차 멘토링 피드백 7-2 - 기준가 계산에 실제로 쓰인 표본이 그대로 담겨야 한다.
+        assertThat(response.samples()).hasSize(3);
+    }
+
+    // 5차 멘토링 피드백 7-2 - AVAILABLE 응답의 samples가 실제 계산에 쓰인 표본의 상세 정보(건물명/주소/
+    // 계약일/보증금/면적)를 담고, 최신 계약일 순으로 정렬돼 내려가는지 검증한다.
+    @Test
+    void AVAILABLE_응답의_samples는_기준가_계산에_쓰인_표본을_최신_계약일순으로_담는다() {
+        init();
+        Property property = jeonseOfficetel(200_000_000L, 25.0);
+        when(kakaoRegionCodeClient.resolve(PROPERTY_LAT, PROPERTY_LNG)).thenReturn(resolvedRegion());
+
+        RentTransactionSample oldest = RentTransactionSample.builder()
+                .propertyType(PropertyType.OFFICETEL).buildingName("테스트오피스텔")
+                .jibunAddress("1-1").legalDongCode(LAWD_CD).legalDongName("청운동")
+                .dealDate(LocalDate.of(2026, 4, 1)).depositWon(180_000_000L).monthlyRentWon(0L).areaSqm(24.0)
+                .build();
+        RentTransactionSample newest = RentTransactionSample.builder()
+                .propertyType(PropertyType.OFFICETEL).buildingName("테스트오피스텔")
+                .jibunAddress("1-2").legalDongCode(LAWD_CD).legalDongName("청운동")
+                .dealDate(LocalDate.of(2026, 6, 15)).depositWon(200_000_000L).monthlyRentWon(0L).areaSqm(25.0)
+                .build();
+        RentTransactionSample middle = RentTransactionSample.builder()
+                .propertyType(PropertyType.OFFICETEL).buildingName("테스트오피스텔")
+                .jibunAddress("1-3").legalDongCode(LAWD_CD).legalDongName("청운동")
+                .dealDate(LocalDate.of(2026, 5, 10)).depositWon(220_000_000L).monthlyRentWon(0L).areaSqm(26.0)
+                .build();
+        stubFirstMonthOnly(List.of(oldest, newest, middle));
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAt(PROPERTY_LAT, PROPERTY_LNG));
+
+        MarketComparisonResponse response = service.compare(property);
+
+        assertThat(response.samples()).hasSize(3);
+        // 최신 계약일(2026-06-15) 순으로 정렬돼야 한다.
+        assertThat(response.samples()).extracting("dealDate")
+                .containsExactly("2026-06-15", "2026-05-10", "2026-04-01");
+        assertThat(response.samples().get(0).buildingName()).isEqualTo("테스트오피스텔");
+        assertThat(response.samples().get(0).address()).isEqualTo("서울특별시 종로구 청운동 1-2");
+        assertThat(response.samples().get(0).depositWon()).isEqualTo(200_000_000L);
+        assertThat(response.samples().get(0).areaSqm()).isEqualTo(25.0);
+        // 표본이 5건 이하라 추릴 필요가 없었으면 priceHighlight는 전부 null이어야 한다.
+        assertThat(response.samples()).extracting("priceHighlight").containsOnlyNulls();
+    }
+
+    // 표본이 대표 노출 상한(5건)을 넘으면 최고가/최저가/최근순으로 추려야 한다(사용자 피드백,
+    // 2026-08-21) - 다 보여주면 응답이 무거워지고 사용자도 다 읽기 부담스럽다는 이유.
+    @Test
+    void 표본이_5건을_넘으면_최고가_최저가_최근순으로_5건만_담는다() {
+        init();
+        Property property = jeonseOfficetel(200_000_000L, 25.0);
+        when(kakaoRegionCodeClient.resolve(PROPERTY_LAT, PROPERTY_LNG)).thenReturn(resolvedRegion());
+
+        RentTransactionSample lowest = txSample("1-1", LocalDate.of(2026, 1, 1), 150_000_000L);
+        RentTransactionSample highest = txSample("1-2", LocalDate.of(2026, 2, 1), 300_000_000L);
+        RentTransactionSample middleExcluded = txSample("1-3", LocalDate.of(2026, 3, 1), 200_000_000L);
+        RentTransactionSample recent1 = txSample("1-4", LocalDate.of(2026, 4, 1), 210_000_000L);
+        RentTransactionSample recent2 = txSample("1-5", LocalDate.of(2026, 5, 1), 190_000_000L);
+        RentTransactionSample mostRecent = txSample("1-6", LocalDate.of(2026, 6, 1), 205_000_000L);
+        stubFirstMonthOnly(List.of(lowest, highest, middleExcluded, recent1, recent2, mostRecent));
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAt(PROPERTY_LAT, PROPERTY_LNG));
+
+        MarketComparisonResponse response = service.compare(property);
+
+        // 총 표본 수(sampleCount)는 6건 그대로지만, 노출용 samples는 대표 5건으로 추려진다.
+        assertThat(response.sampleCount()).isEqualTo(6);
+        assertThat(response.samples()).hasSize(5);
+        // 최근순으로 채워지는 3건(mostRecent/recent2/recent1) + 최고가(highest) + 최저가(lowest) -
+        // middleExcluded(200M, 3월)만 어느 기준에도 안 걸려 빠진다. 최종 출력은 항상 최신 계약일순.
+        assertThat(response.samples()).extracting("dealDate")
+                .containsExactly("2026-06-01", "2026-05-01", "2026-04-01", "2026-02-01", "2026-01-01");
+        assertThat(response.samples()).extracting("depositWon")
+                .containsExactly(205_000_000L, 190_000_000L, 210_000_000L, 300_000_000L, 150_000_000L);
+        // 목록 순서(최신순)와 선정 사유(최고가/최저가)가 다르다 보니, FE가 배지를 붙일 수 있도록
+        // priceHighlight로 어떤 표본이 왜 뽑혔는지 표시해야 한다 - 나머지 표본(최근순으로 뽑힌 것)은 null.
+        assertThat(response.samples()).extracting("priceHighlight")
+                .containsExactly(null, null, null, SamplePriceHighlight.HIGHEST, SamplePriceHighlight.LOWEST);
+    }
+
+    private RentTransactionSample txSample(String jibun, LocalDate dealDate, long depositWon) {
+        return RentTransactionSample.builder()
+                .propertyType(PropertyType.OFFICETEL).buildingName("테스트오피스텔")
+                .jibunAddress(jibun).legalDongCode(LAWD_CD).legalDongName("청운동")
+                .dealDate(dealDate).depositWon(depositWon).monthlyRentWon(0L).areaSqm(25.0)
+                .build();
     }
 
     @Test
@@ -372,7 +457,7 @@ class MarketComparisonServiceTest {
     void getCachedOnly는_캐시에_이미_있으면_그대로_반환하고_계산을_트리거하지_않는다() {
         init();
         MarketComparisonResponse cached = MarketComparisonResponse.available(
-                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6
+                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6, List.of()
         );
         // compare()가 @Cacheable 프록시를 거쳐야 실제로 채워지는 캐시라, 프록시 없이 직접 생성한 이
         // 테스트에서는 채워진 캐시 상태를 수동으로 흉내낸다(등록/수정/상세조회에서 compare()가 이미

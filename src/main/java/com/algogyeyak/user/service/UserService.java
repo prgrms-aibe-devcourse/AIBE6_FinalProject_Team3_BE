@@ -1,5 +1,6 @@
 package com.algogyeyak.user.service;
 
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
@@ -48,6 +49,7 @@ public class UserService {
     private final ChecklistRepository checklistRepository;
     private final PropertyRepository propertyRepository;
     private final S3PresignService s3PresignService;
+    private final UserAuthStatusCacheService userAuthStatusCacheService;
     private final TransactionTemplate requiresNewTransactionTemplate;
 
     public UserService(
@@ -57,6 +59,7 @@ public class UserService {
             ChecklistRepository checklistRepository,
             PropertyRepository propertyRepository,
             S3PresignService s3PresignService,
+            UserAuthStatusCacheService userAuthStatusCacheService,
             PlatformTransactionManager transactionManager) {
         this.userRepository = userRepository;
         this.userPreferenceRepository = userPreferenceRepository;
@@ -64,6 +67,7 @@ public class UserService {
         this.checklistRepository = checklistRepository;
         this.propertyRepository = propertyRepository;
         this.s3PresignService = s3PresignService;
+        this.userAuthStatusCacheService = userAuthStatusCacheService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -214,6 +218,9 @@ public class UserService {
         // 탈퇴할 때마다 실제 소유자가 없는 이미지가 영구적으로 S3에 남는다.
         String previousImageUrl = user.getProfileImageUrl();
         user.withdraw();
+        // JwtAuthenticationFilter의 user-status 캐시가 탈퇴 이전 상태를 최대 30초 더 신뢰하지
+        // 않도록 커밋 직후 지운다 - AdminUserService.updateRole/updateStatus와 동일한 이유.
+        userAuthStatusCacheService.evictAfterCommit(userId);
         deletePreviousProfileImageIfOwned(userId, previousImageUrl);
 
         // OAuth 연동 정보는 하드 삭제한다 - 남겨두면 (provider, provider_id) unique 제약 때문에

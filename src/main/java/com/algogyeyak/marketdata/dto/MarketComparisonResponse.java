@@ -1,5 +1,7 @@
 package com.algogyeyak.marketdata.dto;
 
+import java.util.List;
+
 /**
  * 매물-실거래가 시세비교 결과. property 도메인의 PropertyDetailResponse/PropertyRegisterResponse가
  * 공통으로 사용하는 공용 DTO다 (기존에는 두 응답 클래스에 동일한 레코드가 중복 정의되어 있었음).
@@ -18,20 +20,25 @@ public record MarketComparisonResponse(
         // 국토부 실거래를 조회한 개월 수(market-data.comparison.lookback-months와 동일한 값). status가
         // UNAVAILABLE이면 null.
         Integer lookbackMonths,
+        // 기준가(중앙값) 산출에 실제로 쓰인 개별 실거래 표본 목록(5차 멘토링 피드백 7-2) - status가
+        // UNAVAILABLE이면 null, AVAILABLE이면 sampleCount와 크기가 같다.
+        List<MarketTransactionSampleResponse> samples,
         String message,          // 판정불가 사유 등 사용자 안내 문구 (자유 텍스트, 화면 표시용)
         MarketComparisonUnavailableReason reason // 판정불가 사유 코드 (구조화, 다른 도메인 소비용) - AVAILABLE이면 null
 ) {
     public static MarketComparisonResponse unavailable(MarketComparisonUnavailableReason reason, String message) {
-        return new MarketComparisonResponse("UNAVAILABLE", null, null, null, null, null, null, null, message, reason);
+        return new MarketComparisonResponse(
+                "UNAVAILABLE", null, null, null, null, null, null, null, null, message, reason
+        );
     }
 
     public static MarketComparisonResponse available(
             long referencePrice, double differenceRate, int sampleCount, String referenceDate, int radiusMeters,
-            double areaErrorRate, int lookbackMonths
+            double areaErrorRate, int lookbackMonths, List<MarketTransactionSampleResponse> samples
     ) {
         return new MarketComparisonResponse(
                 "AVAILABLE", referencePrice, differenceRate, sampleCount, referenceDate, radiusMeters,
-                areaErrorRate, lookbackMonths, null, null
+                areaErrorRate, lookbackMonths, samples, null, null
         );
     }
 }

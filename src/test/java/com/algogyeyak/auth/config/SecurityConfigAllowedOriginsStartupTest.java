@@ -4,6 +4,7 @@ import com.algogyeyak.auth.handler.OAuth2AuthenticationFailureHandler;
 import com.algogyeyak.auth.handler.OAuth2AuthenticationSuccessHandler;
 import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtProvider;
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CustomOAuth2UserService;
 import com.algogyeyak.user.repository.UserRepository;
@@ -35,7 +36,8 @@ class SecurityConfigAllowedOriginsStartupTest {
                     mock(CookieAuthorizationRequestRepository.class),
                     mock(JwtProvider.class),
                     mock(AccessTokenRevocationService.class),
-                    mock(UserRepository.class)));
+                    mock(UserRepository.class),
+                    mock(UserAuthStatusCacheService.class)));
 
     @Test
     void failsToStartWhenAllowedOriginsIsBlank() {
