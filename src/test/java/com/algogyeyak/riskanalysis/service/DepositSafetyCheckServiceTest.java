@@ -10,10 +10,13 @@ import com.algogyeyak.riskanalysis.client.MarketSaleDataClient;
 import com.algogyeyak.riskanalysis.dto.DepositSafetyCheckResponse;
 import com.algogyeyak.riskanalysis.dto.MarketSalePrice;
 import com.algogyeyak.riskanalysis.entity.DepositSafetyCheck;
+import com.algogyeyak.riskanalysis.entity.PropertyRisk;
 import com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason;
 import com.algogyeyak.riskanalysis.enums.DepositSafetyStatus;
+import com.algogyeyak.riskanalysis.enums.RiskSignalType;
 import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
 import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
+import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -41,10 +44,11 @@ class DepositSafetyCheckServiceTest {
     private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final com.algogyeyak.checklist.repository.ChecklistItemRepository checklistItemRepository =
             mock(com.algogyeyak.checklist.repository.ChecklistItemRepository.class);
+    private final PropertyRiskRepository propertyRiskRepository = mock(PropertyRiskRepository.class);
     private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
     private final DepositSafetyCheckService service = new DepositSafetyCheckService(
             depositSafetyCheckRepository, marketSaleDataClient, propertyRepository, checklistItemRepository,
-            policyConfig, mock(PlatformTransactionManager.class));
+            propertyRiskRepository, policyConfig, mock(PlatformTransactionManager.class));
 
     private Property property(Long id, TransactionType transactionType, Long deposit) {
         Property property = Property.builder()
@@ -282,6 +286,39 @@ class DepositSafetyCheckServiceTest {
         DepositSafetyCheckResponse response = service.get(1L, 10L);
 
         assertThat(response.recentOwnershipChangeWarning()).isFalse();
+    }
+
+    @Test
+    @DisplayName("get()은 전세가율이 안전 구간이어도 같은 매물에 PRICE_ANOMALY 신호가 있으면 priceAnomalyWarning을 true로 반환한다")
+    void getReturnsPriceAnomalyWarningEvenWhenRatioIsSafe() {
+        setPolicy();
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        // 전세가율 4% - cautionFrom(80) 미만이라 "안전" 구간
+        DepositSafetyCheck check = DepositSafetyCheck.calculated(
+                property, BigDecimal.valueOf(4), null, null, LocalDate.of(2026, 7, 31), "설명", 5, 300, "v1.0");
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
+        when(propertyRiskRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.PRICE_ANOMALY))
+                .thenReturn(Optional.of(mock(PropertyRisk.class)));
+
+        DepositSafetyCheckResponse response = service.get(1L, 10L);
+
+        assertThat(response.priceAnomalyWarning()).isTrue();
+    }
+
+    @Test
+    @DisplayName("get()은 PRICE_ANOMALY 신호가 없으면 priceAnomalyWarning을 false로 반환한다")
+    void getReturnsNoPriceAnomalyWarningWhenSignalAbsent() {
+        setPolicy();
+        Property property = property(10L, TransactionType.JEONSE, 200_000_000L);
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property));
+        DepositSafetyCheck check = DepositSafetyCheck.calculated(
+                property, BigDecimal.valueOf(82), null, null, LocalDate.of(2026, 7, 31), "설명", 5, 300, "v1.0");
+        when(depositSafetyCheckRepository.findByPropertyId(10L)).thenReturn(Optional.of(check));
+
+        DepositSafetyCheckResponse response = service.get(1L, 10L);
+
+        assertThat(response.priceAnomalyWarning()).isFalse();
     }
 
     @Test

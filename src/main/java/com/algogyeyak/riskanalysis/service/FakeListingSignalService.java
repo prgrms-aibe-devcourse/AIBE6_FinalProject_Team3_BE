@@ -2,6 +2,7 @@ package com.algogyeyak.riskanalysis.service;
 
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
@@ -40,6 +41,7 @@ import java.util.stream.Collectors;
 public class FakeListingSignalService {
     private final List<SignalDetector> detectors;
     private final MarketDataClient marketDataClient;
+    private final MarketComparisonService marketComparisonService;
     private final PropertyRiskCheckRepository riskCheckRepository;
     private final PropertyRiskRepository riskRepository;
     private final PropertyRepository propertyRepository;
@@ -50,6 +52,7 @@ public class FakeListingSignalService {
     public FakeListingSignalService(
             List<SignalDetector> detectors,
             MarketDataClient marketDataClient,
+            MarketComparisonService marketComparisonService,
             PropertyRiskCheckRepository riskCheckRepository,
             PropertyRiskRepository riskRepository,
             PropertyRepository propertyRepository,
@@ -58,6 +61,7 @@ public class FakeListingSignalService {
             PlatformTransactionManager transactionManager) {
         this.detectors = detectors;
         this.marketDataClient = marketDataClient;
+        this.marketComparisonService = marketComparisonService;
         this.riskCheckRepository = riskCheckRepository;
         this.riskRepository = riskRepository;
         this.propertyRepository = propertyRepository;
@@ -141,6 +145,13 @@ public class FakeListingSignalService {
      */
     @Transactional
     public int checkAndSave(Property property) {
+        // marketDataClient.getComparison()이 내부적으로 쓰는 MarketComparisonService.compare()는
+        // propertyId만 키로 Redis에 캐싱된다(TTL 30분). PropertyService.update()가 자기 응답을
+        // 만들 때는 스스로 evictCache()를 부르지만, 이 메서드는 그 호출자에 의존하지 않고 여기서도
+        // 직접 한 번 더 비운다 - 그래야 이 메서드가 PropertyService.update() 경로를 거치지 않고
+        // 호출되는 모든 경우(재계산 배치, 다른 트리거 등)에도 PRICE_ANOMALY가 항상 최신 보증금 기준
+        // 시세비교 결과를 보게 된다. evict는 멱등이라 이미 최신이어도 다시 불러 안전하다.
+        marketComparisonService.evictCache(property.getId());
         MarketComparison comparison = marketDataClient.getComparison(property.getId())
                 .orElse(null);
 
@@ -231,7 +242,16 @@ public class FakeListingSignalService {
     // 결과 1건만 유지한다. insert 경쟁 대비는 upsertCheck()와 동일한 이유·동일한 패턴.
     private void upsertRisk(Property property, RiskSignalType signalType, SignalCheckResult result) {
         if (result.status() != RiskCheckStatus.SUCCESS || result.description() == null) {
-            riskRepository.deleteByPropertyIdAndSignalType(property.getId(), signalType);
+            // 이 메서드의 다른 모든 쓰기(update/insert)는 REQUIRES_NEW로 격리돼 있는데 이 delete만
+            // 바깥(ambient) 트랜잭션에서 그대로 실행되고 있었다 - checkAndSave(Property) 안에서 이
+            // 호출 "이후"에 실행되는 다른 코드(예: depositSafetyCheckService.checkAndSave())가 예외를
+            // 던지면, 그 예외를 밖에서 잡아 흡수하더라도 Spring이 이미 공유 트랜잭션을
+            // rollback-only로 표시해버려 이 delete까지 통째로 롤백된다 - "신호가 해소돼서 사라져야
+            // 하는 리스크가 DB에 그대로 남는" 버그로 실제 재현됨(신호가 새로 발견되는 insert/update
+            // 케이스는 이미 REQUIRES_NEW라 이 문제가 없었음). insert/update와 동일하게 REQUIRES_NEW로
+            // 격리해 바깥 트랜잭션의 이후 실패와 무관하게 항상 커밋되게 한다.
+            requiresNewTransactionTemplate.executeWithoutResult(status ->
+                    riskRepository.deleteByPropertyIdAndSignalType(property.getId(), signalType));
             return;
         }
 

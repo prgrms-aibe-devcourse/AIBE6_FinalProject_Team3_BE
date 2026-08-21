@@ -254,6 +254,10 @@ public class AdminChecklistTemplateService {
         validateNotDeactivatingLastActiveTemplate(template, false);
         // 삭제 후에는 다시 조회할 수 없으니, 감사 로그에 남길 내용을 삭제 전에 미리 캡처해둔다.
         Map<String, Object> deletedSummary = Map.of("content", template.getContent(), "category", template.getCategory());
+        // template_id는 nullable=false FK라(ChecklistItemTemplateImage 참고), cascade/orphanRemoval
+        // 없이 템플릿만 지우면 예시 이미지가 하나라도 있는 템플릿에서 FK 제약 위반이 난다 - 템플릿
+        // 삭제 전에 딸린 이미지부터 지운다.
+        checklistItemTemplateImageRepository.deleteByTemplateId(templateId);
         checklistItemTemplateRepository.delete(template);
         adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE, templateId, deletedSummary);
     }
@@ -304,8 +308,12 @@ public class AdminChecklistTemplateService {
         } catch (DataIntegrityViolationException e) {
             throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_ORDER_CONFLICT);
         }
-        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE, saved.getId(),
-                Map.of("templateId", templateId, "imageUrl", saved.getImageUrl()));
+        // targetType이 CHECKLIST_TEMPLATE이므로 targetId도 이미지 자신이 아니라 소속 템플릿 id여야
+        // 한다 - 이미지/템플릿은 시퀀스가 서로 달라, 이미지 id를 넣으면 나중에 targetType=
+        // CHECKLIST_TEMPLATE&targetId=X로 이력 조회 시 이 이벤트가 아예 안 잡히거나(대부분) 우연히
+        // id가 같은 엉뚱한 템플릿의 이력으로 잡힐 수 있다(2026-08-20 전수조사에서 발견).
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE, templateId,
+                Map.of("imageId", saved.getId(), "imageUrl", saved.getImageUrl()));
         return AdminChecklistItemTemplateImageResponse.from(saved);
     }
 
@@ -313,8 +321,9 @@ public class AdminChecklistTemplateService {
     public void deleteImage(Long actorId, String actorEmail, Long templateId, Long imageId) {
         ChecklistItemTemplateImage image = findImageOwnedByTemplate(templateId, imageId);
         checklistItemTemplateImageRepository.delete(image);
-        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE, imageId,
-                Map.of("templateId", templateId));
+        // addImage()와 같은 이유로 targetId는 이미지가 아니라 소속 템플릿 id여야 한다.
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE, templateId,
+                Map.of("imageId", imageId));
     }
 
     // templateId를 경로에서 받지만 실제 소속 확인은 image.getTemplate()로 하므로, 다른 문항 소유의

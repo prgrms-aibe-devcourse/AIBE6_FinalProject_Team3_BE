@@ -7,6 +7,7 @@ import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CustomOAuth2UserService;
+import com.algogyeyak.global.config.RequestIdLoggingFilter;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.response.ApiError;
 import com.algogyeyak.global.response.ApiResponse;
@@ -31,6 +32,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
 import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.util.StringUtils;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -65,6 +67,10 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
 
+    // /actuator/prometheus 전용 공유 비밀 - MetricsScrapeTokenFilter 참고.
+    @Value("${app.metrics.scrape-token}")
+    private String metricsScrapeToken;
+
     // CORS_ALLOWED_ORIGINS가 ""/공백/","처럼 값은 있지만 파싱 후 남는 origin이 없는 경우를 막는다 -
     // fail-fast(placeholder 필수화)는 env 자체가 없는 경우만 잡아주고, 이런 값은 그대로 통과시켜
     // CORS 설정이 빈 리스트로 조용히 뜬 채 모든 브라우저 인증 요청이 CORS 차단으로 실패하게 만든다.
@@ -73,6 +79,19 @@ public class SecurityConfig {
         if (parseAllowedOrigins().isEmpty()) {
             throw new IllegalStateException(
                     "app.cors.allowed-origins(CORS_ALLOWED_ORIGINS)에 유효한 origin이 하나도 없습니다: \"" + allowedOrigins + "\"");
+        }
+    }
+
+    // METRICS_SCRAPE_TOKEN=(빈 값)처럼 env 자체는 있지만 내용이 비어있는 경우를 막는다 - placeholder
+    // 필수화(${METRICS_SCRAPE_TOKEN}, 기본값 없음)는 env가 아예 없는 경우만 fail-fast로 잡아주고,
+    // 빈 문자열은 그대로 통과시킨다. MetricsScrapeTokenFilter가 "Bearer " 뒤 토큰을 이 값과 단순
+    // equals로 비교하므로, 둘 다 빈 문자열이면 Authorization: Bearer  (토큰 없이 공백만) 요청이
+    // 인증을 그대로 통과해버린다.
+    @PostConstruct
+    void validateMetricsScrapeToken() {
+        if (!StringUtils.hasText(metricsScrapeToken)) {
+            throw new IllegalStateException(
+                    "app.metrics.scrape-token(METRICS_SCRAPE_TOKEN)이 비어있습니다 - /actuator/prometheus 인증이 사실상 무력화됩니다.");
         }
     }
 
@@ -106,7 +125,10 @@ public class SecurityConfig {
                         // 인증 정보 자체가 없어지는 건 아니다.
                         .requestMatchers("/users/nickname-check", "/users/nickname-policy").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
-                        // Actuator(헬스체크 + Prometheus) - health는 위 목록에도 있었던 중복 항목을 여기로 합침
+                        // Actuator(헬스체크 + Prometheus) - health는 위 목록에도 있었던 중복 항목을 여기로 합침.
+                        // prometheus는 여기서는 permitAll(Spring Security 레벨의 JWT 인증은 면제)이지만,
+                        // MetricsScrapeTokenFilter가 별도로 공유 비밀(app.metrics.scrape-token)을 검사해
+                        // 리버스 프록시 설정과 무관하게 한 번 더 막는다 - health는 대상이 아니다.
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .anyRequest().authenticated()
                 )
@@ -140,7 +162,9 @@ public class SecurityConfig {
                         .accessDeniedHandler((request, response, accessDeniedException) ->
                                 writeErrorResponse(response, ErrorCode.FORBIDDEN))
                 )
-                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository), UsernamePasswordAuthenticationFilter.class)
+                // /actuator/prometheus만 검사하고 그 외 경로는 그대로 통과시킨다 - MetricsScrapeTokenFilter 참고.
+                .addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
@@ -173,6 +197,9 @@ public class SecurityConfig {
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
+        // 프론트가 CORS 환경(별도 도메인)이라 응답 헤더는 Access-Control-Expose-Headers에 없으면
+        // JS에서 아예 못 읽는다 - X-Request-Id를 클라이언트 로그/문의와 대조하려면 명시적으로 열어줘야 한다.
+        configuration.setExposedHeaders(List.of(RequestIdLoggingFilter.REQUEST_ID_HEADER));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

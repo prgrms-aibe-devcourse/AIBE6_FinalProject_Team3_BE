@@ -663,6 +663,36 @@ class AuthControllerTest {
     // 검증한다 - 이미 뜬 컨텍스트에서 validateDevLoginConfig()를 reflection으로 직접 호출하는 방식은
     // @PostConstruct 애너테이션이 실수로 빠져도 통과해버려 그 계약을 보장하지 못하기 때문이다.
 
+    // 회귀 테스트(2026-08-20, 멘토링 피드백) - 관리자 외 일반 회원 화면도 로그인 없이 바로 확인할
+    // 수 있도록 role=USER 쿼리 파라미터를 추가했다. 기본값(role 생략)은 여전히 ADMIN이어야 한다
+    // (위 테스트들이 이미 그걸 검증).
+    @Test
+    void devLoginWithUserRoleIssuesAuthCookiesForSeededTestUser() throws Exception {
+        ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        ReflectionTestUtils.setField(authController, "devLoginUserEmail", "tester@algogyeyak.local");
+        ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
+        try {
+            User testUser = User.createLocalUser("tester@algogyeyak.local", null, "테스트유저");
+            ReflectionTestUtils.setField(testUser, "id", 2L);
+            ReflectionTestUtils.setField(testUser, "role", Role.USER);
+            when(userRepository.findByEmail("tester@algogyeyak.local")).thenReturn(Optional.of(testUser));
+            when(refreshTokenService.issue(testUser)).thenReturn("new-refresh-token");
+            when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
+
+            mockMvc.perform(post("/auth/dev-login?role=USER").header("X-Dev-Login-Key", "test-secret"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.role").value("USER"))
+                    .andExpect(header().string("Set-Cookie",
+                            containsString(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "=")));
+            // ADMIN 계정 이메일로는 조회하지 않아야 한다 - role=USER는 devLoginUserEmail을 써야 한다.
+            verify(userRepository, never()).findByEmail("admin@algogyeyak.local");
+        } finally {
+            ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+            ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+        }
+    }
+
     @Test
     void devLoginReturnsNotFoundWhenEnabledButSeededAdminMissing() throws Exception {
         ReflectionTestUtils.setField(authController, "devLoginEnabled", true);

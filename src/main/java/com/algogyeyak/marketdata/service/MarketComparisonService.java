@@ -47,6 +47,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * TTL은 market-data.comparison.cache-ttl-minutes) - 매물 상세조회를 반복할 때마다 국토부/카카오
  * API를 다시 호출하지 않기 위함. 매물 가격/면적이 바뀌면 결과가 달라지므로,
  * PropertyService.update()가 재계산 직전에 evictCache()로 해당 매물의 캐시를 명시적으로 비운다.
+ * FakeListingSignalService.checkAndSave(Property)도 PRICE_ANOMALY 판정 직전에 한 번 더
+ * evictCache()를 부른다 - PropertyService.update() 경로를 거치지 않고 이 메서드가 호출되는
+ * 경우(재계산 배치 등)까지 캐시가 30분간 낡은 채로 남는 걸 막기 위함(evict는 멱등이라 안전).
  */
 @Slf4j
 @Service

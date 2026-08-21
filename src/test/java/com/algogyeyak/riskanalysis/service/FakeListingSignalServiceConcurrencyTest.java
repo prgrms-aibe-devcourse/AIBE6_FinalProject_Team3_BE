@@ -1,5 +1,6 @@
 package com.algogyeyak.riskanalysis.service;
 
+import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
@@ -52,6 +53,12 @@ class FakeListingSignalServiceConcurrencyTest {
     // 상관없다.
     @MockitoBean
     private MarketDataClient marketDataClient;
+
+    // checkAndSave(Property)가 PRICE_ANOMALY 판정 직전에 evictCache()를 직접 호출하므로, 실제 빈을
+    // 그대로 두면 이 테스트가 진짜 Redis 연결을 필요로 하게 된다 - 이 테스트는 동시성 안전성만
+    // 확인하므로(Testcontainers로 Redis를 띄우지 않음) mock으로 대체한다.
+    @MockitoBean
+    private MarketComparisonService marketComparisonService;
 
     // FakeListingSignalService.checkAndSave(Property)는 이 서비스도 내부에서 호출하는데, 그 안의
     // 실제 시세 조회(MarketSaleDataClient)까지 이 테스트가 준비할 필요는 없으므로 통째로 대체한다.
