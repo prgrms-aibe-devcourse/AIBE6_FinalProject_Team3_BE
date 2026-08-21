@@ -442,8 +442,8 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
         PageResponse<PropertyListResponse> result =
@@ -473,12 +473,12 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
         MarketComparisonResponse comparison = MarketComparisonResponse.available(
-                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6
+                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6, List.of()
         );
         // 목록 조회는 compare()가 아니라 캐시만 읽는 getCachedOnly()를 호출한다 - 매물 수만큼
         // 국토부/카카오 API를 순차 호출하지 않기 위한 성능 개선(fix/property-list-cached-market-comparison).
@@ -507,8 +507,8 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
         MarketComparisonResponse notYetCalculated = MarketComparisonResponse.unavailable(
@@ -551,8 +551,8 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(propertyWithChecklist, propertyWithoutChecklist), pageable, 2));
 
         // 문항 4개 중 3개 체크됨 -> 75%. propertyId 2번은 체크리스트가 아예 없어(집계 자체가 안 잡힘)
@@ -591,8 +591,8 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(checkedWithRisks, checkedClean, neverChecked), pageable, 3));
 
         // checkedWithRisks/checkedClean은 4종 신호 판정이 이미 돌았다는 것만 표시하면 되므로, 이제는
@@ -629,8 +629,8 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(calculated, unavailable), pageable, 2));
 
         // unavailable(판정불가)은 요약 맵에 아예 안 나타난다(PropertyRiskSummaryProviderImpl이
@@ -662,8 +662,8 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(withImages, withoutImages), pageable, 2));
 
         // id 오름차순(=업로드 순서)으로 정렬된 상태로 Repository가 내려준다고 가정하고, 매물당
@@ -712,14 +712,17 @@ class PropertyServiceTest {
     }
 
     @Test
-    void 지역_검색어로_필터링하면_repository_search에_region이_전달된다() {
+    void 검색어로_필터링하면_repository_search에_region이_전달된다() {
+        // region은 메인 검색창 하나로 받는 검색어다 - 주소든 건물명이든 이 값 하나로 repository에
+        // 그대로 전달되고, 실제 주소/건물명 OR 매칭은 repository 쿼리(PropertyRepositoryTest)가 검증한다.
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                "역삼동", null, null, null, null, null, null, null, null, null
+                "래미안", null, null, null, null, null, null, null, null, null
         );
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                eq("역삼동"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq("래미안"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
 

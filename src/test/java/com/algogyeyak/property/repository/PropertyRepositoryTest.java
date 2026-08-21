@@ -113,6 +113,29 @@ class PropertyRepositoryTest {
         return PageRequest.of(0, 20);
     }
 
+    // 5차 멘토링 피드백 6-3 - 메인 검색창 하나로 받는 region 파라미터가 주소(region 컬럼)뿐 아니라
+    // 건물명(title 컬럼)도 부분일치(LIKE) OR로 매칭하는지 실제 쿼리로 검증한다. 처음엔 title을 별도
+    // 파라미터+AND 조건으로 뒀었는데, 검색창 하나에 주소든 건물명이든 입력하면 찾아지길 기대하는 UX라
+    // 단일 검색어의 OR 매칭으로 수정함(2026-08-21).
+    @Test
+    void region_검색어가_건물명과_부분일치하면_해당_매물도_반환한다() {
+        Property raemian = propertyRepository.save(Property.builder()
+                .userId(1L).title("래미안 강남").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(10_000_000L).area(20.0).build());
+        propertyRepository.save(Property.builder()
+                .userId(1L).title("힐스테이트").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(10_000_000L).area(20.0).build());
+
+        Page<Property> result = propertyRepository.search(
+                1L, PropertyStatus.ACTIVE,
+                "래미안", null, null, null, null, null, null, null, null,
+                null,
+                defaultPageable()
+        );
+
+        assertThat(result.getContent()).extracting(Property::getId).containsExactly(raemian.getId());
+    }
+
     @Test
     void signalPropertyIds가_null이면_필터링_없이_전체_매물을_반환한다() {
         Property property1 = save(1L);

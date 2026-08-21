@@ -86,8 +86,12 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
 
     /**
      * 본인이 등록한 매물 목록 조회 (개인 분석 도구 성격상 마켓플레이스식 전체 조회가 아닌 본인 소유 매물만 대상).
-     * 지역(주소 부분일치)/면적범위/거래유형/주택유형/보증금범위/월세범위 전부 선택 조건이라, null인
-     * 파라미터는 조건 자체를 무시하도록 각 절을 "(:param IS NULL OR ...)" 형태로 구성했다.
+     * region은 메인 검색창 하나로 받는 자유 텍스트 검색어다 - 주소(도로명/지번)든 건물명(title)이든
+     * 부분일치(LIKE)하면 매칭된다(5차 멘토링 피드백 6-3, OR 조건, 2026-08-21). 처음엔 title을 별도
+     * 파라미터+AND 조건으로 뒀었는데, 사용자가 상단 검색창 하나에 주소든 건물명이든 입력하면 찾아지길
+     * 기대해서 단일 검색어의 OR 매칭으로 수정함.
+     * 면적범위/거래유형/주택유형/보증금범위/월세범위 등 나머지는 전부 선택 조건이라, null인 파라미터는
+     * 조건 자체를 무시하도록 각 절을 "(:param IS NULL OR ...)" 형태로 구성했다.
      * monthlyRent는 전세 매물에서 항상 null이라 minMonthlyRent/maxMonthlyRent가 넘어오면 전세 매물은
      * 자연히 결과에서 제외된다(별도 분기 불필요).
      * 정렬은 메서드명이 아니라 Pageable의 Sort로 받는다 - 정렬 기준을 여러 개 허용하기 위함
@@ -102,7 +106,8 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
             WHERE p.userId = :userId
               AND p.status = :status
               AND (:region IS NULL OR a.roadAddress LIKE CONCAT('%', :region, '%')
-                   OR a.jibunAddress LIKE CONCAT('%', :region, '%'))
+                   OR a.jibunAddress LIKE CONCAT('%', :region, '%')
+                   OR p.title LIKE CONCAT('%', :region, '%'))
               AND (:minArea IS NULL OR p.area >= :minArea)
               AND (:maxArea IS NULL OR p.area <= :maxArea)
               AND (:transactionType IS NULL OR p.transactionType = :transactionType)

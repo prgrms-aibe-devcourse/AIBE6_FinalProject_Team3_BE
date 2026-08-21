@@ -150,7 +150,7 @@
 4. ~~매물 상세 응답에 임장 체크리스트 생성 여부가 포함되지 않음~~ → `checklistCreated` 필드 추가로 해소됨
 5. ~~매물 상세 응답에 누적 신고 여부가 포함되지 않음~~ → `reported` 필드 추가로 해소됨(단, 아래 6번의 자가 플래그 구조라 "본인이 신고했는지" 기준)
 6. 매물 신고가 "본인 매물을 본인이 신고"하는 자가 플래그 구조 — 원래 의도(마켓플레이스식 신고였는지)를 확인 필요
-7. ~~매물 목록 조회에 지역/면적/거래유형/주택유형/가격범위 검색이 전혀 없음~~ → `PropertySearchCondition`(region/minArea·maxArea/transactionType/propertyType/minDeposit·maxDeposit/minMonthlyRent·maxMonthlyRent) 추가로 해소됨(페이지네이션은 아래 7-1로 이미 분리 해소돼 있었음)
+7. ~~매물 목록 조회에 지역/면적/거래유형/주택유형/가격범위 검색이 전혀 없음~~ → `PropertySearchCondition`(region/minArea·maxArea/transactionType/propertyType/minDeposit·maxDeposit/minMonthlyRent·maxMonthlyRent) 추가로 해소됨(페이지네이션은 아래 7-1로 이미 분리 해소돼 있었음). ~~건물명(title) 검색은 아직 없음~~ **(2026-08-21 해소, 5차 멘토링 피드백 6-3)** 처음엔 `PropertySearchCondition.title`을 별도 파라미터+AND 조건으로 추가했었는데, FE 메인 검색창은 하나뿐이라 사용자가 주소든 건물명이든 그 한 칸에 입력하면 찾아지길 기대하는 UX였음 — `title` 파라미터는 제거하고, 기존 `region` 파라미터가 `a.roadAddress`/`a.jibunAddress`뿐 아니라 `p.title`까지 LIKE OR로 매칭하도록 `PropertyRepository.search()` 쿼리를 수정함. `GET /properties?region=` 하나로 주소/건물명 통합 검색
    - 7-1. ~~페이지네이션이 전혀 없음~~ → `page`/`size`/`sort` 지원으로 해소됨. 단, 응답이 `List`에서 `PageResponse`로 바뀐 breaking change라 FE 연동 확인 필요
 8. `PropertyType`에 아파트(APARTMENT)가 없음 — 의도된 범위인지 확인
 9. 매물 수정 시 주소/매물유형/거래유형 변경이 애초에 불가능한 구조 — 요구사항의 "주소 변경 시 재정규화" 시나리오 자체가 발생할 수 없음
