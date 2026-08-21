@@ -41,13 +41,14 @@ class ChecklistOverviewResponseTest {
         LocalDateTime checklistUpdatedAt = LocalDateTime.of(2026, 7, 30, 10, 0);
         ReflectionTestUtils.setField(checklist, "updatedAt", checklistUpdatedAt);
 
-        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, checklist, 75, 1, 2);
+        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, checklist, 75, 1, 2, 3);
 
         assertThat(response.lastCheckedAt()).isEqualTo(checklistUpdatedAt);
         assertThat(response.title()).isEqualTo("테스트 매물");
         assertThat(response.progressPercent()).isEqualTo(75);
         assertThat(response.cautionCount()).isEqualTo(1);
         assertThat(response.generalMissingCount()).isEqualTo(2);
+        assertThat(response.requiredMissingCount()).isEqualTo(3);
     }
 
     @Test
@@ -56,7 +57,7 @@ class ChecklistOverviewResponseTest {
         LocalDateTime propertyUpdatedAt = LocalDateTime.of(2026, 6, 1, 12, 0);
         Property property = property(propertyUpdatedAt);
 
-        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, null, null, null, null);
+        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, null, null, null, null, null);
 
         assertThat(response.checklistId()).isNull();
         assertThat(response.status()).isEqualTo(ChecklistStatus.NOT_STARTED);
@@ -68,10 +69,11 @@ class ChecklistOverviewResponseTest {
     void progressAndCautionAreNullWhenNotStarted() {
         Property property = property(LocalDateTime.of(2026, 6, 1, 12, 0));
 
-        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, null, null, null, null);
+        ChecklistOverviewResponse response = ChecklistOverviewResponse.from(property, null, null, null, null, null);
 
         assertThat(response.progressPercent()).isNull();
         assertThat(response.cautionCount()).isNull();
         assertThat(response.generalMissingCount()).isNull();
+        assertThat(response.requiredMissingCount()).isNull();
     }
 }

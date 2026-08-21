@@ -31,13 +31,16 @@ public interface ChecklistItemRepository extends JpaRepository<ChecklistItem, Lo
      * Checklist.refreshStatus()가 COMPLETED 판정에 REQUIRED 항목만 보고 GENERAL은 무시하는 것과
      * 짝을 이루는 값 - "완료" 배지가 떴어도 GENERAL 항목이 남아있을 수 있는데, 그걸 목록 카드에
      * 퍼센트 대신 텍스트("일반 항목 N개 남음")로 보여주기 위해 추가됨(FE 피드백 반영).
+     * requiredMissingCount는 반대로 미체크 REQUIRED 항목 개수 - COMPLETED면 정의상 항상 0이라
+     * IN_PROGRESS 카드("필수 항목 N개 남음")에서만 의미가 있다.
      */
     @Query("""
             SELECT i.checklist.property.id AS propertyId,
                    COUNT(i) AS totalCount,
                    SUM(CASE WHEN i.checked = true THEN 1 ELSE 0 END) AS checkedCount,
                    SUM(CASE WHEN i.issueFound = true OR i.userNote IS NOT NULL THEN 1 ELSE 0 END) AS issueCount,
-                   SUM(CASE WHEN i.importance = 'GENERAL' AND i.checked = false THEN 1 ELSE 0 END) AS generalMissingCount
+                   SUM(CASE WHEN i.importance = 'GENERAL' AND i.checked = false THEN 1 ELSE 0 END) AS generalMissingCount,
+                   SUM(CASE WHEN i.importance = 'REQUIRED' AND i.checked = false THEN 1 ELSE 0 END) AS requiredMissingCount
             FROM ChecklistItem i
             WHERE i.checklist.user.id = :userId
             GROUP BY i.checklist.property.id
@@ -54,5 +57,7 @@ public interface ChecklistItemRepository extends JpaRepository<ChecklistItem, Lo
         long getIssueCount();
 
         long getGeneralMissingCount();
+
+        long getRequiredMissingCount();
     }
 }

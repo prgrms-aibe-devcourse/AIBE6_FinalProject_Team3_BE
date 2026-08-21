@@ -139,6 +139,21 @@ class ChecklistItemRepositoryTest {
     }
 
     @Test
+    void 체크되지_않은_필수_항목_개수를_requiredMissingCount로_집계한다() {
+        User user = saveUser();
+        Property property = saveProperty(user.getId());
+        Checklist checklist = saveChecklist(user, property);
+        saveItem(checklist, ChecklistImportance.REQUIRED); // 미체크 필수 - 집계에 포함돼야 함
+        ChecklistItem checkedRequired = saveItem(checklist, ChecklistImportance.REQUIRED);
+        checkedRequired.check(true); // 체크된 필수 - 집계에서 빠져야 함
+        saveItem(checklist, ChecklistImportance.GENERAL); // 미체크 일반 - REQUIRED가 아니라 집계에서 빠져야 함
+
+        List<ChecklistProgressProjection> result = checklistItemRepository.findProgressByUserId(user.getId());
+
+        assertThat(result.get(0).getRequiredMissingCount()).isEqualTo(1);
+    }
+
+    @Test
     void 다른_유저의_체크리스트_항목은_집계에_포함하지_않는다() {
         User user = saveUser();
         User other = saveUser();
