@@ -97,3 +97,7 @@ jobs:
             docker image prune -af
             docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml pull backend
             docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml up -d
+            # NPM(nginx)은 backend 컨테이너명을 IP로 변환한 결과를 캐싱해두고 요청마다 다시 조회하지
+            # 않는다 - 위 up -d로 backend가 재생성돼 내부 IP가 바뀌어도 NPM은 예전 IP를 계속 써서
+            # 502가 나는 문제가 있었다(2026-08-20). 매 배포마다 리로드시켜 새 IP를 다시 잡게 한다.
+            docker exec npm nginx -s reload
