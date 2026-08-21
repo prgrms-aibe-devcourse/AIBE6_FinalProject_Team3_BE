@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.service;
 
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
@@ -36,9 +37,10 @@ class LocalAuthServiceTest {
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     @SuppressWarnings("unchecked")
     private final ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+    private final UserAuthStatusCacheService userAuthStatusCacheService = mock(UserAuthStatusCacheService.class);
     private final LocalAuthService localAuthService = new LocalAuthService(
             userRepository, passwordEncoder, emailVerificationService, mock(PlatformTransactionManager.class),
-            redisTemplate);
+            redisTemplate, userAuthStatusCacheService);
 
     {
         // 대부분의 테스트는 로그인 시도 횟수 제한과 무관하므로, opsForValue().increment()가
@@ -421,6 +423,20 @@ class LocalAuthServiceTest {
         localAuthService.setPassword(1L, null, "newPassword1");
 
         assertEquals("new-encoded-hash", user.getPasswordHash());
+    }
+
+    // 회귀 테스트 - user-status 캐시가 stale한 passwordChangedAt을 최대 30초 들고 있으면, 방금
+    // 바꾼 비밀번호 이전에 발급된 access token이 그동안 계속 통과한다.
+    @Test
+    void setPasswordEvictsUserStatusCacheAfterChange() {
+        User user = User.createOAuthUser("social@example.com", "소셜유저", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+
+        localAuthService.setPassword(1L, null, "newPassword1");
+
+        verify(userAuthStatusCacheService).evictAfterCommit(1L);
     }
 
     @Test

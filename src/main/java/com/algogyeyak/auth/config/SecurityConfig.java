@@ -5,6 +5,7 @@ import com.algogyeyak.auth.handler.OAuth2AuthenticationSuccessHandler;
 import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CustomOAuth2UserService;
 import com.algogyeyak.global.config.RequestIdLoggingFilter;
@@ -60,6 +61,7 @@ public class SecurityConfig {
     private final JwtProvider jwtProvider;
     private final AccessTokenRevocationService accessTokenRevocationService;
     private final UserRepository userRepository;
+    private final UserAuthStatusCacheService userAuthStatusCacheService;
 
     // 이 클래스 내부에서만 쓰는 단순 직렬화 용도라 Boot이 자동 구성하는 ObjectMapper 빈에 의존하지 않는다.
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -162,7 +164,7 @@ public class SecurityConfig {
                         .accessDeniedHandler((request, response, accessDeniedException) ->
                                 writeErrorResponse(response, ErrorCode.FORBIDDEN))
                 )
-                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository), UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository, userAuthStatusCacheService), UsernamePasswordAuthenticationFilter.class)
                 // /actuator/prometheus만 검사하고 그 외 경로는 그대로 통과시킨다 - MetricsScrapeTokenFilter 참고.
                 .addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), UsernamePasswordAuthenticationFilter.class);
 
