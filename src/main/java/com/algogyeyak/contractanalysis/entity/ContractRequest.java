@@ -117,6 +117,7 @@ public class ContractRequest {
 
         for (ContractAnalysisClause analyzedClause : analyzedClauses) {
             ContractClause clause = ContractClause.builder()
+                    .title(analyzedClause.title())
                     .riskFlag(analyzedClause.riskFlag())
                     .explanation(analyzedClause.explanation())
                     .question(analyzedClause.question())
