@@ -227,7 +227,8 @@ public class ChecklistService {
             return ChecklistOverviewResponse.from(
                     property, checklist,
                     progress != null ? toProgressPercent(progress) : null,
-                    progress != null ? (int) progress.getIssueCount() : null
+                    progress != null ? (int) progress.getIssueCount() : null,
+                    progress != null ? (int) progress.getGeneralMissingCount() : null
             );
         }));
     }

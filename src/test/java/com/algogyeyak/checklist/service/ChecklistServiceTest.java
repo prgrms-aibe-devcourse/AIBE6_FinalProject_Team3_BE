@@ -282,6 +282,7 @@ class ChecklistServiceTest {
         when(progress.getTotalCount()).thenReturn(4L);
         when(progress.getCheckedCount()).thenReturn(3L);
         when(progress.getIssueCount()).thenReturn(2L);
+        when(progress.getGeneralMissingCount()).thenReturn(1L);
         when(checklistItemRepository.findProgressByUserId(1L)).thenReturn(List.of(progress));
 
         com.algogyeyak.global.response.PageResponse<ChecklistOverviewResponse> result =
@@ -289,8 +290,10 @@ class ChecklistServiceTest {
 
         assertThat(result.content().get(0).progressPercent()).isEqualTo(75);
         assertThat(result.content().get(0).cautionCount()).isEqualTo(2);
+        assertThat(result.content().get(0).generalMissingCount()).isEqualTo(1);
         assertThat(result.content().get(1).progressPercent()).isNull();
         assertThat(result.content().get(1).cautionCount()).isNull();
+        assertThat(result.content().get(1).generalMissingCount()).isNull();
     }
 
     @Test

@@ -27,13 +27,17 @@ public interface ChecklistItemRepository extends JpaRepository<ChecklistItem, Lo
      * 그대로 재사용한다(ChecklistOverviewResponse의 progressPercent/cautionCount 필드 참고).
      * issueCount는 ChecklistItem.hasIssue()(issueFound가 true이거나 userNote가 있으면 주의 항목)와
      * 동일한 조건을 CASE WHEN으로 재현한 것 - 엔티티 메서드를 그대로 SQL로 옮길 수는 없어 조건이
-     * 어긋나지 않도록 hasIssue() 변경 시 이 쿼리도 함께 고쳐야 한다.
+     * 어긋나지 않도록 hasIssue() 변경 시 이 쿼리도 함께 고쳐야 한다. generalMissingCount는
+     * Checklist.refreshStatus()가 COMPLETED 판정에 REQUIRED 항목만 보고 GENERAL은 무시하는 것과
+     * 짝을 이루는 값 - "완료" 배지가 떴어도 GENERAL 항목이 남아있을 수 있는데, 그걸 목록 카드에
+     * 퍼센트 대신 텍스트("일반 항목 N개 남음")로 보여주기 위해 추가됨(FE 피드백 반영).
      */
     @Query("""
             SELECT i.checklist.property.id AS propertyId,
                    COUNT(i) AS totalCount,
                    SUM(CASE WHEN i.checked = true THEN 1 ELSE 0 END) AS checkedCount,
-                   SUM(CASE WHEN i.issueFound = true OR i.userNote IS NOT NULL THEN 1 ELSE 0 END) AS issueCount
+                   SUM(CASE WHEN i.issueFound = true OR i.userNote IS NOT NULL THEN 1 ELSE 0 END) AS issueCount,
+                   SUM(CASE WHEN i.importance = 'GENERAL' AND i.checked = false THEN 1 ELSE 0 END) AS generalMissingCount
             FROM ChecklistItem i
             WHERE i.checklist.user.id = :userId
             GROUP BY i.checklist.property.id
@@ -48,5 +52,7 @@ public interface ChecklistItemRepository extends JpaRepository<ChecklistItem, Lo
         long getCheckedCount();
 
         long getIssueCount();
+
+        long getGeneralMissingCount();
     }
 }
