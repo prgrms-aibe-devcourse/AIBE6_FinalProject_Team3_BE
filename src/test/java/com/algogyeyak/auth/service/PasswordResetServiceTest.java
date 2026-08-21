@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.service;
 
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -48,8 +49,9 @@ class PasswordResetServiceTest {
     private final EmailService emailService = mock(EmailService.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
     private final RefreshTokenService refreshTokenService = mock(RefreshTokenService.class);
+    private final UserAuthStatusCacheService userAuthStatusCacheService = mock(UserAuthStatusCacheService.class);
     private final PasswordResetService service = new PasswordResetService(
-            redisTemplate, userRepository, emailService, passwordEncoder, refreshTokenService);
+            redisTemplate, userRepository, emailService, passwordEncoder, refreshTokenService, userAuthStatusCacheService);
 
     private User localUser(Long id) {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
@@ -244,6 +246,9 @@ class PasswordResetServiceTest {
         assertEquals("new-encoded-hash", user.getPasswordHash());
         assertNotNull(user.getPasswordChangedAt());
         verify(refreshTokenService).revokeAllForUser(1L);
+        // LocalAuthService.setPassword()와 동일한 이유 - stale한 passwordChangedAt 캐시가
+        // 재설정 이전 토큰을 최대 30초 더 통과시키지 않도록 무효화해야 한다.
+        verify(userAuthStatusCacheService).evictAfterCommit(1L);
     }
 
     // 회귀 테스트 - 재설정 토큰은 CONSUME_SCRIPT로 이미 돌이킬 수 없이 소각된 뒤라, 그 다음 단계인

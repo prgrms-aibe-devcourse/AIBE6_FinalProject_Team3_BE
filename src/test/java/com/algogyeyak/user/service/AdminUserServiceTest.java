@@ -3,6 +3,7 @@ package com.algogyeyak.user.service;
 import com.algogyeyak.admin.dto.AdminBulkActionResponse;
 import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.dto.AdminUserDetailResponse;
@@ -60,8 +61,9 @@ class AdminUserServiceTest {
     private final UserRepository userRepository = mock(UserRepository.class);
     private final AdminAuditLogger adminAuditLogger = mock(AdminAuditLogger.class);
     private final PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+    private final UserAuthStatusCacheService userAuthStatusCacheService = mock(UserAuthStatusCacheService.class);
     private final AdminUserService adminUserService =
-            new AdminUserService(userRepository, adminAuditLogger, transactionManager);
+            new AdminUserService(userRepository, adminAuditLogger, userAuthStatusCacheService, transactionManager);
 
     private User adminUser(Long id) {
         User user = User.createOAuthUser("admin" + id + "@example.com", "관리자" + id, "http://img");
@@ -142,6 +144,8 @@ class AdminUserServiceTest {
         assertEquals(Role.USER, response.role());
         verify(adminAuditLogger).log(ACTOR_ID, ACTOR_EMAIL, AdminAuditAction.UPDATE_ROLE, 1L,
                 Map.of("beforeRole", Role.ADMIN, "afterRole", Role.USER));
+        // role 회수가 user-status 캐시에 최대 30초 가려지지 않도록 성공 시 반드시 무효화해야 한다.
+        verify(userAuthStatusCacheService).evictAfterCommit(1L);
     }
 
     // AdminUserService.updateRole()가 조건부 UPDATE(updateRoleIfNotWithdrawn)의 영향받은 row 수로
@@ -160,6 +164,7 @@ class AdminUserServiceTest {
 
         assertEquals(ErrorCode.ADMIN_INVALID_ROLE_TRANSITION, exception.getErrorCode());
         verify(adminAuditLogger, never()).log(any(), any(), any(), any(), any());
+        verify(userAuthStatusCacheService, never()).evictAfterCommit(any());
     }
 
     @Test
@@ -192,6 +197,8 @@ class AdminUserServiceTest {
         assertEquals(UserStatus.SUSPENDED, response.status());
         verify(adminAuditLogger).log(ACTOR_ID, ACTOR_EMAIL, AdminAuditAction.UPDATE_STATUS, 1L,
                 Map.of("beforeStatus", UserStatus.ACTIVE, "afterStatus", UserStatus.SUSPENDED));
+        // 정지가 user-status 캐시에 최대 30초 가려지지 않도록 성공 시 반드시 무효화해야 한다.
+        verify(userAuthStatusCacheService).evictAfterCommit(1L);
     }
 
     // AdminUserService.updateStatus()가 조건부 UPDATE(updateStatusIfNotWithdrawn)의 영향받은
@@ -209,6 +216,7 @@ class AdminUserServiceTest {
 
         assertEquals(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, exception.getErrorCode());
         verify(adminAuditLogger, never()).log(any(), any(), any(), any(), any());
+        verify(userAuthStatusCacheService, never()).evictAfterCommit(any());
     }
 
     // 강등/정지 대상이 이미 ADMIN+ACTIVE가 아니면(예: 일반 유저 정지) 마지막 관리자와 무관하므로

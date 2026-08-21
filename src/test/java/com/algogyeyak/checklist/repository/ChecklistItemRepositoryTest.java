@@ -65,11 +65,15 @@ class ChecklistItemRepositoryTest {
     }
 
     private ChecklistItem saveCheckItem(Checklist checklist) {
+        return saveItem(checklist, ChecklistImportance.GENERAL);
+    }
+
+    private ChecklistItem saveItem(Checklist checklist, ChecklistImportance importance) {
         return checklistItemRepository.save(ChecklistItem.builder()
                 .checklist(checklist)
                 .category(ChecklistCategory.INDOOR)
                 .content("테스트 문항")
-                .importance(ChecklistImportance.GENERAL)
+                .importance(importance)
                 .itemType(ChecklistItemType.CHECK)
                 .displayOrder(1)
                 .build());
@@ -117,6 +121,36 @@ class ChecklistItemRepositoryTest {
         List<ChecklistProgressProjection> result = checklistItemRepository.findProgressByUserId(user.getId());
 
         assertThat(result.get(0).getIssueCount()).isEqualTo(0);
+    }
+
+    @Test
+    void 체크되지_않은_일반_항목_개수를_generalMissingCount로_집계한다() {
+        User user = saveUser();
+        Property property = saveProperty(user.getId());
+        Checklist checklist = saveChecklist(user, property);
+        saveItem(checklist, ChecklistImportance.GENERAL); // 미체크 일반 - 집계에 포함돼야 함
+        ChecklistItem checkedGeneral = saveItem(checklist, ChecklistImportance.GENERAL);
+        checkedGeneral.check(true); // 체크된 일반 - 집계에서 빠져야 함
+        saveItem(checklist, ChecklistImportance.REQUIRED); // 미체크 필수 - GENERAL이 아니라 집계에서 빠져야 함
+
+        List<ChecklistProgressProjection> result = checklistItemRepository.findProgressByUserId(user.getId());
+
+        assertThat(result.get(0).getGeneralMissingCount()).isEqualTo(1);
+    }
+
+    @Test
+    void 체크되지_않은_필수_항목_개수를_requiredMissingCount로_집계한다() {
+        User user = saveUser();
+        Property property = saveProperty(user.getId());
+        Checklist checklist = saveChecklist(user, property);
+        saveItem(checklist, ChecklistImportance.REQUIRED); // 미체크 필수 - 집계에 포함돼야 함
+        ChecklistItem checkedRequired = saveItem(checklist, ChecklistImportance.REQUIRED);
+        checkedRequired.check(true); // 체크된 필수 - 집계에서 빠져야 함
+        saveItem(checklist, ChecklistImportance.GENERAL); // 미체크 일반 - REQUIRED가 아니라 집계에서 빠져야 함
+
+        List<ChecklistProgressProjection> result = checklistItemRepository.findProgressByUserId(user.getId());
+
+        assertThat(result.get(0).getRequiredMissingCount()).isEqualTo(1);
     }
 
     @Test

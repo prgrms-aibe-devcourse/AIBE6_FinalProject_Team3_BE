@@ -48,6 +48,9 @@ public class GeminiClientImpl implements GeminiClient {
                인용하세요. 여러 조항을 하나로 합치거나 일부만 발췌해서 이어붙이지 마세요.
                조항이 길면 전체를 그대로 인용하되, 설명(explanation)에서 핵심만 요약해서
                설명하세요.
+               originalText 인용 시, OCR로 인한 명백한 오타(자모분리, 이상한 특수문자,
+               띄어쓰기 오류)는 문맥상 명확하면 자연스럽게 교정해서 인용하세요.
+               숫자·날짜·금액 등 사실 정보는 원문 그대로 유지하세요.
             3. 위험 여부는 등급이나 점수로 표현하지 말고, 사실과 이유를 설명하는 방식으로 답하세요.
             4. 어려운 법률 용어는 쉬운 일상어로 풀어서 설명하세요.
             5. 수정 요청 문구를 제안할 때는, 이것이 법률적 정답이 아니라
@@ -66,6 +69,8 @@ public class GeminiClientImpl implements GeminiClient {
                빈 배열로 반환하고 summary에 "입력하신 내용이 계약 조항으로 보이지 않습니다.
                특약사항이 포함된 계약 문구를 입력해주세요"라고 안내하세요. 그 외의 경우
                summary는 빈 문자열로 두세요.
+            10. 각 조항마다 5~10자 내외의 짧은 제목(title)도 생성하세요.
+                예: "반려동물 사육 금지", "보증금 반환 지연"
             """;
 
     private static final String CHAT_SYSTEM_INSTRUCTION_TEMPLATE = """
@@ -98,6 +103,10 @@ public class GeminiClientImpl implements GeminiClient {
                             "items", Map.of(
                                     "type", "OBJECT",
                                     "properties", Map.of(
+                                            "title", Map.of(
+                                                    "type", "STRING",
+                                                    "description", "조항 내용을 요약한 5~10자 내외의 짧은 제목"
+                                            ),
                                             "originalText", Map.of("type", "STRING"),
                                             "riskFlag", Map.of("type", "BOOLEAN"),
                                             "explanation", Map.of("type", "STRING"),
@@ -109,7 +118,8 @@ public class GeminiClientImpl implements GeminiClient {
                                             "suggestedText", Map.of("type", "STRING")
                                     ),
                                     "required", List.of(
-                                            "originalText", "riskFlag", "explanation", "question", "suggestedText"
+                                            "title", "originalText", "riskFlag", "explanation", "question",
+                                            "suggestedText"
                                     )
                             )
                     )

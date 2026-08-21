@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.service;
 
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.auth.token.RefreshTokenService;
 import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.global.error.ErrorCode;
@@ -94,6 +95,7 @@ public class PasswordResetService {
     private final EmailService emailService;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
+    private final UserAuthStatusCacheService userAuthStatusCacheService;
 
     @Value("${app.password-reset.token-validity-seconds}")
     private long tokenValiditySeconds;
@@ -109,12 +111,14 @@ public class PasswordResetService {
             UserRepository userRepository,
             EmailService emailService,
             PasswordEncoder passwordEncoder,
-            RefreshTokenService refreshTokenService) {
+            RefreshTokenService refreshTokenService,
+            UserAuthStatusCacheService userAuthStatusCacheService) {
         this.redisTemplate = redisTemplate;
         this.userRepository = userRepository;
         this.emailService = emailService;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
+        this.userAuthStatusCacheService = userAuthStatusCacheService;
     }
 
     public void requestReset(String email) {
@@ -222,6 +226,9 @@ public class PasswordResetService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_PASSWORD_RESET_TOKEN_INVALID));
 
         user.updatePasswordHash(passwordEncoder.encode(newPassword));
+        // LocalAuthService.setPassword()와 동일한 이유 - passwordChangedAt 캐시가 stale하면
+        // 재설정 이전에 발급된 access token이 최대 30초 더 통과할 수 있다.
+        userAuthStatusCacheService.evictAfterCommit(user.getId());
 
         // 재설정 성공 - 탈취된 세션이 있었을 수 있으므로 기존 refresh token(전체 세션)을 끊어낸다.
         // 이 호출은 반드시 best-effort여야 한다 - CONSUME_SCRIPT로 재설정 토큰을 이미 돌이킬 수 없이
