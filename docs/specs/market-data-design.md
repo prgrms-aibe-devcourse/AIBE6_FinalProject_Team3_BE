@@ -158,8 +158,16 @@
    (약 239-267줄)가 매물 상세화면에서 `marketComparison`을 반경/표본수/차이율/기준일/판정불가 사유까지 전부 렌더링하고
    있으며, `frontend/docs/specs/market-data-design.md` 자체도 이미 "FE 작업 완료" 시점으로 갱신되어 있다. 이 문서만
    구버전 서술(남은 이슈 1번)이 남아있는 상태 — 삭제 또는 갱신이 필요하다(자세한 내용은 frontend 쪽 문서 참고).
-7. **목록조회(`GET /properties`)가 페이지의 매물마다 순차적으로 `marketComparisonService.compare()`를 호출함** —
+7. ~~**목록조회(`GET /properties`)가 페이지의 매물마다 순차적으로 `marketComparisonService.compare()`를 호출함** —
    `PropertyService`의 목록조회 스트림(195번째 줄 부근)이 각 매물에 대해 `compare()`를 호출한다. 캐시가 살아있는
    매물은 Redis 히트로 끝나지만, 캐시 미스가 몰린 상황(배포 직후 Redis 초기화, TTL 만료 등)에서는 목록조회 한 번이
    페이지 크기만큼의 국토부/카카오 API 호출을 순차적으로 트리거할 수 있다. 코드 주석이 이 트레이드오프를 이미
-   인지하고 있으나("심각하게 느려지진 않는다"), 실측 근거는 없는 가정이라 트래픽이 늘면 재검토가 필요하다.
+   인지하고 있으나("심각하게 느려지진 않는다"), 실측 근거는 없는 가정이라 트래픽이 늘면 재검토가 필요하다.~~
+   ✅ **(2026-08-21 해결)** 홈 화면이 `size=100`까지 요청하면서 실측으로 문제가 확인됨(캐시 미스 매물마다 Kakao
+   지역코드 조회 1회 + 최근 `lookbackMonths`(기본 6)개월치 MOLIT 순차 호출 + 후보 지번주소마다 Kakao 지오코딩까지
+   전부 목록 크기만큼 증폭). `MarketComparisonService`에 `getCachedOnly(propertyId)`를 추가해 `@Cacheable` 프록시를
+   거치지 않고 `CacheManager`로 `"marketComparison"` 캐시를 직접 읽기만 하도록 하고(계산 트리거 없음),
+   `PropertyService.getMyProperties()`가 `compare()` 대신 이 메서드를 쓰도록 변경. 캐시 미스면
+   `MarketComparisonUnavailableReason.NOT_YET_CALCULATED`로 응답하며, 실제 계산은 등록/수정/상세조회(모두
+   단일 매물 호출이라 증폭되지 않음)에서만 트리거된다. FE는 이미 `AVAILABLE`이 아닌 모든 경우를 "실거래가 연동
+   예정"으로 처리하고 있어 변경이 필요 없었다.

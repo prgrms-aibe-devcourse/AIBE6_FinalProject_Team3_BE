@@ -67,6 +67,10 @@ public class MarketDataClientImpl implements MarketDataClient {
             case PROPERTY_TYPE_UNSUPPORTED -> MarketUnavailableReason.PROPERTY_TYPE_UNSUPPORTED;
             case ADDRESS_INFO_MISSING -> MarketUnavailableReason.ADDRESS_INFO_MISSING;
             case INSUFFICIENT_SAMPLE -> MarketUnavailableReason.INSUFFICIENT_SAMPLE;
+            // (2026-08-20) NOT_YET_CALCULATED는 MarketComparisonService.getCachedOnly()만 만드는
+            // 사유라 compare()를 호출하는 이 경로(getComparison())에서는 실제로 나올 수 없다 - 그래도
+            // switch가 exhaustive해야 하므로 가장 가까운 의미인 INSUFFICIENT_SAMPLE로 매핑해둔다.
+            case NOT_YET_CALCULATED -> MarketUnavailableReason.INSUFFICIENT_SAMPLE;
         };
     }
 }
