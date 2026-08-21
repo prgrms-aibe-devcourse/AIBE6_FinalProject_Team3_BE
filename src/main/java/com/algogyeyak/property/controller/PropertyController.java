@@ -49,9 +49,10 @@ public class PropertyController {
     /**
      * 본인이 등록한 매물 목록 조회. (개인 분석 도구 성격상 전체 공개 매물 검색이 아니라 본인 소유 매물만 반환)
      * 기본 정렬은 등록일 최신순, 기본 페이지 크기는 20 (최대 100 - PageableUtils.validateMaxSize).
-     * region/title/minArea/maxArea/transactionType/propertyType/minDeposit/maxDeposit/minMonthlyRent/
+     * region/minArea/maxArea/transactionType/propertyType/minDeposit/maxDeposit/minMonthlyRent/
      * maxMonthlyRent/hasSignal은 전부 선택 파라미터 - 아무것도 안 넘기면 기존과 동일하게 본인 소유
-     * 전체 목록을 반환한다. title은 건물명(Property.title) 부분일치 검색이다(5차 멘토링 피드백 6-3).
+     * 전체 목록을 반환한다. region은 메인 검색창 하나로 받는 자유 텍스트 검색어로, 주소(도로명/지번)든
+     * 건물명(Property.title)이든 부분일치하면 매칭된다(5차 멘토링 피드백 6-3, OR 조건).
      * minMonthlyRent/maxMonthlyRent는 전세 매물의 monthlyRent가 항상 null이라 사실상 월세 매물에만 적용된다.
      * hasSignal=true면 확인 필요 신호(checkSignalCount > 0)가 있는 매물만 반환한다(#233).
      */
@@ -60,7 +61,6 @@ public class PropertyController {
             @AuthenticationPrincipal JwtUserPrincipal principal,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
             @RequestParam(required = false) String region,
-            @RequestParam(required = false) String title,
             @RequestParam(required = false) Double minArea,
             @RequestParam(required = false) Double maxArea,
             @RequestParam(required = false) TransactionType transactionType,
@@ -72,7 +72,7 @@ public class PropertyController {
             @RequestParam(required = false) Boolean hasSignal
     ) {
         PropertySearchCondition condition = new PropertySearchCondition(
-                region, title, minArea, maxArea, transactionType, propertyType,
+                region, minArea, maxArea, transactionType, propertyType,
                 minDeposit, maxDeposit, minMonthlyRent, maxMonthlyRent, hasSignal
         );
         PageResponse<PropertyListResponse> response =
