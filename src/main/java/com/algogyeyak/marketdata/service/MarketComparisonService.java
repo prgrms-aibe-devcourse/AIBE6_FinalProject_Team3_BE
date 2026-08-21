@@ -16,6 +16,7 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.Cache;
@@ -24,13 +25,12 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 매물과 국토부 실거래가를 비교해 시세 대비 위치를 판정한다.
@@ -69,7 +69,21 @@ public class MarketComparisonService {
     // 지번주소 -> 지오코딩 결과 캐시. 같은 건물에서 여러 건 거래된 경우가 많아 캐시 효과가 크다.
     // (Redis가 아니라 이 빈의 인메모리 필드 - 프로세스 재시작 시 초기화됨. Redis 캐싱 대상은
     // compare()의 최종 결과뿐이다.)
-    private final Map<String, AddressResolutionResult> geocodeCache = new ConcurrentHashMap<>();
+    // 이전에는 크기/만료 제한이 없는 순수 ConcurrentHashMap이라 서버를 오래 띄워둘수록(주소
+    // 종류가 늘어날수록) 메모리를 무한정 점유하는 구조였다(2026-08-21 멘토링 피드백에서 지적).
+    // Caffeine으로 바꿔 상한을 둔다 - 지번주소는 사실상 불변값이라 expireAfterWrite는 정확성이
+    // 아니라 오래 안 쓰인 항목을 회수해 메모리를 아끼는 목적이다.
+    private static final long GEOCODE_CACHE_MAX_SIZE = 10_000;
+    private static final Duration GEOCODE_CACHE_EXPIRE_AFTER_WRITE = Duration.ofHours(6);
+
+    // 필드 타입을 com.github.benmanes.caffeine.cache.Cache로 완전한정 이름으로 쓴다 -
+    // org.springframework.cache.Cache(getCachedOnly()에서 이미 씀)와 단순 이름이 겹쳐서
+    // 같은 파일에서 둘 다 import할 수 없다.
+    private final com.github.benmanes.caffeine.cache.Cache<String, AddressResolutionResult> geocodeCache =
+            Caffeine.newBuilder()
+                    .maximumSize(GEOCODE_CACHE_MAX_SIZE)
+                    .expireAfterWrite(GEOCODE_CACHE_EXPIRE_AFTER_WRITE)
+                    .build();
 
     @Cacheable(cacheNames = "marketComparison", key = "#property.id")
     public MarketComparisonResponse compare(Property property) {
@@ -171,7 +185,7 @@ public class MarketComparisonService {
             }
             String fullAddress = buildFullAddress(sample, sggPrefix);
 
-            AddressResolutionResult resolution = geocodeCache.computeIfAbsent(
+            AddressResolutionResult resolution = geocodeCache.get(
                     fullAddress, kakaoAddressClient::resolve
             );
 

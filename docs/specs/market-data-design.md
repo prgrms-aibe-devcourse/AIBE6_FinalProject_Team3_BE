@@ -145,10 +145,14 @@
    "동일 매물 반복 조회 시 캐싱" ✅ 항목), 이후 risk-analysis용으로 추가된 `MarketSaleComparisonService.compare()`에는
    동일한 애노테이션이 없다. `MarketSaleDataClientImpl.getSalePrice()`(risk-analysis)가 이를 호출할 때마다 캐시 없이
    매번 국토부/카카오 API를 다시 호출한다 — 같은 매물에 대해 전세 비교와 매매 비교가 캐싱 정책상 일관되지 않은 상태다.
-4. **인메모리 지오코딩 캐시가 무제한 누적됨** — `MarketComparisonService.geocodeCache`와
+4. ~~**인메모리 지오코딩 캐시가 무제한 누적됨** — `MarketComparisonService.geocodeCache`와
    `MarketSaleComparisonService.geocodeCache`는 각각 독립된 `ConcurrentHashMap`으로, TTL도 크기 제한도 없어 프로세스가
    떠 있는 동안 계속 커진다(Redis 쪽 최종 결과 캐시는 TTL이 명시적으로 있는 것과 대조적). 장기 운영 시 힙 사용량을
-   모니터링하거나 상한/만료 정책(예: Caffeine으로 교체)을 고려할 필요가 있다.
+   모니터링하거나 상한/만료 정책(예: Caffeine으로 교체)을 고려할 필요가 있다.~~
+   ✅ **(2026-08-21 해결, #272)** 두 서비스의 `geocodeCache` 모두 Caffeine(`maximumSize=10_000`,
+   `expireAfterWrite=6h`)으로 교체 — 지번주소는 사실상 불변값이라 만료는 정확성이 아니라 오래 안 쓰인 항목을
+   회수해 메모리를 아끼는 목적. `Map.computeIfAbsent` → `Cache.get(key, mappingFunction)`으로 캐시-미스 시에만
+   지오코딩 API를 호출하는 원자적 동작은 그대로 유지(테스트로 검증).
 5. **문서가 이미 구현된 `MarketSaleComparisonService` 관련 코드를 전혀 다루지 않음** — 이 문서("실제 구현 현황"
    섹션)는 `MarketComparisonService`(전세 시세비교)만 설명하고, 같은 패키지에 존재하며 risk-analysis가 이미 소비 중인
    `MarketSaleComparisonService`/`MarketSaleComparisonResponse`/`MolitTradeClient`/`MolitTradeClientImpl`/

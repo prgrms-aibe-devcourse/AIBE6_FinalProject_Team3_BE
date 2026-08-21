@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -235,6 +236,32 @@ class MarketComparisonServiceTest {
         assertThat(response.reason()).isNull();
         // 5차 멘토링 피드백 7-2 - 기준가 계산에 실제로 쓰인 표본이 그대로 담겨야 한다.
         assertThat(response.samples()).hasSize(3);
+    }
+
+    // 2026-08-21 멘토링 피드백(#272) - geocodeCache를 무제한 ConcurrentHashMap에서 Caffeine으로
+    // 바꾼 뒤에도 "같은 조합 주소는 지오코딩 API를 한 번만 호출한다"는 기존 캐싱 동작이 그대로
+    // 유지되는지 검증한다(Caffeine Cache.get(key, mappingFunction)이 예전 computeIfAbsent와
+    // 동일하게 원자적으로 캐시-미스 시에만 호출해야 함).
+    @Test
+    void 같은_조합주소를_가진_표본이_여러_건이면_지오코딩_API는_한_번만_호출된다() {
+        init();
+        Property property = jeonseOfficetel(200_000_000L, 25.0);
+        when(kakaoRegionCodeClient.resolve(PROPERTY_LAT, PROPERTY_LNG)).thenReturn(resolvedRegion());
+
+        // 같은 건물(같은 지번주소)에서 세 건 거래된 상황 - buildFullAddress()가 만드는 조합 주소가
+        // 완전히 동일해야 캐시가 재사용된다.
+        List<RentTransactionSample> samples = List.of(
+                sample("1-1", 180_000_000L, 0L, 24.0),
+                sample("1-1", 190_000_000L, 0L, 24.0),
+                sample("1-1", 200_000_000L, 0L, 24.0)
+        );
+        stubFirstMonthOnly(samples);
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAt(PROPERTY_LAT, PROPERTY_LNG));
+
+        MarketComparisonResponse response = service.compare(property);
+
+        assertThat(response.status()).isEqualTo("AVAILABLE");
+        verify(kakaoAddressClient, times(1)).resolve(anyString());
     }
 
     // 5차 멘토링 피드백 7-2 - AVAILABLE 응답의 samples가 실제 계산에 쓰인 표본의 상세 정보(건물명/주소/
