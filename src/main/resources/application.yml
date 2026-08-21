@@ -143,6 +143,13 @@ clova:
 gemini:
   api-key: ${GEMINI_API_KEY:dummy-gemini-api-key-for-local}
   model: gemini-3.5-flash
+  # Gemini 무료 티어 한도(분당 5회, 일 20회)를 서버가 먼저 방어하기 위한 값. 유료 티어로
+  # 전환되면 재배포 없이 여기 값만 올리면 된다(GeminiRateLimitProperties/GeminiRateLimiterService 참고).
+  rate-limit:
+    per-minute-limit: 5
+    per-day-limit: 20
+    # 공유 한도를 한 유저가 짧은 간격의 연속 호출로 독점하지 못하게 하는 최소 호출 간격.
+    min-interval-seconds: 10
 
 # 국토교통부 실거래가 API(공공데이터포털). 반드시 "일반 인증키(Decoding)" 값을 사용할 것 -
 # Encoding 키를 넣으면 UriComponentsBuilder가 다시 인코딩해 이중 인코딩으로 인증에 실패한다.

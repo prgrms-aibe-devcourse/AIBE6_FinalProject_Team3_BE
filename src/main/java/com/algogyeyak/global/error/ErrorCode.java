@@ -128,6 +128,8 @@ public enum ErrorCode {
     CONTRACT_ANALYSIS_AI_API_ERROR(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_API_ERROR", "AI 분석 서비스 연동 중 오류가 발생했습니다."),
     CONTRACT_ANALYSIS_QUESTION_REQUIRED(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_QUESTION_REQUIRED", "질문을 입력해주세요."),
     CONTRACT_ANALYSIS_HISTORY_NOT_FOUND(HttpStatus.NOT_FOUND, "CONTRACT_ANALYSIS_HISTORY_NOT_FOUND", "존재하지 않는 계약 분석 이력입니다."),
+    // Gemini 무료 티어 호출 한도(분당/일별) 사전 방어용 - AUTH_TOO_MANY_LOGIN_ATTEMPTS와 동일하게 429.
+    CONTRACT_ANALYSIS_AI_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "CONTRACT_ANALYSIS_AI_RATE_LIMITED", "지금 요청이 많아 잠시 후 다시 시도해주세요."),
 
     // Admin 도메인
     ADMIN_USER_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_USER_NOT_FOUND", "존재하지 않는 사용자입니다."),

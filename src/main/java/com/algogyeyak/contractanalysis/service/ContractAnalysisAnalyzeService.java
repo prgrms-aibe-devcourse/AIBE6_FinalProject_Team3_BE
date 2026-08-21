@@ -29,16 +29,18 @@ public class ContractAnalysisAnalyzeService {
     private final GeminiClient geminiClient;
     private final ContractAnalysisMaskingService maskingService;
     private final ContractRequestRepository contractRequestRepository;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
 
     public ContractAnalysisAnalyzeService(
             GeminiClient geminiClient,
             ContractAnalysisMaskingService maskingService,
-            ContractRequestRepository contractRequestRepository
+            ContractRequestRepository contractRequestRepository,
+            ObjectMapper objectMapper
     ) {
         this.geminiClient = geminiClient;
         this.maskingService = maskingService;
         this.contractRequestRepository = contractRequestRepository;
+        this.objectMapper = objectMapper;
     }
 
     public ContractAnalysisAnalyzeResponse analyze(Long userId, ContractAnalysisAnalyzeRequest request) {

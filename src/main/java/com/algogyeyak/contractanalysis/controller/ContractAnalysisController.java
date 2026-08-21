@@ -16,6 +16,7 @@ import com.algogyeyak.contractanalysis.service.ContractAnalysisChatService;
 import com.algogyeyak.contractanalysis.service.ContractAnalysisInputService;
 import com.algogyeyak.contractanalysis.service.ContractAnalysisMaskingService;
 import com.algogyeyak.contractanalysis.service.ContractAnalysisOcrService;
+import com.algogyeyak.contractanalysis.service.GeminiRateLimiterService;
 import com.algogyeyak.global.response.ApiResponse;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -37,19 +38,22 @@ public class ContractAnalysisController {
     private final ContractAnalysisMaskingService contractAnalysisMaskingService;
     private final ContractAnalysisAnalyzeService contractAnalysisAnalyzeService;
     private final ContractAnalysisChatService contractAnalysisChatService;
+    private final GeminiRateLimiterService geminiRateLimiterService;
 
     public ContractAnalysisController(
             ContractAnalysisInputService contractAnalysisInputService,
             ContractAnalysisOcrService contractAnalysisOcrService,
             ContractAnalysisMaskingService contractAnalysisMaskingService,
             ContractAnalysisAnalyzeService contractAnalysisAnalyzeService,
-            ContractAnalysisChatService contractAnalysisChatService
+            ContractAnalysisChatService contractAnalysisChatService,
+            GeminiRateLimiterService geminiRateLimiterService
     ) {
         this.contractAnalysisInputService = contractAnalysisInputService;
         this.contractAnalysisOcrService = contractAnalysisOcrService;
         this.contractAnalysisMaskingService = contractAnalysisMaskingService;
         this.contractAnalysisAnalyzeService = contractAnalysisAnalyzeService;
         this.contractAnalysisChatService = contractAnalysisChatService;
+        this.geminiRateLimiterService = geminiRateLimiterService;
     }
 
     @PostMapping(value = "/inputs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -86,14 +90,17 @@ public class ContractAnalysisController {
             @RequestBody ContractAnalysisAnalyzeRequest request,
             @AuthenticationPrincipal JwtUserPrincipal principal
     ) {
+        geminiRateLimiterService.checkAndConsume(principal.userId());
         ContractAnalysisAnalyzeResponse response = contractAnalysisAnalyzeService.analyze(principal.userId(), request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @PostMapping("/chat")
     public ResponseEntity<ApiResponse<ContractAnalysisChatResponse>> chat(
-            @RequestBody ContractAnalysisChatRequest request
+            @RequestBody ContractAnalysisChatRequest request,
+            @AuthenticationPrincipal JwtUserPrincipal principal
     ) {
+        geminiRateLimiterService.checkAndConsume(principal.userId());
         ContractAnalysisChatResponse response = contractAnalysisChatService.chat(request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
