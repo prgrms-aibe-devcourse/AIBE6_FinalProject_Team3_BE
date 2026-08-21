@@ -2,6 +2,7 @@ package com.algogyeyak.contractanalysis.client;
 
 import com.algogyeyak.contractanalysis.client.dto.GeminiGenerateContentRequest;
 import com.algogyeyak.contractanalysis.client.dto.GeminiGenerateContentResponse;
+import com.algogyeyak.contractanalysis.config.GeminiProperties;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisChatClause;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisChatMessage;
 import com.algogyeyak.global.error.ErrorCode;
@@ -14,7 +15,6 @@ import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.ConnectTimeoutException;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -130,15 +130,14 @@ public class GeminiClientImpl implements GeminiClient {
     );
 
     private final RestTemplate restTemplate;
+    private final GeminiProperties geminiProperties;
 
-    @Value("${gemini.api-key}")
-    private String apiKey;
-
-    @Value("${gemini.model}")
-    private String model;
-
-    public GeminiClientImpl(@Qualifier("geminiRestTemplate") RestTemplate restTemplate) {
+    public GeminiClientImpl(
+            @Qualifier("geminiRestTemplate") RestTemplate restTemplate,
+            GeminiProperties geminiProperties
+    ) {
         this.restTemplate = restTemplate;
+        this.geminiProperties = geminiProperties;
     }
 
     @Override
@@ -196,8 +195,8 @@ public class GeminiClientImpl implements GeminiClient {
     }
 
     private GeminiGenerateContentResponse execute(GeminiGenerateContentRequest requestBody) {
-        URI uri = UriComponentsBuilder.fromUriString(ENDPOINT_TEMPLATE.formatted(model))
-                .queryParam("key", apiKey)
+        URI uri = UriComponentsBuilder.fromUriString(ENDPOINT_TEMPLATE.formatted(geminiProperties.model()))
+                .queryParam("key", geminiProperties.apiKey())
                 .build()
                 .encode()
                 .toUri();
