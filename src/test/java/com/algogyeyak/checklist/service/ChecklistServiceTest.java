@@ -25,6 +25,8 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -139,6 +141,48 @@ class ChecklistServiceTest {
 
         assertThat(result.getItems()).hasSize(1);
         assertThat(result.getItems().get(0).getContent()).isEqualTo("공동현관과 현관문 잠금장치가 모두 정상 작동하나요?");
+    }
+
+    @Test
+    @DisplayName("체크리스트 생성 중 동시 insert로 유니크 제약을 위반하면 재조회해서 기존 체크리스트를 반환한다")
+    void createOrGetChecklistRecoversFromConcurrentInsertRace() {
+        User user = user(1L);
+        Checklist winner = Checklist.createFrom(user, property(10L, 1L), 1, List.of());
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
+        when(templateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistRepository.saveAndFlush(any(Checklist.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+
+        Checklist result = checklistService.createOrGetChecklist(1L, 10L);
+
+        assertThat(result).isEqualTo(winner);
+    }
+
+    @Test
+    @DisplayName("체크리스트 생성 중 데드락(락 획득 실패)이 나도 재조회해서 기존 체크리스트를 반환한다")
+    void createOrGetChecklistRecoversFromLockAcquisitionFailure() {
+        // 30명 가까이 동시에 같은 유니크 키로 insert를 시도하면, 단순 유니크 제약 위반이 아니라
+        // InnoDB 데드락(CannotAcquireLockException)이 날 수 있다(실제 k6 03-race-conditions.js
+        // 부하 테스트로 확인함) - DataIntegrityViolationException만 잡던 기존 코드는 이 예외 타입을
+        // 놓쳐서 500으로 새어나갔다.
+        User user = user(1L);
+        Checklist winner = Checklist.createFrom(user, property(10L, 1L), 1, List.of());
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
+        when(templateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistRepository.saveAndFlush(any(Checklist.class)))
+                .thenThrow(new CannotAcquireLockException("Deadlock found when trying to get lock"));
+
+        Checklist result = checklistService.createOrGetChecklist(1L, 10L);
+
+        assertThat(result).isEqualTo(winner);
     }
 
     @Test

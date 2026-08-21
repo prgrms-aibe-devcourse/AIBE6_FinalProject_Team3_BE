@@ -3,18 +3,23 @@ import { check, sleep } from 'k6';
 import { BASE_URL } from './common/config.js';
 import { login, extractAuthCookies, authCookieHeader } from './common/auth.js';
 
-// stress test: 정상 트래픽(baseline 20명)을 넘어서 VU를 50 -> 100 -> 150까지 단계적으로
-// 올려가며 언제부터 응답시간/에러율이 무너지기 시작하는지 확인한다. t3.small에서
-// 몇 명부터 HikariCP 풀(기본 10)이나 JVM 힙이 병목이 되는지가 관심사라, thresholds로
+// stress test: 정상 트래픽(baseline 60명)을 넘어서 VU를 100 -> 200 -> 300 -> 400까지
+// 단계적으로 올려가며 언제부터 응답시간/에러율이 무너지기 시작하는지 확인한다. t3.small에서
+// 몇 명부터 HikariCP 풀이나 JVM 힙이 병목이 되는지가 관심사라, thresholds로
 // 테스트를 중단시키지 않고(abortOnFail 없음) 각 단계별 실측값을 그대로 관찰한다.
+// 50/100/150은 Grafana(모니터링 스택) 끈 상태에서 이미 완전히 안정적으로 확인됨 - 특히
+// Tomcat 기본 최대 스레드(200)가 하나의 구조적 한계선일 가능성이 높아, 그 근처를 오래(3분씩)
+// 유지했을 때도 버티는지 보려고 올림.
 export const options = {
   stages: [
-    { duration: '2m', target: 50 },
-    { duration: '3m', target: 50 },
     { duration: '2m', target: 100 },
     { duration: '3m', target: 100 },
-    { duration: '2m', target: 150 },
-    { duration: '3m', target: 150 },
+    { duration: '2m', target: 200 },
+    { duration: '3m', target: 200 },
+    { duration: '2m', target: 300 },
+    { duration: '3m', target: 300 },
+    { duration: '2m', target: 400 },
+    { duration: '3m', target: 400 },
     { duration: '2m', target: 0 },
   ],
   thresholds: {

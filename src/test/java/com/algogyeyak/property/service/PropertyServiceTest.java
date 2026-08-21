@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -479,13 +480,48 @@ class PropertyServiceTest {
         MarketComparisonResponse comparison = MarketComparisonResponse.available(
                 28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6
         );
-        when(marketComparisonService.compare(property)).thenReturn(comparison);
+        // 목록 조회는 compare()가 아니라 캐시만 읽는 getCachedOnly()를 호출한다 - 매물 수만큼
+        // 국토부/카카오 API를 순차 호출하지 않기 위한 성능 개선(fix/property-list-cached-market-comparison).
+        when(marketComparisonService.getCachedOnly(property.getId())).thenReturn(comparison);
 
         PageResponse<PropertyListResponse> result =
                 propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
 
         assertThat(result.content()).hasSize(1);
         assertThat(result.content().get(0).marketComparison()).isEqualTo(comparison);
+    }
+
+    @Test
+    void 매물_목록조회_응답에_시세비교_캐시가_없으면_NOT_YET_CALCULATED로_응답한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 1L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
+
+        MarketComparisonResponse notYetCalculated = MarketComparisonResponse.unavailable(
+                MarketComparisonUnavailableReason.NOT_YET_CALCULATED, "아직 시세 비교가 계산되지 않았어요. 매물 상세 화면에서 확인해보세요.");
+        when(marketComparisonService.getCachedOnly(property.getId())).thenReturn(notYetCalculated);
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).marketComparison().reason())
+                .isEqualTo(MarketComparisonUnavailableReason.NOT_YET_CALCULATED);
+        verify(marketComparisonService, never()).compare(any());
     }
 
     @Test

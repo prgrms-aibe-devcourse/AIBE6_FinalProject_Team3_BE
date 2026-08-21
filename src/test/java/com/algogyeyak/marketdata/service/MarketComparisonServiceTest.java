@@ -29,6 +29,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 
 @ExtendWith(MockitoExtension.class)
 class MarketComparisonServiceTest {
@@ -42,6 +45,11 @@ class MarketComparisonServiceTest {
     @Mock
     private MolitRentClient molitRentClient;
 
+    // getCachedOnly()는 @Cacheable 프록시가 아니라 CacheManager를 직접 읽으므로, 실제 캐시 동작이
+    // 필요한 테스트를 위해 Mockito mock 대신 인메모리 구현체를 쓴다(get/put이 실제로 동작해야
+    // "캐시 히트/미스"를 검증할 수 있음).
+    private final CacheManager cacheManager = new ConcurrentMapCacheManager("marketComparison");
+
     private MarketComparisonService service;
 
     private static final double PROPERTY_LAT = 37.5665;
@@ -53,7 +61,8 @@ class MarketComparisonServiceTest {
             new MarketComparisonProperties(300, 600, 3, 0.2, 6, 30);
 
     private void init() {
-        service = new MarketComparisonService(kakaoRegionCodeClient, kakaoAddressClient, molitRentClient, PROPERTIES);
+        service = new MarketComparisonService(
+                kakaoRegionCodeClient, kakaoAddressClient, molitRentClient, PROPERTIES, cacheManager);
     }
 
     private Property jeonseOfficetel(long deposit, double area) {
@@ -345,5 +354,34 @@ class MarketComparisonServiceTest {
         assertThat(response.sampleCount()).isEqualTo(3);
         assertThat(response.referencePrice()).isEqualTo(200_000_000L);
         verify(kakaoAddressClient).resolve(prefix + "산1-2");
+    }
+
+    @Test
+    void getCachedOnly는_캐시가_없으면_계산을_트리거하지_않고_NOT_YET_CALCULATED를_반환한다() {
+        init();
+
+        MarketComparisonResponse response = service.getCachedOnly(1L);
+
+        assertThat(response.status()).isEqualTo("UNAVAILABLE");
+        assertThat(response.reason()).isEqualTo(MarketComparisonUnavailableReason.NOT_YET_CALCULATED);
+        // 목록 조회 성능 개선의 핵심 - 캐시 미스여도 국토부/카카오 API를 절대 호출하지 않아야 한다.
+        verifyNoInteractions(kakaoRegionCodeClient, kakaoAddressClient, molitRentClient);
+    }
+
+    @Test
+    void getCachedOnly는_캐시에_이미_있으면_그대로_반환하고_계산을_트리거하지_않는다() {
+        init();
+        MarketComparisonResponse cached = MarketComparisonResponse.available(
+                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6
+        );
+        // compare()가 @Cacheable 프록시를 거쳐야 실제로 채워지는 캐시라, 프록시 없이 직접 생성한 이
+        // 테스트에서는 채워진 캐시 상태를 수동으로 흉내낸다(등록/수정/상세조회에서 compare()가 이미
+        // 채워놓은 캐시를 목록 조회가 재사용하는 상황과 동일).
+        cacheManager.getCache("marketComparison").put(1L, cached);
+
+        MarketComparisonResponse response = service.getCachedOnly(1L);
+
+        assertThat(response).isEqualTo(cached);
+        verifyNoInteractions(kakaoRegionCodeClient, kakaoAddressClient, molitRentClient);
     }
 }
