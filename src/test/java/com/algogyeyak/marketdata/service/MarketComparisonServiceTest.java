@@ -14,6 +14,7 @@ import com.algogyeyak.marketdata.client.RentTransactionSample;
 import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
+import com.algogyeyak.marketdata.dto.SamplePriceHighlight;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
 import com.algogyeyak.property.client.KakaoRegionCodeClient;
@@ -272,6 +273,8 @@ class MarketComparisonServiceTest {
         assertThat(response.samples().get(0).address()).isEqualTo("서울특별시 종로구 청운동 1-2");
         assertThat(response.samples().get(0).depositWon()).isEqualTo(200_000_000L);
         assertThat(response.samples().get(0).areaSqm()).isEqualTo(25.0);
+        // 표본이 5건 이하라 추릴 필요가 없었으면 priceHighlight는 전부 null이어야 한다.
+        assertThat(response.samples()).extracting("priceHighlight").containsOnlyNulls();
     }
 
     // 표본이 대표 노출 상한(5건)을 넘으면 최고가/최저가/최근순으로 추려야 한다(사용자 피드백,
@@ -302,6 +305,10 @@ class MarketComparisonServiceTest {
                 .containsExactly("2026-06-01", "2026-05-01", "2026-04-01", "2026-02-01", "2026-01-01");
         assertThat(response.samples()).extracting("depositWon")
                 .containsExactly(205_000_000L, 190_000_000L, 210_000_000L, 300_000_000L, 150_000_000L);
+        // 목록 순서(최신순)와 선정 사유(최고가/최저가)가 다르다 보니, FE가 배지를 붙일 수 있도록
+        // priceHighlight로 어떤 표본이 왜 뽑혔는지 표시해야 한다 - 나머지 표본(최근순으로 뽑힌 것)은 null.
+        assertThat(response.samples()).extracting("priceHighlight")
+                .containsExactly(null, null, null, SamplePriceHighlight.HIGHEST, SamplePriceHighlight.LOWEST);
     }
 
     private RentTransactionSample txSample(String jibun, LocalDate dealDate, long depositWon) {

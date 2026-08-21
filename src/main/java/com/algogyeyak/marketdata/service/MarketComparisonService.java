@@ -6,6 +6,7 @@ import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.marketdata.dto.MarketTransactionSampleResponse;
+import com.algogyeyak.marketdata.dto.SamplePriceHighlight;
 import com.algogyeyak.marketdata.util.GeoDistanceCalculator;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
@@ -205,19 +206,31 @@ public class MarketComparisonService {
 
     /**
      * 기준가(중앙값) 산출에 실제로 쓰인 표본(used) 중 대표 표본만 사용자 노출용 응답으로
-     * 변환한다(5차 멘토링 피드백 7-2). 최신 계약일 순으로 정렬해 최근 거래부터 보여준다.
+     * 변환한다(5차 멘토링 피드백 7-2). 최종 목록은 항상 최신 계약일 순으로 정렬해 최근 거래부터
+     * 보여준다 - 이때 최고가/최저가로 뽑힌 표본이 목록 중간에 섞여 있으면 "왜 여기 있지?" 하고
+     * 혼란스러울 수 있어(사용자 피드백, 2026-08-21), priceHighlight로 선정 사유를 같이 내려준다.
      */
     private List<MarketTransactionSampleResponse> buildSampleResponses(List<GeocodedSample> used, String sggPrefix) {
-        return pickRepresentativeSamples(used).stream()
+        RepresentativeSamples representative = pickRepresentativeSamples(used);
+        return representative.samples().stream()
                 .sorted(Comparator.comparing((GeocodedSample g) -> g.sample().getDealDate()).reversed())
                 .map(g -> new MarketTransactionSampleResponse(
                         g.sample().getBuildingName(),
                         buildFullAddress(g.sample(), sggPrefix),
                         g.sample().getDealDate().toString(),
                         g.sample().getDepositWon(),
-                        g.sample().getAreaSqm()
+                        g.sample().getAreaSqm(),
+                        g == representative.highest() ? SamplePriceHighlight.HIGHEST
+                                : g == representative.lowest() ? SamplePriceHighlight.LOWEST
+                                : null
                 ))
                 .toList();
+    }
+
+    // pickRepresentativeSamples()가 어떤 표본을 최고가/최저가로 뽑았는지 buildSampleResponses()에
+    // 같이 넘겨주기 위한 내부 홀더. 표본이 5건 이하라 추릴 필요가 없었으면 highest/lowest는 null
+    // (전부 최근순 노출과 동일하게 취급되어 어떤 표본도 강조되지 않는다).
+    private record RepresentativeSamples(List<GeocodedSample> samples, GeocodedSample highest, GeocodedSample lowest) {
     }
 
     /**
@@ -226,26 +239,31 @@ public class MarketComparisonService {
      * 기준에 겹치면(예: 최고가이면서 동시에 최근 거래) 중복 없이 다음 후보로 넘어간다. 표본이
      * 5건 이하면 추릴 필요가 없어 그대로 전부 반환한다.
      */
-    private List<GeocodedSample> pickRepresentativeSamples(List<GeocodedSample> used) {
+    private RepresentativeSamples pickRepresentativeSamples(List<GeocodedSample> used) {
         if (used.size() <= MAX_EXPOSED_SAMPLES) {
-            return used;
+            return new RepresentativeSamples(used, null, null);
         }
 
-        List<GeocodedSample> selected = new ArrayList<>();
-        used.stream()
+        GeocodedSample highest = used.stream()
                 .max(Comparator.comparingLong(g -> g.sample().getDepositWon()))
-                .ifPresent(selected::add);
-        used.stream()
+                .orElseThrow();
+        GeocodedSample lowest = used.stream()
                 .min(Comparator.comparingLong(g -> g.sample().getDepositWon()))
-                .filter(g -> !selected.contains(g))
-                .ifPresent(selected::add);
+                .filter(g -> g != highest)
+                .orElse(null);
+
+        List<GeocodedSample> selected = new ArrayList<>();
+        selected.add(highest);
+        if (lowest != null) {
+            selected.add(lowest);
+        }
         used.stream()
                 .sorted(Comparator.comparing((GeocodedSample g) -> g.sample().getDealDate()).reversed())
                 .filter(g -> !selected.contains(g))
                 .limit(MAX_EXPOSED_SAMPLES - selected.size())
                 .forEach(selected::add);
 
-        return selected;
+        return new RepresentativeSamples(selected, highest, lowest);
     }
 
     private List<GeocodedSample> filterByRadius(List<GeocodedSample> geocoded, PropertyAddress address, int radiusMeters) {
