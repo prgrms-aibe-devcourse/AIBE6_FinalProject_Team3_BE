@@ -14,8 +14,10 @@ import com.algogyeyak.riskanalysis.dto.MarketSalePrice;
 import com.algogyeyak.riskanalysis.entity.DepositSafetyCheck;
 import com.algogyeyak.riskanalysis.enums.DepositSafetyCheckReason;
 import com.algogyeyak.riskanalysis.enums.DepositSafetyStatus;
+import com.algogyeyak.riskanalysis.enums.RiskSignalType;
 import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
 import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
+import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -44,6 +46,7 @@ public class DepositSafetyCheckService {
     private final MarketSaleDataClient marketSaleDataClient;
     private final PropertyRepository propertyRepository;
     private final ChecklistItemRepository checklistItemRepository;
+    private final PropertyRiskRepository propertyRiskRepository;
     private final RiskPolicyConfig policyConfig;
     private final TransactionTemplate requiresNewTransactionTemplate;
 
@@ -52,12 +55,14 @@ public class DepositSafetyCheckService {
             MarketSaleDataClient marketSaleDataClient,
             PropertyRepository propertyRepository,
             ChecklistItemRepository checklistItemRepository,
+            PropertyRiskRepository propertyRiskRepository,
             RiskPolicyConfig policyConfig,
             PlatformTransactionManager transactionManager) {
         this.depositSafetyCheckRepository = depositSafetyCheckRepository;
         this.marketSaleDataClient = marketSaleDataClient;
         this.propertyRepository = propertyRepository;
         this.checklistItemRepository = checklistItemRepository;
+        this.propertyRiskRepository = propertyRiskRepository;
         this.policyConfig = policyConfig;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -72,6 +77,7 @@ public class DepositSafetyCheckService {
         Property property = findOwnedProperty(userId, propertyId);
         DepositSafetyCheck check = depositSafetyCheckRepository.findByPropertyId(propertyId).orElse(null);
         return DepositSafetyCheckResponse.from(propertyId, check, isRecentOwnershipChangeWarning(propertyId, check),
+                isPriceAnomalyWarning(propertyId),
                 policyConfig.getJeonseRatioCautionFrom(), policyConfig.getJeonseRatioWarnFrom(), policyConfig.getJeonseRatioWarnTo());
     }
 
@@ -93,6 +99,7 @@ public class DepositSafetyCheckService {
                 maxClaimAmount != null ? BigDecimal.valueOf(maxClaimAmount) : null);
 
         return DepositSafetyCheckResponse.from(propertyId, check, isRecentOwnershipChangeWarning(propertyId, check),
+                isPriceAnomalyWarning(propertyId),
                 policyConfig.getJeonseRatioCautionFrom(), policyConfig.getJeonseRatioWarnFrom(), policyConfig.getJeonseRatioWarnTo());
     }
 
@@ -124,6 +131,18 @@ public class DepositSafetyCheckService {
         } catch (java.time.format.DateTimeParseException e) {
             return false;
         }
+    }
+
+    /**
+     * "시세 이상 저가(PRICE_ANOMALY)" 신호와의 모순 경고. 전세가율은 보증금을 매매시세와 비교하고
+     * PRICE_ANOMALY는 같은 보증금을 전월세 실거래가와 비교하는데, 두 판정이 서로 독립적이라 보증금이
+     * 비정상적으로 싸서 PRICE_ANOMALY가 뜬 매물이 그 낮은 보증금 때문에 전세가율은 오히려
+     * "안전"으로 나오는 모순이 생길 수 있다(risk-analysis-design.md 남은 이슈 13번 참고).
+     * recentOwnershipChangeWarning과 달리 전세가율 구간과 무관하게 항상 계산한다 - 전세가율이
+     * "안전"으로 보일 때가 오히려 더 경고가 필요한 경우이기 때문이다.
+     */
+    private boolean isPriceAnomalyWarning(Long propertyId) {
+        return propertyRiskRepository.findByPropertyIdAndSignalType(propertyId, RiskSignalType.PRICE_ANOMALY).isPresent();
     }
 
     private Property findOwnedProperty(Long userId, Long propertyId) {
