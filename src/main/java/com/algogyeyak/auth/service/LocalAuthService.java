@@ -1,5 +1,6 @@
 package com.algogyeyak.auth.service;
 
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
@@ -39,6 +40,7 @@ public class LocalAuthService {
     private final EmailVerificationService emailVerificationService;
     private final TransactionTemplate requiresNewTransactionTemplate;
     private final StringRedisTemplate redisTemplate;
+    private final UserAuthStatusCacheService userAuthStatusCacheService;
 
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
@@ -54,13 +56,15 @@ public class LocalAuthService {
             PasswordEncoder passwordEncoder,
             EmailVerificationService emailVerificationService,
             PlatformTransactionManager transactionManager,
-            StringRedisTemplate redisTemplate) {
+            StringRedisTemplate redisTemplate,
+            UserAuthStatusCacheService userAuthStatusCacheService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailVerificationService = emailVerificationService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.redisTemplate = redisTemplate;
+        this.userAuthStatusCacheService = userAuthStatusCacheService;
     }
 
     @Transactional
@@ -235,5 +239,9 @@ public class LocalAuthService {
         }
 
         user.updatePasswordHash(passwordEncoder.encode(newPassword));
+        // passwordChangedAt이 캐시에 최대 30초 stale하게 남아있으면 이번에 바꾼 비밀번호 이전에
+        // 발급된 access token(탈취됐거나 다른 기기에 열려 있던)이 그동안 계속 통과한다 - 커밋
+        // 직후 지워 다음 요청부터 바로 DB의 새 passwordChangedAt을 보게 한다.
+        userAuthStatusCacheService.evictAfterCommit(userId);
     }
 }
