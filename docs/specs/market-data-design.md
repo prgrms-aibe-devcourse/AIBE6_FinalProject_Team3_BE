@@ -49,7 +49,8 @@
 | 중앙값 계산 | ✅ 구현 |
 | 성공/판정불가/실패 3단계 응답 구조 | ⚠️ 사실상 AVAILABLE/UNAVAILABLE 2단계 — 외부 API 실패도 예외를 던지지 않고 UNAVAILABLE로 흡수(아래 비기능요구사항 참고) |
 | 데이터 기준일·조회시각·적용 반경 단계 기록 | ⚠️ 기준일(`referenceDate`)·반경 단계(`radiusMeters`)는 응답에 포함. 조회시각 자체는 별도 기록 없음 |
-| 응답 스키마(대표시세/차이/차이율/표본수/기준일/status) | ✅ `MarketComparisonResponse(status, referencePrice, differenceRate, sampleCount, referenceDate, radiusMeters, areaErrorRate, lookbackMonths, message, reason)`. `areaErrorRate`/`lookbackMonths`는 AVAILABLE일 때만 채워지고 UNAVAILABLE이면 `radiusMeters`와 동일하게 null(#206) |
+| 응답 스키마(대표시세/차이/차이율/표본수/기준일/status) | ✅ `MarketComparisonResponse(status, referencePrice, differenceRate, sampleCount, referenceDate, radiusMeters, areaErrorRate, lookbackMonths, samples, message, reason)`. `areaErrorRate`/`lookbackMonths`는 AVAILABLE일 때만 채워지고 UNAVAILABLE이면 `radiusMeters`와 동일하게 null(#206) |
+| 기준가 산출 근거(개별 실거래 표본) 노출 | ✅ **(2026-08-21 추가, 5차 멘토링 피드백 7-2)** `samples: List<MarketTransactionSampleResponse>` 추가 — 중앙값 계산에 실제로 쓰인 표본(반경·면적오차·전세 필터를 모두 통과한 것)만 건물명/조합주소/계약일/보증금/면적과 함께 최신 계약일 순으로 담는다. 국토부 실거래가 공개시스템이 원래도 공개하는 공공데이터라 별도 개인정보 이슈는 없음. UNAVAILABLE이면 null |
 
 ## 비기능 요구사항 — 대조
 

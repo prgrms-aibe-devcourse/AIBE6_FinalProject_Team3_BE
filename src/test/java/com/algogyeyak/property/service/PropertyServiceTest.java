@@ -478,7 +478,7 @@ class PropertyServiceTest {
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
         MarketComparisonResponse comparison = MarketComparisonResponse.available(
-                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6
+                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6, List.of()
         );
         // 목록 조회는 compare()가 아니라 캐시만 읽는 getCachedOnly()를 호출한다 - 매물 수만큼
         // 국토부/카카오 API를 순차 호출하지 않기 위한 성능 개선(fix/property-list-cached-market-comparison).

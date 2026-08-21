@@ -5,6 +5,7 @@ import com.algogyeyak.marketdata.client.RentTransactionSample;
 import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
+import com.algogyeyak.marketdata.dto.MarketTransactionSampleResponse;
 import com.algogyeyak.marketdata.util.GeoDistanceCalculator;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
@@ -138,7 +139,8 @@ public class MarketComparisonService {
                 latestDealDate != null ? latestDealDate.toString() : null,
                 radiusUsed,
                 properties.areaErrorRate(),
-                properties.lookbackMonths()
+                properties.lookbackMonths(),
+                buildSampleResponses(used, sggPrefix)
         );
     }
 
@@ -166,7 +168,7 @@ public class MarketComparisonService {
             if (sample.getJibunAddress() == null) {
                 continue;
             }
-            String fullAddress = sggPrefix + " " + sample.getLegalDongName() + " " + sample.getJibunAddress();
+            String fullAddress = buildFullAddress(sample, sggPrefix);
 
             AddressResolutionResult resolution = geocodeCache.computeIfAbsent(
                     fullAddress, kakaoAddressClient::resolve
@@ -186,6 +188,32 @@ public class MarketComparisonService {
             log.info("실거래 지오코딩 실패 {}건 (전체 후보 {}건 중) - 표본에서 제외됨", failedCount, samples.size());
         }
         return result;
+    }
+
+    /**
+     * "서울특별시 종로구" + "청운동" + "1-1" -> "서울특별시 종로구 청운동 1-1" 형태의 조합 주소.
+     * geocodeAll()의 지오코딩 대상 주소, 그리고 buildSampleResponses()의 사용자 노출용 주소가
+     * 동일한 조합 규칙을 써야 하므로(동일 표본이면 같은 주소여야 함) 하나로 공유한다.
+     */
+    private String buildFullAddress(RentTransactionSample sample, String sggPrefix) {
+        return sggPrefix + " " + sample.getLegalDongName() + " " + sample.getJibunAddress();
+    }
+
+    /**
+     * 기준가(중앙값) 산출에 실제로 쓰인 표본(used)을 사용자 노출용 응답으로 변환한다(5차 멘토링
+     * 피드백 7-2). 최신 계약일 순으로 정렬해 최근 거래부터 보여준다.
+     */
+    private List<MarketTransactionSampleResponse> buildSampleResponses(List<GeocodedSample> used, String sggPrefix) {
+        return used.stream()
+                .sorted(Comparator.comparing((GeocodedSample g) -> g.sample().getDealDate()).reversed())
+                .map(g -> new MarketTransactionSampleResponse(
+                        g.sample().getBuildingName(),
+                        buildFullAddress(g.sample(), sggPrefix),
+                        g.sample().getDealDate().toString(),
+                        g.sample().getDepositWon(),
+                        g.sample().getAreaSqm()
+                ))
+                .toList();
     }
 
     private List<GeocodedSample> filterByRadius(List<GeocodedSample> geocoded, PropertyAddress address, int radiusMeters) {
