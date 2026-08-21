@@ -9,9 +9,13 @@ import com.algogyeyak.property.entity.TransactionType;
  *
  * region은 도로명주소/지번주소에 대한 부분일치(LIKE) 검색이다 - 법정동코드 등 정확 매칭 인프라가
  * 아직 없어 자유 텍스트 검색으로 처리한다(market-data-design.md 참고, 별도 인프라 필요).
+ * title(건물명)도 region과 동일하게 부분일치(LIKE) 검색이다(5차 멘토링 피드백 6-3). title 컬럼 자체는
+ * NOT NULL이라(PropertyService.resolveTitle() 참고 - 사용자가 비워두면 매물유형 한글 라벨로 대체
+ * 저장됨) 이 조건에서 null 매물을 걱정할 필요는 없다.
  */
 public record PropertySearchCondition(
         String region,
+        String title,
         Double minArea,
         Double maxArea,
         TransactionType transactionType,
@@ -29,6 +33,6 @@ public record PropertySearchCondition(
         Boolean hasSignal
 ) {
     public static PropertySearchCondition empty() {
-        return new PropertySearchCondition(null, null, null, null, null, null, null, null, null, null);
+        return new PropertySearchCondition(null, null, null, null, null, null, null, null, null, null, null);
     }
 }

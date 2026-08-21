@@ -113,6 +113,27 @@ class PropertyRepositoryTest {
         return PageRequest.of(0, 20);
     }
 
+    // 5차 멘토링 피드백 6-3 - title(건물명) 조건이 다른 텍스트 조건(region)과 동일한 LIKE 부분일치
+    // 패턴으로 동작하는지 실제 쿼리로 검증한다.
+    @Test
+    void title_조건으로_필터링하면_건물명이_부분일치하는_매물만_반환한다() {
+        Property raemian = propertyRepository.save(Property.builder()
+                .userId(1L).title("래미안 강남").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(10_000_000L).area(20.0).build());
+        propertyRepository.save(Property.builder()
+                .userId(1L).title("힐스테이트").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(10_000_000L).area(20.0).build());
+
+        Page<Property> result = propertyRepository.search(
+                1L, PropertyStatus.ACTIVE,
+                null, "래미안", null, null, null, null, null, null, null, null,
+                null,
+                defaultPageable()
+        );
+
+        assertThat(result.getContent()).extracting(Property::getId).containsExactly(raemian.getId());
+    }
+
     @Test
     void signalPropertyIds가_null이면_필터링_없이_전체_매물을_반환한다() {
         Property property1 = save(1L);
@@ -120,7 +141,7 @@ class PropertyRepositoryTest {
 
         Page<Property> result = propertyRepository.search(
                 1L, PropertyStatus.ACTIVE,
-                null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
                 null,
                 defaultPageable()
         );
@@ -136,7 +157,7 @@ class PropertyRepositoryTest {
 
         Page<Property> result = propertyRepository.search(
                 1L, PropertyStatus.ACTIVE,
-                null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
                 List.of(signaled.getId()),
                 defaultPageable()
         );
@@ -150,7 +171,7 @@ class PropertyRepositoryTest {
 
         Page<Property> result = propertyRepository.search(
                 1L, PropertyStatus.ACTIVE,
-                null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
                 List.of(),
                 defaultPageable()
         );

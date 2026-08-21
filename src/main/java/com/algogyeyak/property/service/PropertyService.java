@@ -157,6 +157,7 @@ public class PropertyService {
                 userId,
                 PropertyStatus.ACTIVE,
                 condition.region(),
+                condition.title(),
                 condition.minArea(),
                 condition.maxArea(),
                 condition.transactionType(),

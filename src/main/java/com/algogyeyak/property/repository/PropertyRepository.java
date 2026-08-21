@@ -86,7 +86,7 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
 
     /**
      * 본인이 등록한 매물 목록 조회 (개인 분석 도구 성격상 마켓플레이스식 전체 조회가 아닌 본인 소유 매물만 대상).
-     * 지역(주소 부분일치)/면적범위/거래유형/주택유형/보증금범위/월세범위 전부 선택 조건이라, null인
+     * 지역(주소 부분일치)/건물명(title 부분일치)/면적범위/거래유형/주택유형/보증금범위/월세범위 전부 선택 조건이라, null인
      * 파라미터는 조건 자체를 무시하도록 각 절을 "(:param IS NULL OR ...)" 형태로 구성했다.
      * monthlyRent는 전세 매물에서 항상 null이라 minMonthlyRent/maxMonthlyRent가 넘어오면 전세 매물은
      * 자연히 결과에서 제외된다(별도 분기 불필요).
@@ -103,6 +103,7 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
               AND p.status = :status
               AND (:region IS NULL OR a.roadAddress LIKE CONCAT('%', :region, '%')
                    OR a.jibunAddress LIKE CONCAT('%', :region, '%'))
+              AND (:title IS NULL OR p.title LIKE CONCAT('%', :title, '%'))
               AND (:minArea IS NULL OR p.area >= :minArea)
               AND (:maxArea IS NULL OR p.area <= :maxArea)
               AND (:transactionType IS NULL OR p.transactionType = :transactionType)
@@ -117,6 +118,7 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
             @Param("userId") Long userId,
             @Param("status") PropertyStatus status,
             @Param("region") String region,
+            @Param("title") String title,
             @Param("minArea") Double minArea,
             @Param("maxArea") Double maxArea,
             @Param("transactionType") TransactionType transactionType,

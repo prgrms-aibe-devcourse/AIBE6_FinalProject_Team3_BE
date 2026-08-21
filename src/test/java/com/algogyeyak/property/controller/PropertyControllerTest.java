@@ -237,6 +237,7 @@ class PropertyControllerTest {
 
         mockMvc.perform(get("/properties")
                         .queryParam("region", "역삼동")
+                        .queryParam("title", "래미안")
                         .queryParam("minArea", "20")
                         .queryParam("maxArea", "30")
                         .queryParam("transactionType", "JEONSE")
@@ -252,6 +253,7 @@ class PropertyControllerTest {
 
         PropertySearchCondition captured = captor.getValue();
         org.assertj.core.api.Assertions.assertThat(captured.region()).isEqualTo("역삼동");
+        org.assertj.core.api.Assertions.assertThat(captured.title()).isEqualTo("래미안");
         org.assertj.core.api.Assertions.assertThat(captured.minArea()).isEqualTo(20.0);
         org.assertj.core.api.Assertions.assertThat(captured.maxArea()).isEqualTo(30.0);
         org.assertj.core.api.Assertions.assertThat(captured.transactionType()).isEqualTo(TransactionType.JEONSE);
