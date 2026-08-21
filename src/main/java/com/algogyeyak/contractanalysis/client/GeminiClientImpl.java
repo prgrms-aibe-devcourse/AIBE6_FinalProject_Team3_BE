@@ -2,18 +2,19 @@ package com.algogyeyak.contractanalysis.client;
 
 import com.algogyeyak.contractanalysis.client.dto.GeminiGenerateContentRequest;
 import com.algogyeyak.contractanalysis.client.dto.GeminiGenerateContentResponse;
+import com.algogyeyak.contractanalysis.config.GeminiProperties;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisChatClause;
 import com.algogyeyak.contractanalysis.dto.ContractAnalysisChatMessage;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
-import java.net.http.HttpTimeoutException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
+import org.apache.hc.client5.http.ConnectTimeoutException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -48,10 +49,14 @@ public class GeminiClientImpl implements GeminiClient {
                인용하세요. 여러 조항을 하나로 합치거나 일부만 발췌해서 이어붙이지 마세요.
                조항이 길면 전체를 그대로 인용하되, 설명(explanation)에서 핵심만 요약해서
                설명하세요.
+               originalText 인용 시, OCR로 인한 명백한 오타(자모분리, 이상한 특수문자,
+               띄어쓰기 오류)는 문맥상 명확하면 자연스럽게 교정해서 인용하세요.
+               숫자·날짜·금액 등 사실 정보는 원문 그대로 유지하세요.
             3. 위험 여부는 등급이나 점수로 표현하지 말고, 사실과 이유를 설명하는 방식으로 답하세요.
             4. 어려운 법률 용어는 쉬운 일상어로 풀어서 설명하세요.
-            5. 수정 요청 문구를 제안할 때는, 이것이 법률적 정답이 아니라
-               임대인과 협의하기 위한 예시임을 함께 안내하세요.
+            5. suggestedText는 조항 자체를 대체할 수정 문구만 담으세요. "이는 법률적 정답이
+               아니라 협의용 예시입니다" 같은 안내 문구는 붙이지 마세요. 해당 안내는 응답
+               레벨의 disclaimer로 항상 함께 내려가므로 중복됩니다.
             6. question 필드는 사용자가 아니라 중개사/임대인에게 직접 던질 질문이어야 합니다.
                사용자 자신의 상황을 확인하는 질문(예: 당신은 ~하시나요)이 아니라,
                상대방에게 정보나 예외 여부를 묻는 질문(예: ~한 경우도 포함되나요,
@@ -66,6 +71,8 @@ public class GeminiClientImpl implements GeminiClient {
                빈 배열로 반환하고 summary에 "입력하신 내용이 계약 조항으로 보이지 않습니다.
                특약사항이 포함된 계약 문구를 입력해주세요"라고 안내하세요. 그 외의 경우
                summary는 빈 문자열로 두세요.
+            10. 각 조항마다 5~10자 내외의 짧은 제목(title)도 생성하세요.
+                예: "반려동물 사육 금지", "보증금 반환 지연"
             """;
 
     private static final String CHAT_SYSTEM_INSTRUCTION_TEMPLATE = """
@@ -98,6 +105,10 @@ public class GeminiClientImpl implements GeminiClient {
                             "items", Map.of(
                                     "type", "OBJECT",
                                     "properties", Map.of(
+                                            "title", Map.of(
+                                                    "type", "STRING",
+                                                    "description", "조항 내용을 요약한 5~10자 내외의 짧은 제목"
+                                            ),
                                             "originalText", Map.of("type", "STRING"),
                                             "riskFlag", Map.of("type", "BOOLEAN"),
                                             "explanation", Map.of("type", "STRING"),
@@ -109,7 +120,8 @@ public class GeminiClientImpl implements GeminiClient {
                                             "suggestedText", Map.of("type", "STRING")
                                     ),
                                     "required", List.of(
-                                            "originalText", "riskFlag", "explanation", "question", "suggestedText"
+                                            "title", "originalText", "riskFlag", "explanation", "question",
+                                            "suggestedText"
                                     )
                             )
                     )
@@ -118,15 +130,14 @@ public class GeminiClientImpl implements GeminiClient {
     );
 
     private final RestTemplate restTemplate;
+    private final GeminiProperties geminiProperties;
 
-    @Value("${gemini.api-key}")
-    private String apiKey;
-
-    @Value("${gemini.model}")
-    private String model;
-
-    public GeminiClientImpl(RestTemplate restTemplate) {
+    public GeminiClientImpl(
+            @Qualifier("geminiRestTemplate") RestTemplate restTemplate,
+            GeminiProperties geminiProperties
+    ) {
         this.restTemplate = restTemplate;
+        this.geminiProperties = geminiProperties;
     }
 
     @Override
@@ -184,8 +195,8 @@ public class GeminiClientImpl implements GeminiClient {
     }
 
     private GeminiGenerateContentResponse execute(GeminiGenerateContentRequest requestBody) {
-        URI uri = UriComponentsBuilder.fromUriString(ENDPOINT_TEMPLATE.formatted(model))
-                .queryParam("key", apiKey)
+        URI uri = UriComponentsBuilder.fromUriString(ENDPOINT_TEMPLATE.formatted(geminiProperties.model()))
+                .queryParam("key", geminiProperties.apiKey())
                 .build()
                 .encode()
                 .toUri();
@@ -200,9 +211,11 @@ public class GeminiClientImpl implements GeminiClient {
             );
             return response.getBody();
         } catch (ResourceAccessException e) {
-            // Spring Boot 4의 RestTemplateBuilder는 JDK HttpClient 기반 요청 팩토리를 쓰므로,
-            // read timeout이 SocketTimeoutException이 아니라 HttpTimeoutException으로 던져진다.
-            if (e.getCause() instanceof SocketTimeoutException || e.getCause() instanceof HttpTimeoutException) {
+            // geminiRestTemplate(ContractAnalysisRestTemplateConfig)는 Apache HttpClient5 기반이라,
+            // 연결 후 응답 대기 중 타임아웃은 SocketTimeoutException으로, connect 단계 타임아웃은
+            // 별도의 ConnectTimeoutException(SocketTimeoutException이 아님)으로 던져진다 - 둘 다
+            // 사용자 입장에서는 동일한 "시간 초과"이므로 함께 잡는다.
+            if (e.getCause() instanceof SocketTimeoutException || e.getCause() instanceof ConnectTimeoutException) {
                 log.error("Gemini API 호출 시간 초과");
                 throw new BusinessException(
                         ErrorCode.CONTRACT_ANALYSIS_AI_API_ERROR,

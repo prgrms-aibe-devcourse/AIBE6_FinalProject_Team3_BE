@@ -36,6 +36,11 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-restclient")
+    // Gemini/Clova 전용 RestTemplate(ContractAnalysisRestTemplateConfig)의 커넥션 풀(maxTotal/
+    // defaultMaxPerRoute)을 위해 필요 - SimpleClientHttpRequestFactory(HttpURLConnection 기반,
+    // property.config.RestTemplateConfig의 공용 빈이 쓰는 팩토리)는 풀 크기를 조정할 수 있는
+    // 개념 자체가 없다. 버전은 Spring Boot 의존성 관리 BOM이 고정한다.
+    implementation("org.apache.httpcomponents.client5:httpclient5")
     compileOnly("org.projectlombok:lombok")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     // 로컬 개발 전용: backend/.env를 자동으로 읽어 Spring 프로퍼티로 노출한다
@@ -77,6 +82,12 @@ dependencies {
 
     // Prometheus
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
+
+    // MarketComparisonService의 지오코딩 결과 캐시(geocodeCache)용. 이전에는 크기/만료 제한이
+    // 없는 순수 ConcurrentHashMap이라 서버를 오래 띄워둘수록(주소 종류가 늘어날수록) 메모리를
+    // 무한정 점유하는 구조였다(2026-08-21 멘토링 피드백에서 지적) - Caffeine으로 바꿔
+    // maximumSize/expireAfterWrite로 상한을 둔다. 버전은 Spring Boot BOM이 관리한다.
+    implementation("com.github.ben-manes.caffeine:caffeine")
 }
 
 tasks.withType<Test> {

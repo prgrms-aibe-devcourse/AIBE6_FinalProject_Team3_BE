@@ -49,7 +49,8 @@
 | 중앙값 계산 | ✅ 구현 |
 | 성공/판정불가/실패 3단계 응답 구조 | ⚠️ 사실상 AVAILABLE/UNAVAILABLE 2단계 — 외부 API 실패도 예외를 던지지 않고 UNAVAILABLE로 흡수(아래 비기능요구사항 참고) |
 | 데이터 기준일·조회시각·적용 반경 단계 기록 | ⚠️ 기준일(`referenceDate`)·반경 단계(`radiusMeters`)는 응답에 포함. 조회시각 자체는 별도 기록 없음 |
-| 응답 스키마(대표시세/차이/차이율/표본수/기준일/status) | ✅ `MarketComparisonResponse(status, referencePrice, differenceRate, sampleCount, referenceDate, radiusMeters, areaErrorRate, lookbackMonths, message, reason)`. `areaErrorRate`/`lookbackMonths`는 AVAILABLE일 때만 채워지고 UNAVAILABLE이면 `radiusMeters`와 동일하게 null(#206) |
+| 응답 스키마(대표시세/차이/차이율/표본수/기준일/status) | ✅ `MarketComparisonResponse(status, referencePrice, differenceRate, sampleCount, referenceDate, radiusMeters, areaErrorRate, lookbackMonths, samples, message, reason)`. `areaErrorRate`/`lookbackMonths`는 AVAILABLE일 때만 채워지고 UNAVAILABLE이면 `radiusMeters`와 동일하게 null(#206) |
+| 기준가 산출 근거(개별 실거래 표본) 노출 | ✅ **(2026-08-21 추가/정정, 5차 멘토링 피드백 7-2)** `samples: List<MarketTransactionSampleResponse>` 추가 — 중앙값 계산에 실제로 쓰인 표본(반경·면적오차·전세 필터를 모두 통과한 것)을 건물명/조합주소/계약일/보증금/면적과 함께 담는다. 처음엔 쓰인 표본을 전부 노출했었는데, 대단지 등에서 표본이 많으면 응답이 무거워지고 사용자도 다 읽기 부담스럽다는 피드백을 받아 `MarketComparisonService.MAX_EXPOSED_SAMPLES`(5)건으로 제한 — 최고가 1건 + 최저가 1건("이 가격대가 왜 이렇게 나왔는지" 감을 잡게) + 나머지는 최근 계약일순으로 채우고, 최종 목록은 항상 최신 계약일 순으로 정렬해 반환한다. 표본이 5건 이하면 그대로 전부 반환. 총 표본 수는 `sampleCount`가 그대로 담당하므로(제한 없음) `samples.size()`가 `sampleCount`보다 작으면 일부만 노출됐다는 뜻. 최종 목록이 최신순으로 정렬되다 보니 최고가/최저가로 뽑힌 표본이 목록 중간에 섞여 "왜 여기 있지?" 혼란을 줄 수 있어, `MarketTransactionSampleResponse.priceHighlight`(`SamplePriceHighlight` enum, `HIGHEST`/`LOWEST`/null)로 선정 사유를 같이 내려준다 — FE가 배지로 표시. 국토부 실거래가 공개시스템이 원래도 공개하는 공공데이터라 별도 개인정보 이슈는 없음. UNAVAILABLE이면 null |
 
 ## 비기능 요구사항 — 대조
 
@@ -144,10 +145,14 @@
    "동일 매물 반복 조회 시 캐싱" ✅ 항목), 이후 risk-analysis용으로 추가된 `MarketSaleComparisonService.compare()`에는
    동일한 애노테이션이 없다. `MarketSaleDataClientImpl.getSalePrice()`(risk-analysis)가 이를 호출할 때마다 캐시 없이
    매번 국토부/카카오 API를 다시 호출한다 — 같은 매물에 대해 전세 비교와 매매 비교가 캐싱 정책상 일관되지 않은 상태다.
-4. **인메모리 지오코딩 캐시가 무제한 누적됨** — `MarketComparisonService.geocodeCache`와
+4. ~~**인메모리 지오코딩 캐시가 무제한 누적됨** — `MarketComparisonService.geocodeCache`와
    `MarketSaleComparisonService.geocodeCache`는 각각 독립된 `ConcurrentHashMap`으로, TTL도 크기 제한도 없어 프로세스가
    떠 있는 동안 계속 커진다(Redis 쪽 최종 결과 캐시는 TTL이 명시적으로 있는 것과 대조적). 장기 운영 시 힙 사용량을
-   모니터링하거나 상한/만료 정책(예: Caffeine으로 교체)을 고려할 필요가 있다.
+   모니터링하거나 상한/만료 정책(예: Caffeine으로 교체)을 고려할 필요가 있다.~~
+   ✅ **(2026-08-21 해결, #272)** 두 서비스의 `geocodeCache` 모두 Caffeine(`maximumSize=10_000`,
+   `expireAfterWrite=6h`)으로 교체 — 지번주소는 사실상 불변값이라 만료는 정확성이 아니라 오래 안 쓰인 항목을
+   회수해 메모리를 아끼는 목적. `Map.computeIfAbsent` → `Cache.get(key, mappingFunction)`으로 캐시-미스 시에만
+   지오코딩 API를 호출하는 원자적 동작은 그대로 유지(테스트로 검증).
 5. **문서가 이미 구현된 `MarketSaleComparisonService` 관련 코드를 전혀 다루지 않음** — 이 문서("실제 구현 현황"
    섹션)는 `MarketComparisonService`(전세 시세비교)만 설명하고, 같은 패키지에 존재하며 risk-analysis가 이미 소비 중인
    `MarketSaleComparisonService`/`MarketSaleComparisonResponse`/`MolitTradeClient`/`MolitTradeClientImpl`/
@@ -158,8 +163,16 @@
    (약 239-267줄)가 매물 상세화면에서 `marketComparison`을 반경/표본수/차이율/기준일/판정불가 사유까지 전부 렌더링하고
    있으며, `frontend/docs/specs/market-data-design.md` 자체도 이미 "FE 작업 완료" 시점으로 갱신되어 있다. 이 문서만
    구버전 서술(남은 이슈 1번)이 남아있는 상태 — 삭제 또는 갱신이 필요하다(자세한 내용은 frontend 쪽 문서 참고).
-7. **목록조회(`GET /properties`)가 페이지의 매물마다 순차적으로 `marketComparisonService.compare()`를 호출함** —
+7. ~~**목록조회(`GET /properties`)가 페이지의 매물마다 순차적으로 `marketComparisonService.compare()`를 호출함** —
    `PropertyService`의 목록조회 스트림(195번째 줄 부근)이 각 매물에 대해 `compare()`를 호출한다. 캐시가 살아있는
    매물은 Redis 히트로 끝나지만, 캐시 미스가 몰린 상황(배포 직후 Redis 초기화, TTL 만료 등)에서는 목록조회 한 번이
    페이지 크기만큼의 국토부/카카오 API 호출을 순차적으로 트리거할 수 있다. 코드 주석이 이 트레이드오프를 이미
-   인지하고 있으나("심각하게 느려지진 않는다"), 실측 근거는 없는 가정이라 트래픽이 늘면 재검토가 필요하다.
+   인지하고 있으나("심각하게 느려지진 않는다"), 실측 근거는 없는 가정이라 트래픽이 늘면 재검토가 필요하다.~~
+   ✅ **(2026-08-21 해결)** 홈 화면이 `size=100`까지 요청하면서 실측으로 문제가 확인됨(캐시 미스 매물마다 Kakao
+   지역코드 조회 1회 + 최근 `lookbackMonths`(기본 6)개월치 MOLIT 순차 호출 + 후보 지번주소마다 Kakao 지오코딩까지
+   전부 목록 크기만큼 증폭). `MarketComparisonService`에 `getCachedOnly(propertyId)`를 추가해 `@Cacheable` 프록시를
+   거치지 않고 `CacheManager`로 `"marketComparison"` 캐시를 직접 읽기만 하도록 하고(계산 트리거 없음),
+   `PropertyService.getMyProperties()`가 `compare()` 대신 이 메서드를 쓰도록 변경. 캐시 미스면
+   `MarketComparisonUnavailableReason.NOT_YET_CALCULATED`로 응답하며, 실제 계산은 등록/수정/상세조회(모두
+   단일 매물 호출이라 증폭되지 않음)에서만 트리거된다. FE는 이미 `AVAILABLE`이 아닌 모든 경우를 "실거래가 연동
+   예정"으로 처리하고 있어 변경이 필요 없었다.

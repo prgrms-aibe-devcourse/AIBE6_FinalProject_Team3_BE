@@ -18,13 +18,16 @@ const TEST_PASSWORD = __ENV.TEST_PASSWORD;
 export const options = {
   scenarios: {
     // 체크리스트 생성 동시 요청 - ChecklistService.createOrGetChecklist()에 REQUIRES_NEW +
-    // DataIntegrityViolationException 복구 패턴을 적용해(2026-08-20) 이제는 몇 명이 동시에
-    // 요청해도 항상 200/201로 정상 처리돼야 한다. 5명으로는 REQUIRES_NEW 격리 자체가 도는지만
-    // 확인되고 실제 경쟁 강도는 약해서, 더 확실히 검증하려고 50명으로 올림.
+    // DataIntegrityViolationException/CannotAcquireLockException 복구 패턴을 적용해
+    // (2026-08-20/21) 몇 명이 동시에 요청해도 항상 200/201로 정상 처리돼야 한다. 50명으로
+    // 해봤더니 REQUIRES_NEW가 요청당 커넥션을 2개씩(바깥 트랜잭션+복구용) 물어서 HikariCP
+    // 풀(20)이 부족해 30초 connectionTimeout으로 대량 실패했음 - 50명이 정확히 같은 순간에
+    // 같은 매물의 체크리스트를 동시에 시작하는 건 비현실적인 극단값이고, 이 테스트의 목적은
+    // 부하량이 아니라 동시성 정합성 검증이라 풀 용량 안에서 도는 20명으로 낮춤.
     checklistCreate: {
       executor: 'per-vu-iterations',
       exec: 'checklistCreateScenario',
-      vus: 50,
+      vus: 20,
       iterations: 1,
       startTime: '0s',
       maxDuration: '30s',

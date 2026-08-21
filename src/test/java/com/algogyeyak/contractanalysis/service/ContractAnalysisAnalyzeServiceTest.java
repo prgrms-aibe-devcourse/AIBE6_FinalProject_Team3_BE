@@ -14,6 +14,7 @@ import com.algogyeyak.contractanalysis.entity.InputType;
 import com.algogyeyak.contractanalysis.repository.ContractRequestRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +30,7 @@ class ContractAnalysisAnalyzeServiceTest {
     private final ContractAnalysisMaskingService maskingService = new ContractAnalysisMaskingService();
     private final ContractRequestRepository contractRequestRepository = mock(ContractRequestRepository.class);
     private final ContractAnalysisAnalyzeService service =
-            new ContractAnalysisAnalyzeService(geminiClient, maskingService, contractRequestRepository);
+            new ContractAnalysisAnalyzeService(geminiClient, maskingService, contractRequestRepository, new ObjectMapper());
 
     private ContractAnalysisAnalyzeResponse analyze(String maskedText, Boolean userConfirmed) {
         return service.analyze(USER_ID, new ContractAnalysisAnalyzeRequest(maskedText, userConfirmed, null, InputType.TEXT));
@@ -50,6 +51,7 @@ class ContractAnalysisAnalyzeServiceTest {
     private String clauseJson(String originalText, boolean riskFlag, String explanation, String question, String suggestedText) {
         return """
                 {"clauses": [{
+                  "title": "제목",
                   "originalText": "%s",
                   "riskFlag": %s,
                   "explanation": "%s",
@@ -286,6 +288,7 @@ class ContractAnalysisAnalyzeServiceTest {
         String json = """
                 {"clauses": [
                   {
+                    "title": "반려동물 사육 금지",
                     "originalText": "제3조 임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다.",
                     "riskFlag": true,
                     "explanation": "반려동물 금지 조항입니다.",
@@ -293,6 +296,7 @@ class ContractAnalysisAnalyzeServiceTest {
                     "suggestedText": "반려동물 사육에 대해 임대인과 별도 협의를 원합니다."
                   },
                   {
+                    "title": "보증금 반환 지연",
                     "originalText": "제5조 보증금은 계약 종료 후 즉시 반환하지 않고 다음 세입자 입주 시 반환한다.",
                     "riskFlag": true,
                     "explanation": "보증금 반환이 지연될 수 있는 조항입니다.",
@@ -316,6 +320,7 @@ class ContractAnalysisAnalyzeServiceTest {
         String json = """
                 {"clauses": [
                   {
+                    "title": "제목1",
                     "originalText": "제3조 임차인은 계약 기간 중 임대인의 동의 없이 반려동물을 키울 수 없다.",
                     "riskFlag": true,
                     "explanation": "설명1",
@@ -323,6 +328,7 @@ class ContractAnalysisAnalyzeServiceTest {
                     "suggestedText": "제안1"
                   },
                   {
+                    "title": "제목2",
                     "originalText": "제5조 보증금은 계약 종료 후 즉시 반환하지 않고 다음 세입자 입주 시 반환한다.",
                     "riskFlag": false,
                     "explanation": "설명2",

@@ -1,5 +1,6 @@
 package com.algogyeyak.user.service;
 
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.dto.NicknameCheckResponse;
@@ -43,9 +44,11 @@ class UserServiceTest {
     private final ChecklistRepository checklistRepository = mock(ChecklistRepository.class);
     private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final S3PresignService s3PresignService = mock(S3PresignService.class);
+    private final UserAuthStatusCacheService userAuthStatusCacheService = mock(UserAuthStatusCacheService.class);
     private final UserService userService = new UserService(
             userRepository, userPreferenceRepository, userSocialAccountRepository, checklistRepository,
-            propertyRepository, s3PresignService, mock(PlatformTransactionManager.class));
+            propertyRepository, s3PresignService, userAuthStatusCacheService,
+            mock(PlatformTransactionManager.class));
 
     private User activeUser(Long id) {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
@@ -203,6 +206,8 @@ class UserServiceTest {
         userService.withdraw(1L);
 
         verify(s3PresignService).deleteReplacedObject("profile-images/1/old.jpg");
+        // 탈퇴 이후에도 user-status 캐시에 남은 이전 상태로 계속 인증되지 않도록 무효화해야 한다.
+        verify(userAuthStatusCacheService).evictAfterCommit(1L);
     }
 
     @Test

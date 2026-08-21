@@ -13,17 +13,18 @@ import com.algogyeyak.property.client.RegionCodeResult;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyType;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 매물과 국토부 매매 실거래가를 비교해 매매 기준가(전세가율 계산용 분모)를 구한다.
@@ -52,7 +53,15 @@ public class MarketSaleComparisonService {
     private final MolitTradeClient molitTradeClient;
     private final MarketComparisonProperties properties;
 
-    private final Map<String, AddressResolutionResult> geocodeCache = new ConcurrentHashMap<>();
+    // MarketComparisonService.geocodeCache와 동일한 이유(2026-08-21 멘토링 피드백)로 Caffeine을
+    // 쓴다 - 이 클래스도 독립된 인메모리 지오코딩 캐시를 갖고 있어 똑같이 무제한 누적 문제가 있었다.
+    private static final long GEOCODE_CACHE_MAX_SIZE = 10_000;
+    private static final Duration GEOCODE_CACHE_EXPIRE_AFTER_WRITE = Duration.ofHours(6);
+
+    private final Cache<String, AddressResolutionResult> geocodeCache = Caffeine.newBuilder()
+            .maximumSize(GEOCODE_CACHE_MAX_SIZE)
+            .expireAfterWrite(GEOCODE_CACHE_EXPIRE_AFTER_WRITE)
+            .build();
 
     public MarketSaleComparisonResponse compare(Property property) {
         PropertyAddress address = property.getAddress();
@@ -134,7 +143,7 @@ public class MarketSaleComparisonService {
             }
             String fullAddress = sggPrefix + " " + sample.getLegalDongName() + " " + sample.getJibunAddress();
 
-            AddressResolutionResult resolution = geocodeCache.computeIfAbsent(
+            AddressResolutionResult resolution = geocodeCache.get(
                     fullAddress, kakaoAddressClient::resolve
             );
 

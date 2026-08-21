@@ -5,6 +5,8 @@ import com.algogyeyak.marketdata.client.RentTransactionSample;
 import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
+import com.algogyeyak.marketdata.dto.MarketTransactionSampleResponse;
+import com.algogyeyak.marketdata.dto.SamplePriceHighlight;
 import com.algogyeyak.marketdata.util.GeoDistanceCalculator;
 import com.algogyeyak.property.client.AddressResolutionResult;
 import com.algogyeyak.property.client.KakaoAddressClient;
@@ -14,19 +16,21 @@ import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 매물과 국토부 실거래가를 비교해 시세 대비 위치를 판정한다.
@@ -47,6 +51,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * TTL은 market-data.comparison.cache-ttl-minutes) - 매물 상세조회를 반복할 때마다 국토부/카카오
  * API를 다시 호출하지 않기 위함. 매물 가격/면적이 바뀌면 결과가 달라지므로,
  * PropertyService.update()가 재계산 직전에 evictCache()로 해당 매물의 캐시를 명시적으로 비운다.
+ * FakeListingSignalService.checkAndSave(Property)도 PRICE_ANOMALY 판정 직전에 한 번 더
+ * evictCache()를 부른다 - PropertyService.update() 경로를 거치지 않고 이 메서드가 호출되는
+ * 경우(재계산 배치 등)까지 캐시가 30분간 낡은 채로 남는 걸 막기 위함(evict는 멱등이라 안전).
  */
 @Slf4j
 @Service
@@ -57,11 +64,26 @@ public class MarketComparisonService {
     private final KakaoAddressClient kakaoAddressClient;
     private final MolitRentClient molitRentClient;
     private final MarketComparisonProperties properties;
+    private final CacheManager cacheManager;
 
     // 지번주소 -> 지오코딩 결과 캐시. 같은 건물에서 여러 건 거래된 경우가 많아 캐시 효과가 크다.
     // (Redis가 아니라 이 빈의 인메모리 필드 - 프로세스 재시작 시 초기화됨. Redis 캐싱 대상은
     // compare()의 최종 결과뿐이다.)
-    private final Map<String, AddressResolutionResult> geocodeCache = new ConcurrentHashMap<>();
+    // 이전에는 크기/만료 제한이 없는 순수 ConcurrentHashMap이라 서버를 오래 띄워둘수록(주소
+    // 종류가 늘어날수록) 메모리를 무한정 점유하는 구조였다(2026-08-21 멘토링 피드백에서 지적).
+    // Caffeine으로 바꿔 상한을 둔다 - 지번주소는 사실상 불변값이라 expireAfterWrite는 정확성이
+    // 아니라 오래 안 쓰인 항목을 회수해 메모리를 아끼는 목적이다.
+    private static final long GEOCODE_CACHE_MAX_SIZE = 10_000;
+    private static final Duration GEOCODE_CACHE_EXPIRE_AFTER_WRITE = Duration.ofHours(6);
+
+    // 필드 타입을 com.github.benmanes.caffeine.cache.Cache로 완전한정 이름으로 쓴다 -
+    // org.springframework.cache.Cache(getCachedOnly()에서 이미 씀)와 단순 이름이 겹쳐서
+    // 같은 파일에서 둘 다 import할 수 없다.
+    private final com.github.benmanes.caffeine.cache.Cache<String, AddressResolutionResult> geocodeCache =
+            Caffeine.newBuilder()
+                    .maximumSize(GEOCODE_CACHE_MAX_SIZE)
+                    .expireAfterWrite(GEOCODE_CACHE_EXPIRE_AFTER_WRITE)
+                    .build();
 
     @Cacheable(cacheNames = "marketComparison", key = "#property.id")
     public MarketComparisonResponse compare(Property property) {
@@ -132,7 +154,8 @@ public class MarketComparisonService {
                 latestDealDate != null ? latestDealDate.toString() : null,
                 radiusUsed,
                 properties.areaErrorRate(),
-                properties.lookbackMonths()
+                properties.lookbackMonths(),
+                buildSampleResponses(used, sggPrefix)
         );
     }
 
@@ -160,9 +183,9 @@ public class MarketComparisonService {
             if (sample.getJibunAddress() == null) {
                 continue;
             }
-            String fullAddress = sggPrefix + " " + sample.getLegalDongName() + " " + sample.getJibunAddress();
+            String fullAddress = buildFullAddress(sample, sggPrefix);
 
-            AddressResolutionResult resolution = geocodeCache.computeIfAbsent(
+            AddressResolutionResult resolution = geocodeCache.get(
                     fullAddress, kakaoAddressClient::resolve
             );
 
@@ -182,6 +205,81 @@ public class MarketComparisonService {
         return result;
     }
 
+    /**
+     * "서울특별시 종로구" + "청운동" + "1-1" -> "서울특별시 종로구 청운동 1-1" 형태의 조합 주소.
+     * geocodeAll()의 지오코딩 대상 주소, 그리고 buildSampleResponses()의 사용자 노출용 주소가
+     * 동일한 조합 규칙을 써야 하므로(동일 표본이면 같은 주소여야 함) 하나로 공유한다.
+     */
+    private String buildFullAddress(RentTransactionSample sample, String sggPrefix) {
+        return sggPrefix + " " + sample.getLegalDongName() + " " + sample.getJibunAddress();
+    }
+
+    // 대단지 등에서 표본(used)이 많으면 사용자 노출용 응답이 무거워지고 다 읽기도 부담스러워서,
+    // 대표성 있는 최대 이 개수만 추린다(사용자 피드백, 2026-08-21).
+    private static final int MAX_EXPOSED_SAMPLES = 5;
+
+    /**
+     * 기준가(중앙값) 산출에 실제로 쓰인 표본(used) 중 대표 표본만 사용자 노출용 응답으로
+     * 변환한다(5차 멘토링 피드백 7-2). 최종 목록은 항상 최신 계약일 순으로 정렬해 최근 거래부터
+     * 보여준다 - 이때 최고가/최저가로 뽑힌 표본이 목록 중간에 섞여 있으면 "왜 여기 있지?" 하고
+     * 혼란스러울 수 있어(사용자 피드백, 2026-08-21), priceHighlight로 선정 사유를 같이 내려준다.
+     */
+    private List<MarketTransactionSampleResponse> buildSampleResponses(List<GeocodedSample> used, String sggPrefix) {
+        RepresentativeSamples representative = pickRepresentativeSamples(used);
+        return representative.samples().stream()
+                .sorted(Comparator.comparing((GeocodedSample g) -> g.sample().getDealDate()).reversed())
+                .map(g -> new MarketTransactionSampleResponse(
+                        g.sample().getBuildingName(),
+                        buildFullAddress(g.sample(), sggPrefix),
+                        g.sample().getDealDate().toString(),
+                        g.sample().getDepositWon(),
+                        g.sample().getAreaSqm(),
+                        g == representative.highest() ? SamplePriceHighlight.HIGHEST
+                                : g == representative.lowest() ? SamplePriceHighlight.LOWEST
+                                : null
+                ))
+                .toList();
+    }
+
+    // pickRepresentativeSamples()가 어떤 표본을 최고가/최저가로 뽑았는지 buildSampleResponses()에
+    // 같이 넘겨주기 위한 내부 홀더. 표본이 5건 이하라 추릴 필요가 없었으면 highest/lowest는 null
+    // (전부 최근순 노출과 동일하게 취급되어 어떤 표본도 강조되지 않는다).
+    private record RepresentativeSamples(List<GeocodedSample> samples, GeocodedSample highest, GeocodedSample lowest) {
+    }
+
+    /**
+     * 표본이 MAX_EXPOSED_SAMPLES(5)건을 넘으면 최고가 1건 + 최저가 1건("이 가격대가 왜 이렇게
+     * 나왔는지" 감을 잡게) + 나머지는 최근 계약일순으로 채워 대표 5건만 고른다. 동일 표본이 여러
+     * 기준에 겹치면(예: 최고가이면서 동시에 최근 거래) 중복 없이 다음 후보로 넘어간다. 표본이
+     * 5건 이하면 추릴 필요가 없어 그대로 전부 반환한다.
+     */
+    private RepresentativeSamples pickRepresentativeSamples(List<GeocodedSample> used) {
+        if (used.size() <= MAX_EXPOSED_SAMPLES) {
+            return new RepresentativeSamples(used, null, null);
+        }
+
+        GeocodedSample highest = used.stream()
+                .max(Comparator.comparingLong(g -> g.sample().getDepositWon()))
+                .orElseThrow();
+        GeocodedSample lowest = used.stream()
+                .min(Comparator.comparingLong(g -> g.sample().getDepositWon()))
+                .filter(g -> g != highest)
+                .orElse(null);
+
+        List<GeocodedSample> selected = new ArrayList<>();
+        selected.add(highest);
+        if (lowest != null) {
+            selected.add(lowest);
+        }
+        used.stream()
+                .sorted(Comparator.comparing((GeocodedSample g) -> g.sample().getDealDate()).reversed())
+                .filter(g -> !selected.contains(g))
+                .limit(MAX_EXPOSED_SAMPLES - selected.size())
+                .forEach(selected::add);
+
+        return new RepresentativeSamples(selected, highest, lowest);
+    }
+
     private List<GeocodedSample> filterByRadius(List<GeocodedSample> geocoded, PropertyAddress address, int radiusMeters) {
         return geocoded.stream()
                 .filter(g -> GeoDistanceCalculator.distanceInMeters(
@@ -198,6 +296,26 @@ public class MarketComparisonService {
     @CacheEvict(cacheNames = "marketComparison", key = "#propertyId")
     public void evictCache(Long propertyId) {
         // 캐시 삭제는 어노테이션이 처리 - 메서드 본문은 필요 없음.
+    }
+
+    /**
+     * 매물 목록 조회(PropertyService.getMyProperties())처럼 여러 매물을 한 번에 보여주는 화면에서
+     * 쓴다 - compare()를 매물 수만큼 그대로 호출하면 국토부/카카오 API가 순차적으로 반복 호출돼
+     * 목록 조회가 심하게 느려진다(최악의 경우 매물 1건당 지오코딩 요청이 여러 번). @Cacheable
+     * 프록시(compare())를 거치지 않고 CacheManager를 직접 읽어서, 이미 캐시된 결과가 있으면 그대로
+     * 반환하고 없으면(첫 조회이거나 TTL 만료) 계산을 트리거하지 않고 NOT_YET_CALCULATED로 응답한다.
+     * 실제 계산은 여전히 등록/수정/상세조회(모두 단일 매물 호출이라 목록 크기에 증폭되지 않음)에서
+     * compare()를 통해 이뤄지고, 그 결과가 이 캐시를 채운다.
+     */
+    public MarketComparisonResponse getCachedOnly(Long propertyId) {
+        Cache cache = cacheManager.getCache("marketComparison");
+        MarketComparisonResponse cached = cache != null ? cache.get(propertyId, MarketComparisonResponse.class) : null;
+        if (cached != null) {
+            return cached;
+        }
+        return MarketComparisonResponse.unavailable(
+                MarketComparisonUnavailableReason.NOT_YET_CALCULATED,
+                "아직 시세 비교가 계산되지 않았어요. 매물 상세 화면에서 확인해보세요.");
     }
 
     private long median(List<Long> sortedValues) {

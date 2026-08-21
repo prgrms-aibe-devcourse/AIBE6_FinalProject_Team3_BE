@@ -4,6 +4,7 @@ import com.algogyeyak.auth.handler.OAuth2AuthenticationFailureHandler;
 import com.algogyeyak.auth.handler.OAuth2AuthenticationSuccessHandler;
 import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtProvider;
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.auth.oauth.CookieAuthorizationRequestRepository;
 import com.algogyeyak.auth.oauth.CustomOAuth2UserService;
 import com.algogyeyak.user.repository.UserRepository;
@@ -24,6 +25,10 @@ class SecurityConfigAllowedOriginsStartupTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration.class))
+            // app.metrics.scrape-token은 이 클래스의 다른 @PostConstruct(validateMetricsScrapeToken)가
+            // 검사하는 별개 속성이다 - 여기서 검증하려는 게 allowed-origins 하나뿐임을 분명히 하기
+            // 위해 유효한 값으로 고정해, 컨텍스트 실패가 오직 allowed-origins 때문임을 보장한다.
+            .withPropertyValues("app.metrics.scrape-token=test-scrape-token")
             .withBean(SecurityConfig.class, () -> new SecurityConfig(
                     mock(CustomOAuth2UserService.class),
                     mock(OAuth2AuthenticationSuccessHandler.class),
@@ -31,7 +36,8 @@ class SecurityConfigAllowedOriginsStartupTest {
                     mock(CookieAuthorizationRequestRepository.class),
                     mock(JwtProvider.class),
                     mock(AccessTokenRevocationService.class),
-                    mock(UserRepository.class)));
+                    mock(UserRepository.class),
+                    mock(UserAuthStatusCacheService.class)));
 
     @Test
     void failsToStartWhenAllowedOriginsIsBlank() {

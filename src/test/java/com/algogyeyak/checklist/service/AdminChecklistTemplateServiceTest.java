@@ -1,5 +1,6 @@
 package com.algogyeyak.checklist.service;
 
+import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageCreateRequest;
@@ -20,11 +21,14 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -427,6 +431,25 @@ class AdminChecklistTemplateServiceTest {
     }
 
     @Test
+    @DisplayName("예시 이미지가 있는 문항을 삭제하면 템플릿 삭제 전에 이미지부터 지운다 (FK 위반 회귀 테스트)")
+    void deleteRemovesAssociatedImagesBeforeDeletingTemplate() {
+        // 회귀 테스트 - template_id는 nullable=false FK라, 이미지가 하나라도 남아있는 채로 템플릿만
+        // 지우면 DataIntegrityViolationException(500)이 났다. deleteByTemplateId()를 먼저 호출해야
+        // FK 위반 없이 삭제가 끝난다.
+        ChecklistItemTemplate existing = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(checklistItemTemplateRepository.count()).thenReturn(2L);
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(existing, template(2L, 2, 2)));
+
+        adminChecklistTemplateService.delete(ACTOR_ID, ACTOR_EMAIL, 1L);
+
+        InOrder order = inOrder(checklistItemTemplateImageRepository, checklistItemTemplateRepository);
+        order.verify(checklistItemTemplateImageRepository).deleteByTemplateId(1L);
+        order.verify(checklistItemTemplateRepository).delete(existing);
+    }
+
+    @Test
     @DisplayName("비활성 문항이 남아있어도 마지막 활성 문항을 삭제하려 하면 ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM 예외가 발생한다")
     void deleteThrowsWhenDeletingTheLastActiveTemplateEvenIfInactiveTemplatesRemain() {
         // count() <= 1 검사는 "테이블 전체가 비어버리는 것"만 막는다 - 비활성 문항이 하나 더
@@ -577,7 +600,9 @@ class AdminChecklistTemplateServiceTest {
 
         assertThat(result.imageUrl()).isEqualTo("https://example.com/2.jpg");
         assertThat(result.displayOrder()).isEqualTo(2);
-        verify(adminAuditLogger).log(any(), any(), any(), any(), any());
+        // 회귀 테스트(2026-08-20) - targetType이 CHECKLIST_TEMPLATE이므로 targetId는 새로 생성된
+        // 이미지 id(20L)가 아니라 소속 템플릿 id(1L)여야 한다.
+        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE), eq(1L), any());
     }
 
     @Test
@@ -627,6 +652,8 @@ class AdminChecklistTemplateServiceTest {
         adminChecklistTemplateService.deleteImage(ACTOR_ID, ACTOR_EMAIL, 1L, 10L);
 
         verify(checklistItemTemplateImageRepository).delete(image);
+        // 회귀 테스트(2026-08-20) - targetId는 삭제된 이미지 id(10L)가 아니라 소속 템플릿 id(1L)여야 한다.
+        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE), eq(1L), any());
     }
 
     @Test

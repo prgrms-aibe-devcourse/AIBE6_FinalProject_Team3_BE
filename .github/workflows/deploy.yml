@@ -69,14 +69,35 @@ jobs:
             # 빨간 X로 뜨고 GitHub이 실패 알림을 보내게 하기 위함(script_stop + set -e).
             echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
             cd ~/algogyeyak/backend
+            # monitoring/metrics_scrape_token은 git 추적 파일인데 이 스크립트가 매 배포마다
+            # 실제 운영 토큰으로 그 자리에서 덮어쓴다(아래) - 커밋은 안 하니 배포 후 EC2의 워킹트리엔
+            # 항상 커밋된 로컬 기본값과 다른 내용이 남아있다. 지금까지는 아무도 이 파일 자체를 고치는
+            # 커밋을 안 만들어서 우연히 git pull이 매번 성공했을 뿐 - 언젠가 이 파일을 건드리는 커밋이
+            # main에 올라가면 그 순간 git pull이 "로컬 변경사항이 덮어써질 것"이라며 실패해 배포
+            # 파이프라인 전체가 막힌다. pull 직전에 이 파일 하나만 커밋된 상태로 되돌려(다음 줄에서
+            # 어차피 다시 덮어쓰므로 내용은 잃을 게 없다) 이 문제 자체가 생길 여지를 없앤다.
+            git checkout -- monitoring/metrics_scrape_token
             git pull origin main
             # docker-compose.prod.yml이 algogyeyak-network를 external: true로 참조하므로,
             # 이 네트워크가 없는 새 인스턴스(재해복구 등)에서도 최초 배포가 실패하지 않도록
             # 없을 때만 생성한다(이미 있으면 아무 것도 하지 않음 - 기존 운영 환경엔 영향 없음).
             docker network inspect algogyeyak-network >/dev/null 2>&1 || docker network create algogyeyak-network
+            # monitoring/metrics_scrape_token은 git엔 로컬 기본값만 커밋돼 있다(Prometheus용
+            # prometheus.yml은 ${VAR} 치환을 지원하지 않아 실제 토큰을 커밋할 수 없음) - 배포마다
+            # .env의 실제 METRICS_SCRAPE_TOKEN 값으로 이 파일을 덮어써서, Prometheus가 백엔드의
+            # 실제 검사 값과 항상 같은 토큰으로 스크래핑하게 맞춘다. .env에 없으면(값 누락) 건드리지
+            # 않고 로컬 기본값을 그대로 둔다 - SecurityConfig가 어차피 빈 토큰은 기동 시점에
+            # 막으므로, 여기서 실패시키기보다 기존 값 유지가 더 안전하다.
+            if grep -q '^METRICS_SCRAPE_TOKEN=.\+' .env; then
+              grep '^METRICS_SCRAPE_TOKEN=' .env | tail -n1 | cut -d= -f2- | tr -d '\r\n' > monitoring/metrics_scrape_token
+            fi
             # 더 이상 EC2에서 직접 빌드하지 않으므로(GHCR에서 pull), 빌드 캐시는 쌓이지 않는다.
             # 다만 latest 태그를 반복 pull하면 이전 버전 레이어가 dangling 이미지로 남으므로
             # 계속 정리해준다 - 실행 중인 컨테이너가 쓰는 이미지/레이어는 지워지지 않아 안전하다.
             docker image prune -af
             docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml pull backend
             docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml up -d
+            # NPM(nginx)은 backend 컨테이너명을 IP로 변환한 결과를 캐싱해두고 요청마다 다시 조회하지
+            # 않는다 - 위 up -d로 backend가 재생성돼 내부 IP가 바뀌어도 NPM은 예전 IP를 계속 써서
+            # 502가 나는 문제가 있었다(2026-08-20). 매 배포마다 리로드시켜 새 IP를 다시 잡게 한다.
+            docker exec npm nginx -s reload

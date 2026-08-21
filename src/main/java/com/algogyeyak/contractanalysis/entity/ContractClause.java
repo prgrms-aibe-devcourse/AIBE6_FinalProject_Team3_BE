@@ -32,6 +32,9 @@ public class ContractClause {
     @JoinColumn(name = "contract_request_id", nullable = false)
     private ContractRequest contractRequest;
 
+    @Column(nullable = false, length = 50)
+    private String title;
+
     @Column(nullable = false)
     private Boolean riskFlag;
 
@@ -45,7 +48,10 @@ public class ContractClause {
     private String suggestedText;
 
     @Builder
-    private ContractClause(Boolean riskFlag, String explanation, String question, String suggestedText) {
+    private ContractClause(
+            String title, Boolean riskFlag, String explanation, String question, String suggestedText
+    ) {
+        this.title = title;
         this.riskFlag = riskFlag;
         this.explanation = explanation;
         this.question = question;

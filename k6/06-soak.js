@@ -3,18 +3,19 @@ import { check, sleep } from 'k6';
 import { BASE_URL } from './common/config.js';
 import { login, extractAuthCookies, authCookieHeader } from './common/auth.js';
 
-// soak(endurance) test: 중간 부하(80명)를 길게(기본 30분) 유지해서, 짧은 테스트로는 안 보이는
+// soak(endurance) test: 중간 부하(150명)를 길게(기본 30분) 유지해서, 짧은 테스트로는 안 보이는
 // 문제 - 커넥션/메모리 누수, 시간이 지날수록 응답시간이 서서히 늘어나는 현상 - 를 찾는다.
-// 30명은 1차 테스트 결과 너무 여유로워서(5번 기준 부담은 100명부터 시작) 80명으로 올림 - 4번
-// (baseline 60명)보다는 높고 5번에서 다운이 확인된 150명보다는 충분히 낮게 유지. 실제로 더 오래
-// 관찰하려면 -e SOAK_DURATION=2h 처럼 오버라이드해서 늘려서 돌리면 됨(기본값은 CI/로컬에서
-// 부담 없이 돌릴 수 있게 30분으로 잡았다).
+// 80명은 Grafana 끈 상태에서 30분 내내 완전히 안정적(힙도 깔끔한 톱니, 누수 없음)으로 확인돼
+// 150으로 올림 - 5번(stress)에서 150명 3분 유지는 이미 안전한 걸로 확인됐으니, 그 수준을 30분
+// 동안 오래 유지해도 괜찮은지 보는 게 자연스러운 다음 단계. 실제로 더 오래 관찰하려면
+// -e SOAK_DURATION=2h 처럼 오버라이드해서 늘려서 돌리면 됨(기본값은 CI/로컬에서 부담 없이
+// 돌릴 수 있게 30분으로 잡았다).
 const SOAK_DURATION = __ENV.SOAK_DURATION || '30m';
 
 export const options = {
   stages: [
-    { duration: '1m', target: 80 },
-    { duration: SOAK_DURATION, target: 80 },
+    { duration: '1m', target: 150 },
+    { duration: SOAK_DURATION, target: 150 },
     { duration: '1m', target: 0 },
   ],
   thresholds: {

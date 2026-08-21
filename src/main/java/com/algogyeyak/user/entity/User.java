@@ -139,6 +139,14 @@ public class User {
     }
 
     // 관리자 페이지 전용. 탈퇴한 사용자는 이미 익명화되어 되돌릴 수 없는 상태라 정지/활성화 대상에서 제외한다.
+    //
+    // @deprecated 실제 프로덕션 코드는 이 메서드를 더 이상 호출하지 않는다 - AdminUserService가
+    // UserRepository.updateStatusIfNotWithdrawn()(조건부 UPDATE)을 대신 쓴다. 이 메서드가 대상을
+    // 읽은 시점엔 활성 상태였지만 실제 커밋 시점엔 이미 본인 탈퇴가 반영된 레이스에서, JPA
+    // dirty-checking이 그 탈퇴를 무시하고 status를 덮어써버리는 걸 막기 위함(2026-08-14 수정).
+    // 지금은 테스트 픽스처 빌더로만 남아있다 - 새 프로덕션 코드에서 이 메서드를 다시 호출하면 같은
+    // TOCTOU 레이스가 재현된다(2026-08-20 전수조사에서 지적).
+    @Deprecated
     public void suspend() {
         if (isWithdrawn()) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "탈퇴한 사용자는 정지할 수 없습니다.");
@@ -146,6 +154,8 @@ public class User {
         this.status = UserStatus.SUSPENDED;
     }
 
+    // @deprecated suspend()와 동일한 이유 - UserRepository.updateStatusIfNotWithdrawn()을 대신 쓸 것.
+    @Deprecated
     public void activate() {
         if (isWithdrawn()) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_STATUS_TRANSITION, "탈퇴한 사용자는 활성화할 수 없습니다.");
@@ -157,6 +167,10 @@ public class User {
     // suspend()/activate()와 동일한 이유로 탈퇴한 사용자는 대상에서 제외한다 - 탈퇴 처리로 이미
     // 익명화(닉네임/이메일 대체)된 계정이라 권한을 바꿔봐야 그 계정으로 로그인할 방법 자체가 없고,
     // 형제 메서드(suspend/activate)만 이 가드가 있고 changeRole()만 빠져 있던 불일치였다.
+    //
+    // @deprecated suspend()/activate()와 동일한 이유(TOCTOU) - UserRepository.updateRoleIfNotWithdrawn()을
+    // 대신 쓸 것. 지금은 테스트 픽스처 빌더로만 남아있다.
+    @Deprecated
     public void changeRole(Role role) {
         if (isWithdrawn()) {
             throw new BusinessException(ErrorCode.ADMIN_INVALID_ROLE_TRANSITION, "탈퇴한 사용자는 권한을 변경할 수 없습니다.");

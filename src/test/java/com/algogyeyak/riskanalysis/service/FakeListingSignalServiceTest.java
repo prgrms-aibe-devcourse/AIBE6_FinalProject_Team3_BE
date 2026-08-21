@@ -2,6 +2,7 @@ package com.algogyeyak.riskanalysis.service;
 
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
@@ -42,11 +43,12 @@ class FakeListingSignalServiceTest {
     private final PropertyRiskCheckRepository riskCheckRepository = mock(PropertyRiskCheckRepository.class);
     private final PropertyRiskRepository riskRepository = mock(PropertyRiskRepository.class);
     private final MarketDataClient marketDataClient = mock(MarketDataClient.class);
+    private final MarketComparisonService marketComparisonService = mock(MarketComparisonService.class);
     private final DepositSafetyCheckService depositSafetyCheckService = mock(DepositSafetyCheckService.class);
     private final RiskPolicyConfig policyConfig = new RiskPolicyConfig();
     private final FakeListingSignalService service = new FakeListingSignalService(
-            List.of(mock(SignalDetector.class)), marketDataClient, riskCheckRepository, riskRepository,
-            propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
+            List.of(mock(SignalDetector.class)), marketDataClient, marketComparisonService, riskCheckRepository,
+            riskRepository, propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
 
     private Property property(Long id, Long ownerId) {
         Property property = Property.builder()
@@ -165,7 +167,7 @@ class FakeListingSignalServiceTest {
                 com.algogyeyak.riskanalysis.dto.SignalCheckResult.undeterminable(com.algogyeyak.riskanalysis.enums.RiskCheckReason.NO_COMPARABLE_TRANSACTION));
 
         FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
-                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                List.of(detector), marketDataClient, marketComparisonService, riskCheckRepository, riskRepository,
                 propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
 
         // 첫 조회 시점엔 아직 아무도 없다고 나오지만(레이스), saveAndFlush 시도 시 다른 트랜잭션이
@@ -197,7 +199,7 @@ class FakeListingSignalServiceTest {
                 com.algogyeyak.riskanalysis.dto.SignalCheckResult.success("동일 주소로 등록된 다른 매물이 있어요"));
 
         FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
-                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                List.of(detector), marketDataClient, marketComparisonService, riskCheckRepository, riskRepository,
                 propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
 
         when(riskCheckRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.DUPLICATE_LISTING))
@@ -225,7 +227,7 @@ class FakeListingSignalServiceTest {
                 com.algogyeyak.riskanalysis.dto.SignalCheckResult.undeterminable(com.algogyeyak.riskanalysis.enums.RiskCheckReason.NO_COMPARABLE_TRANSACTION));
 
         FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
-                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                List.of(detector), marketDataClient, marketComparisonService, riskCheckRepository, riskRepository,
                 propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
 
         PropertyRiskCheck existing = mock(PropertyRiskCheck.class);
@@ -252,7 +254,7 @@ class FakeListingSignalServiceTest {
                 com.algogyeyak.riskanalysis.dto.SignalCheckResult.success("동일 주소로 등록된 다른 매물이 있어요"));
 
         FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
-                List.of(detector), marketDataClient, riskCheckRepository, riskRepository,
+                List.of(detector), marketDataClient, marketComparisonService, riskCheckRepository, riskRepository,
                 propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
 
         when(riskCheckRepository.findByPropertyIdAndSignalType(10L, RiskSignalType.DUPLICATE_LISTING))
@@ -333,7 +335,7 @@ class FakeListingSignalServiceTest {
                 com.algogyeyak.riskanalysis.dto.SignalCheckResult.success(null));
 
         FakeListingSignalService serviceWithDetectors = new FakeListingSignalService(
-                List.of(foundDetector, cleanDetector), marketDataClient, riskCheckRepository, riskRepository,
+                List.of(foundDetector, cleanDetector), marketDataClient, marketComparisonService, riskCheckRepository, riskRepository,
                 propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
 
         RiskAnalysisSummaryResponse result = serviceWithDetectors.checkAndSummarize(1L, 10L);
@@ -358,7 +360,7 @@ class FakeListingSignalServiceTest {
                 com.algogyeyak.riskanalysis.dto.SignalCheckResult.success(null));
 
         FakeListingSignalService serviceWithDetector = new FakeListingSignalService(
-                List.of(cleanDetector), marketDataClient, riskCheckRepository, riskRepository,
+                List.of(cleanDetector), marketDataClient, marketComparisonService, riskCheckRepository, riskRepository,
                 propertyRepository, depositSafetyCheckService, policyConfig, mock(PlatformTransactionManager.class));
 
         RiskAnalysisSummaryResponse result = serviceWithDetector.checkAndSummarize(1L, 10L);

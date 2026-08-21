@@ -258,11 +258,11 @@ class ChecklistControllerTest {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         ChecklistOverviewResponse started = new ChecklistOverviewResponse(
                 10L, 100L, "강남 오피스텔", "서울특별시 강남구 테헤란로 123", null, "OFFICETEL", "JEONSE", ChecklistStatus.IN_PROGRESS,
-                java.time.LocalDateTime.of(2026, 7, 30, 10, 0), 75, 1
+                java.time.LocalDateTime.of(2026, 7, 30, 10, 0), 75, 1, 3, 2
         );
         ChecklistOverviewResponse notStarted = new ChecklistOverviewResponse(
                 20L, null, "마포 다세대", "서울특별시 마포구 월드컵로 1", null, "MULTI_FAMILY", "MONTHLY_RENT", ChecklistStatus.NOT_STARTED,
-                java.time.LocalDateTime.of(2026, 6, 1, 12, 0), null, null
+                java.time.LocalDateTime.of(2026, 6, 1, 12, 0), null, null, null, null
         );
         when(checklistService.listMyChecklists(1L, org.springframework.data.domain.PageRequest.of(0, 20)))
                 .thenReturn(new com.algogyeyak.global.response.PageResponse<>(
@@ -278,11 +278,15 @@ class ChecklistControllerTest {
                 .andExpect(jsonPath("$.data.content[0].status").value("IN_PROGRESS"))
                 .andExpect(jsonPath("$.data.content[0].progressPercent").value(75))
                 .andExpect(jsonPath("$.data.content[0].cautionCount").value(1))
+                .andExpect(jsonPath("$.data.content[0].generalMissingCount").value(3))
+                .andExpect(jsonPath("$.data.content[0].requiredMissingCount").value(2))
                 .andExpect(jsonPath("$.data.content[1].propertyId").value(20))
                 .andExpect(jsonPath("$.data.content[1].checklistId").doesNotExist())
                 .andExpect(jsonPath("$.data.content[1].status").value("NOT_STARTED"))
                 .andExpect(jsonPath("$.data.content[1].progressPercent").doesNotExist())
                 .andExpect(jsonPath("$.data.content[1].cautionCount").doesNotExist())
+                .andExpect(jsonPath("$.data.content[1].generalMissingCount").doesNotExist())
+                .andExpect(jsonPath("$.data.content[1].requiredMissingCount").doesNotExist())
                 .andExpect(jsonPath("$.data.page").value(0))
                 .andExpect(jsonPath("$.data.size").value(20))
                 .andExpect(jsonPath("$.data.totalElements").value(2))

@@ -42,6 +42,7 @@ class AuthControllerDevLoginStartupTest {
                 .withPropertyValues(
                         "app.dev-login.enabled=true",
                         "app.dev-login.email=admin@algogyeyak.local",
+                        "app.dev-login.user-email=tester@algogyeyak.local",
                         "app.dev-login.secret=")
                 .run(context -> assertThat(context).hasFailed());
     }
@@ -52,6 +53,7 @@ class AuthControllerDevLoginStartupTest {
                 .withPropertyValues(
                         "app.dev-login.enabled=true",
                         "app.dev-login.email=admin@algogyeyak.local",
+                        "app.dev-login.user-email=tester@algogyeyak.local",
                         "app.dev-login.secret=some-secret")
                 .run(context -> assertThat(context).hasNotFailed());
     }
@@ -62,6 +64,7 @@ class AuthControllerDevLoginStartupTest {
                 .withPropertyValues(
                         "app.dev-login.enabled=false",
                         "app.dev-login.email=admin@algogyeyak.local",
+                        "app.dev-login.user-email=tester@algogyeyak.local",
                         "app.dev-login.secret=")
                 .run(context -> assertThat(context).hasNotFailed());
     }

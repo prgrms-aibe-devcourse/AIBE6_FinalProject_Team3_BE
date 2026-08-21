@@ -3,8 +3,12 @@ package com.algogyeyak.global.config;
 import com.algogyeyak.marketdata.config.MarketComparisonProperties;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CachingConfigurer;
 import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.cache.interceptor.CacheErrorHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
@@ -28,11 +32,18 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
  * marketComparison 캐시(TTL)는 MarketComparisonProperties.cacheTtlMinutes()를 그대로
  * 쓴다 - market-data 도메인의 다른 정책값과 마찬가지로 재배포 없이 튜닝 가능하게 두기 위해
  * 하드코딩하지 않았다.
+ *
+ * CacheErrorHandler로 fail-open을 명시한다: 이 캐시(marketComparison)는 어디까지나
+ * 성능 최적화용이라 Redis 장애 시에도 서비스가 죽으면 안 된다 - 캐시 조회/저장/삭제가 실패하면
+ * 경고 로그만 남기고 호출부는 캐시가 비어있던 것처럼(=원본 로직으로) 계속 진행한다.
+ * (참고: AccessTokenRevocationService의 토큰 블랙리스트 캐시는 보안 목적이라 반대로
+ * fail-closed를 의도적으로 유지한다 - 그 클래스의 javadoc 참고.)
  */
 @Configuration
 @EnableCaching
 @RequiredArgsConstructor
-public class RedisCacheConfig {
+@Slf4j
+public class RedisCacheConfig implements CachingConfigurer {
 
     private final MarketComparisonProperties marketComparisonProperties;
 
@@ -54,5 +65,33 @@ public class RedisCacheConfig {
                         RedisSerializationContext.SerializationPair.fromSerializer(new GenericJackson2JsonRedisSerializer())
                 )
                 .disableCachingNullValues();
+    }
+
+    @Override
+    public CacheErrorHandler errorHandler() {
+        return new CacheErrorHandler() {
+            @Override
+            public void handleCacheGetError(RuntimeException exception, Cache cache, Object key) {
+                log.warn("캐시 조회 실패 - fail-open으로 원본 로직 진행 (cache={}, key={})",
+                        cache.getName(), key, exception);
+            }
+
+            @Override
+            public void handleCachePutError(RuntimeException exception, Cache cache, Object key, Object value) {
+                log.warn("캐시 저장 실패 - fail-open으로 무시 (cache={}, key={})",
+                        cache.getName(), key, exception);
+            }
+
+            @Override
+            public void handleCacheEvictError(RuntimeException exception, Cache cache, Object key) {
+                log.warn("캐시 삭제 실패 - fail-open으로 무시 (cache={}, key={})",
+                        cache.getName(), key, exception);
+            }
+
+            @Override
+            public void handleCacheClearError(RuntimeException exception, Cache cache) {
+                log.warn("캐시 전체 삭제 실패 - fail-open으로 무시 (cache={})", cache.getName(), exception);
+            }
+        };
     }
 }

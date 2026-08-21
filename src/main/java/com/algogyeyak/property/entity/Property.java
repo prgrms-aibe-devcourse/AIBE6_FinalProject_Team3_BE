@@ -10,6 +10,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
@@ -31,7 +32,19 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
  * (User 엔티티가 생기면 연관관계로 바꿀지 팀과 논의 필요).
  */
 @Entity
-@Table(name = "property")
+@Table(name = "property", indexes = {
+        // 관리자 통계 대시보드의 기간별 매물 등록 조회(PropertyRepository.countByCreatedAtBetween/
+        // findCreatedAtBetween, AdminStatsService 참고)가 이 컬럼으로 조회한다 - User/PropertyReport는
+        // 같은 이유로 이미 created_at 인덱스가 있는데 Property만 빠져 있어 이 조회만 풀스캔이었다
+        // (2026-08-20 멘토링 피드백에서 지적).
+        @Index(name = "idx_property_created_at", columnList = "created_at"),
+        // PropertyRepository.search()가 매 호출마다 user_id + status로 필터링하는데(마이페이지
+        // 매물 목록, hasSignal 필터 등 대부분의 조회 경로가 이 메서드를 거친다) 그동안 이 두
+        // 컬럼을 커버하는 인덱스가 없어 매물 수가 늘어날수록 풀스캔 비용이 커지는 구조였다
+        // (2026-08-21 멘토링 피드백에서 지적). WHERE 절 등장 순서(userId 먼저, status 다음)와
+        // 맞춰 컬럼 순서를 둔다.
+        @Index(name = "idx_property_user_status", columnList = "user_id, status")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)

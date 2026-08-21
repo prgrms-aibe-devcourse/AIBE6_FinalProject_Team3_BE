@@ -200,7 +200,10 @@ public class PropertyService {
                     return PropertyListResponse.from(
                             property,
                             checklistProgressByPropertyId.get(propertyId),
-                            marketComparisonService.compare(property),
+                            // 목록 조회는 캐시된 시세비교 결과만 읽는다(compare() 직접 호출 금지) - 매물
+                            // 수만큼 국토부/카카오 API를 순차 호출하는 걸 막기 위함. 캐시가 없으면
+                            // NOT_YET_CALCULATED로 응답하고, 실제 계산은 등록/수정/상세조회에서 이뤄진다.
+                            marketComparisonService.getCachedOnly(propertyId),
                             riskSummary != null ? riskSummary.checkSignalCount() : null,
                             riskSummary != null ? riskSummary.signalSummary() : null,
                             riskSummary != null ? riskSummary.jeonseRatio() : null,
