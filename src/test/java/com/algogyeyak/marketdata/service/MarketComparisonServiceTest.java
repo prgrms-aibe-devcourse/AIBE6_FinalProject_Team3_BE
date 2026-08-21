@@ -274,6 +274,44 @@ class MarketComparisonServiceTest {
         assertThat(response.samples().get(0).areaSqm()).isEqualTo(25.0);
     }
 
+    // 표본이 대표 노출 상한(5건)을 넘으면 최고가/최저가/최근순으로 추려야 한다(사용자 피드백,
+    // 2026-08-21) - 다 보여주면 응답이 무거워지고 사용자도 다 읽기 부담스럽다는 이유.
+    @Test
+    void 표본이_5건을_넘으면_최고가_최저가_최근순으로_5건만_담는다() {
+        init();
+        Property property = jeonseOfficetel(200_000_000L, 25.0);
+        when(kakaoRegionCodeClient.resolve(PROPERTY_LAT, PROPERTY_LNG)).thenReturn(resolvedRegion());
+
+        RentTransactionSample lowest = txSample("1-1", LocalDate.of(2026, 1, 1), 150_000_000L);
+        RentTransactionSample highest = txSample("1-2", LocalDate.of(2026, 2, 1), 300_000_000L);
+        RentTransactionSample middleExcluded = txSample("1-3", LocalDate.of(2026, 3, 1), 200_000_000L);
+        RentTransactionSample recent1 = txSample("1-4", LocalDate.of(2026, 4, 1), 210_000_000L);
+        RentTransactionSample recent2 = txSample("1-5", LocalDate.of(2026, 5, 1), 190_000_000L);
+        RentTransactionSample mostRecent = txSample("1-6", LocalDate.of(2026, 6, 1), 205_000_000L);
+        stubFirstMonthOnly(List.of(lowest, highest, middleExcluded, recent1, recent2, mostRecent));
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAt(PROPERTY_LAT, PROPERTY_LNG));
+
+        MarketComparisonResponse response = service.compare(property);
+
+        // 총 표본 수(sampleCount)는 6건 그대로지만, 노출용 samples는 대표 5건으로 추려진다.
+        assertThat(response.sampleCount()).isEqualTo(6);
+        assertThat(response.samples()).hasSize(5);
+        // 최근순으로 채워지는 3건(mostRecent/recent2/recent1) + 최고가(highest) + 최저가(lowest) -
+        // middleExcluded(200M, 3월)만 어느 기준에도 안 걸려 빠진다. 최종 출력은 항상 최신 계약일순.
+        assertThat(response.samples()).extracting("dealDate")
+                .containsExactly("2026-06-01", "2026-05-01", "2026-04-01", "2026-02-01", "2026-01-01");
+        assertThat(response.samples()).extracting("depositWon")
+                .containsExactly(205_000_000L, 190_000_000L, 210_000_000L, 300_000_000L, 150_000_000L);
+    }
+
+    private RentTransactionSample txSample(String jibun, LocalDate dealDate, long depositWon) {
+        return RentTransactionSample.builder()
+                .propertyType(PropertyType.OFFICETEL).buildingName("테스트오피스텔")
+                .jibunAddress(jibun).legalDongCode(LAWD_CD).legalDongName("청운동")
+                .dealDate(dealDate).depositWon(depositWon).monthlyRentWon(0L).areaSqm(25.0)
+                .build();
+    }
+
     @Test
     void _300m_이내가_부족해_600m로_확장하는_경우를_검증한다() {
         init();

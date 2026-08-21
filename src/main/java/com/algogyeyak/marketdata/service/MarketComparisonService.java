@@ -199,12 +199,16 @@ public class MarketComparisonService {
         return sggPrefix + " " + sample.getLegalDongName() + " " + sample.getJibunAddress();
     }
 
+    // 대단지 등에서 표본(used)이 많으면 사용자 노출용 응답이 무거워지고 다 읽기도 부담스러워서,
+    // 대표성 있는 최대 이 개수만 추린다(사용자 피드백, 2026-08-21).
+    private static final int MAX_EXPOSED_SAMPLES = 5;
+
     /**
-     * 기준가(중앙값) 산출에 실제로 쓰인 표본(used)을 사용자 노출용 응답으로 변환한다(5차 멘토링
-     * 피드백 7-2). 최신 계약일 순으로 정렬해 최근 거래부터 보여준다.
+     * 기준가(중앙값) 산출에 실제로 쓰인 표본(used) 중 대표 표본만 사용자 노출용 응답으로
+     * 변환한다(5차 멘토링 피드백 7-2). 최신 계약일 순으로 정렬해 최근 거래부터 보여준다.
      */
     private List<MarketTransactionSampleResponse> buildSampleResponses(List<GeocodedSample> used, String sggPrefix) {
-        return used.stream()
+        return pickRepresentativeSamples(used).stream()
                 .sorted(Comparator.comparing((GeocodedSample g) -> g.sample().getDealDate()).reversed())
                 .map(g -> new MarketTransactionSampleResponse(
                         g.sample().getBuildingName(),
@@ -214,6 +218,34 @@ public class MarketComparisonService {
                         g.sample().getAreaSqm()
                 ))
                 .toList();
+    }
+
+    /**
+     * 표본이 MAX_EXPOSED_SAMPLES(5)건을 넘으면 최고가 1건 + 최저가 1건("이 가격대가 왜 이렇게
+     * 나왔는지" 감을 잡게) + 나머지는 최근 계약일순으로 채워 대표 5건만 고른다. 동일 표본이 여러
+     * 기준에 겹치면(예: 최고가이면서 동시에 최근 거래) 중복 없이 다음 후보로 넘어간다. 표본이
+     * 5건 이하면 추릴 필요가 없어 그대로 전부 반환한다.
+     */
+    private List<GeocodedSample> pickRepresentativeSamples(List<GeocodedSample> used) {
+        if (used.size() <= MAX_EXPOSED_SAMPLES) {
+            return used;
+        }
+
+        List<GeocodedSample> selected = new ArrayList<>();
+        used.stream()
+                .max(Comparator.comparingLong(g -> g.sample().getDepositWon()))
+                .ifPresent(selected::add);
+        used.stream()
+                .min(Comparator.comparingLong(g -> g.sample().getDepositWon()))
+                .filter(g -> !selected.contains(g))
+                .ifPresent(selected::add);
+        used.stream()
+                .sorted(Comparator.comparing((GeocodedSample g) -> g.sample().getDealDate()).reversed())
+                .filter(g -> !selected.contains(g))
+                .limit(MAX_EXPOSED_SAMPLES - selected.size())
+                .forEach(selected::add);
+
+        return selected;
     }
 
     private List<GeocodedSample> filterByRadius(List<GeocodedSample> geocoded, PropertyAddress address, int radiusMeters) {
