@@ -8,6 +8,12 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.pagination.PageableUtils;
 import com.algogyeyak.global.response.PageResponse;
+import com.algogyeyak.property.entity.Property;
+import com.algogyeyak.property.repository.PropertyRepository;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -20,9 +26,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class ContractAnalysisHistoryService {
 
     private final ContractRequestRepository contractRequestRepository;
+    private final PropertyRepository propertyRepository;
 
-    public ContractAnalysisHistoryService(ContractRequestRepository contractRequestRepository) {
+    public ContractAnalysisHistoryService(
+            ContractRequestRepository contractRequestRepository, PropertyRepository propertyRepository
+    ) {
         this.contractRequestRepository = contractRequestRepository;
+        this.propertyRepository = propertyRepository;
     }
 
     // 항상 최신순 고정이라(ChecklistService.listMyChecklists와 동일한 이유) 클라이언트가 보낸
@@ -37,7 +47,24 @@ public class ContractAnalysisHistoryService {
 
         Page<ContractRequest> page = contractRequestRepository.findAllByUserId(userId, fixedSortPageable);
 
-        return PageResponse.from(page, ContractHistoryResponse::from);
+        // 페이지당 최대 매물 수만큼만 IN 조회 1번으로 묶어 가져온다(항목마다 매물을 따로 조회하는
+        // N+1을 피하기 위함) - propertyId가 null인 이력(매물과 연결되지 않은 분석)도 있을 수 있어
+        // null은 걸러낸다. findAllById는 이미 삭제(status=DELETED)된 매물도 행 자체는 남아있어 함께
+        // 반환하므로, 삭제된 매물이어도 이력 화면에서는 매물명이 계속 표시된다.
+        List<Long> propertyIds = page.getContent().stream()
+                .map(ContractRequest::getPropertyId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, String> propertyTitleById = propertyRepository.findAllById(propertyIds).stream()
+                .collect(Collectors.toMap(Property::getId, Property::getTitle));
+
+        return PageResponse.from(
+                page,
+                contractRequest -> ContractHistoryResponse.from(
+                        contractRequest, propertyTitleById.get(contractRequest.getPropertyId())
+                )
+        );
     }
 
     // clauses는 LAZY 연관관계라 트랜잭션(읽기 전용) 안에서 DTO로 다 매핑해야 컨트롤러로
@@ -50,6 +77,10 @@ public class ContractAnalysisHistoryService {
             throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_FORBIDDEN, "본인의 계약 분석 이력만 조회할 수 있습니다.");
         }
 
-        return ContractHistoryDetailResponse.from(contractRequest);
+        String propertyTitle = contractRequest.getPropertyId() != null
+                ? propertyRepository.findById(contractRequest.getPropertyId()).map(Property::getTitle).orElse(null)
+                : null;
+
+        return ContractHistoryDetailResponse.from(contractRequest, propertyTitle);
     }
 }
