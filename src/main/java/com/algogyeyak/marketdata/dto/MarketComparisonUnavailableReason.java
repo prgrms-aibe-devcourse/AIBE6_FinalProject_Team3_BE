@@ -13,5 +13,10 @@ public enum MarketComparisonUnavailableReason {
     TRANSACTION_TYPE_UNSUPPORTED, // 월세 등 시세 비교 대상이 아닌 거래유형
     PROPERTY_TYPE_UNSUPPORTED,    // 단독/다가구 등 실거래 위치 비공개로 비교 불가한 매물유형
     ADDRESS_INFO_MISSING,         // 좌표 없음, 지역코드 조회 실패 등 주소 관련 정보 부족
-    INSUFFICIENT_SAMPLE           // 반경 확장 후에도 비교 가능한 실거래 표본이 부족함
+    INSUFFICIENT_SAMPLE,          // 반경 확장 후에도 비교 가능한 실거래 표본이 부족함
+    // (2026-08-20 신규) 매물 목록 조회는 캐시된 결과만 읽고 계산을 트리거하지 않는다
+    // (MarketComparisonService.getCachedOnly() 참고) - 아직 한 번도 계산된 적 없거나 캐시가
+    // 만료된 매물이면 이 사유로 응답한다. compare()가 직접 만드는 사유가 아니라 실제 계산
+    // 실패와는 무관하다 - 상세조회/등록/수정에서 곧 채워질 예정이라는 뜻.
+    NOT_YET_CALCULATED
 }

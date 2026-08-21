@@ -145,7 +145,7 @@
 ## 남은 이슈 / 확인 필요 총정리
 
 1. 매매(SALE) 거래유형과 `askingPrice`가 아예 없음 — 전월세만 지원. 서비스 타겟에 맞춘 의도적 축소인지 확인
-2. ~~국토부 실거래가 연동 자체가 미구현~~ → `market-data` 도메인으로 해소됨(`market-data-design.md` 참고). 남은 건 매물 조회마다 실시간 재계산하는 구조라 트래픽 늘면 캐싱/저장 전환이 필요할 수 있다는 점
+2. ~~국토부 실거래가 연동 자체가 미구현~~ → `market-data` 도메인으로 해소됨(`market-data-design.md` 참고). ~~남은 건 매물 조회마다 실시간 재계산하는 구조라 트래픽 늘면 캐싱/저장 전환이 필요할 수 있다는 점~~ ✅ **(2026-08-21 목록 조회분 해결)** 목록 조회(`GET /properties`)가 매물마다 `MarketComparisonService.compare(property)`를 순차 호출해 국토부/카카오 API를 목록 크기(최대 100건)만큼 증폭시키던 문제를 발견 — `PropertyService.getMyProperties()`가 이제 `MarketComparisonService.getCachedOnly(propertyId)`로 Redis 캐시만 읽고 계산을 트리거하지 않는다(캐시 미스 시 `MarketComparisonUnavailableReason.NOT_YET_CALCULATED`로 응답, FE는 원래도 `AVAILABLE`이 아니면 "실거래가 연동 예정"을 표시하므로 FE 변경 불필요). 실제 계산(`compare()`)은 여전히 등록/수정/상세조회(모두 단일 매물 호출)에서만 트리거됨.
 3. ~~risk-analysis(위험 신호·안전성 정보) 도메인 자체는 별도로 존재하지만, 매물 상세 응답과는 아직 연동되어 있지 않음~~ → **해소됨.** 목록은 `PropertyListResponse`에 `checkSignalCount`/`signalSummary`/`jeonseRatio`를 추가하는 방식으로, 상세는 FE가 `GET /risk-signals`·`GET /deposit-safety`를 별도로 호출하는 방식으로 각각 연동됨(BE `PropertyDetailResponse` 자체엔 필드가 없지만 실제 화면엔 정상 표시됨 — 위 상세조회 표 참고)
 4. ~~매물 상세 응답에 임장 체크리스트 생성 여부가 포함되지 않음~~ → `checklistCreated` 필드 추가로 해소됨
 5. ~~매물 상세 응답에 누적 신고 여부가 포함되지 않음~~ → `reported` 필드 추가로 해소됨(단, 아래 6번의 자가 플래그 구조라 "본인이 신고했는지" 기준)

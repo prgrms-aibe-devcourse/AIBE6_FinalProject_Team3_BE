@@ -16,6 +16,8 @@ import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -60,6 +62,7 @@ public class MarketComparisonService {
     private final KakaoAddressClient kakaoAddressClient;
     private final MolitRentClient molitRentClient;
     private final MarketComparisonProperties properties;
+    private final CacheManager cacheManager;
 
     // 지번주소 -> 지오코딩 결과 캐시. 같은 건물에서 여러 건 거래된 경우가 많아 캐시 효과가 크다.
     // (Redis가 아니라 이 빈의 인메모리 필드 - 프로세스 재시작 시 초기화됨. Redis 캐싱 대상은
@@ -201,6 +204,26 @@ public class MarketComparisonService {
     @CacheEvict(cacheNames = "marketComparison", key = "#propertyId")
     public void evictCache(Long propertyId) {
         // 캐시 삭제는 어노테이션이 처리 - 메서드 본문은 필요 없음.
+    }
+
+    /**
+     * 매물 목록 조회(PropertyService.getMyProperties())처럼 여러 매물을 한 번에 보여주는 화면에서
+     * 쓴다 - compare()를 매물 수만큼 그대로 호출하면 국토부/카카오 API가 순차적으로 반복 호출돼
+     * 목록 조회가 심하게 느려진다(최악의 경우 매물 1건당 지오코딩 요청이 여러 번). @Cacheable
+     * 프록시(compare())를 거치지 않고 CacheManager를 직접 읽어서, 이미 캐시된 결과가 있으면 그대로
+     * 반환하고 없으면(첫 조회이거나 TTL 만료) 계산을 트리거하지 않고 NOT_YET_CALCULATED로 응답한다.
+     * 실제 계산은 여전히 등록/수정/상세조회(모두 단일 매물 호출이라 목록 크기에 증폭되지 않음)에서
+     * compare()를 통해 이뤄지고, 그 결과가 이 캐시를 채운다.
+     */
+    public MarketComparisonResponse getCachedOnly(Long propertyId) {
+        Cache cache = cacheManager.getCache("marketComparison");
+        MarketComparisonResponse cached = cache != null ? cache.get(propertyId, MarketComparisonResponse.class) : null;
+        if (cached != null) {
+            return cached;
+        }
+        return MarketComparisonResponse.unavailable(
+                MarketComparisonUnavailableReason.NOT_YET_CALCULATED,
+                "아직 시세 비교가 계산되지 않았어요. 매물 상세 화면에서 확인해보세요.");
     }
 
     private long median(List<Long> sortedValues) {
