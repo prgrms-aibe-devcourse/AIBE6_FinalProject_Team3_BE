@@ -114,6 +114,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -148,6 +149,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -179,6 +181,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -206,6 +209,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "존재하지 않는 주소",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -228,6 +232,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -252,6 +257,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 종로구 충신동 1",
+                null,
                 PropertyType.DETACHED_HOUSE,
                 TransactionType.JEONSE,
                 200_000_000L,
@@ -284,6 +290,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 종로구 청운동 1",
+                null,
                 PropertyType.MULTI_FAMILY,
                 TransactionType.JEONSE,
                 200_000_000L,
@@ -319,6 +326,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -340,6 +348,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -364,6 +373,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -385,6 +395,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.MONTHLY_RENT,
                 5_000_000L,
@@ -404,6 +415,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -964,7 +976,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, "수정된 설명", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, "수정된 설명", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -996,7 +1008,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("", 35_000_000L, null, 25.0, null, "수정된 설명", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("", null, 35_000_000L, null, 25.0, null, "수정된 설명", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -1021,7 +1033,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 30_000_000L, null, 23.5, 200_000L, "역세권 오피스텔", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 30_000_000L, null, 23.5, 200_000L, "역세권 오피스텔", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -1032,7 +1044,7 @@ class PropertyServiceTest {
     void 존재하지_않는_매물을_수정하면_예외가_발생한다() {
         when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 999L, request))
                 .isInstanceOf(BusinessException.class);
@@ -1055,7 +1067,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
@@ -1077,7 +1089,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, 500_000L, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);

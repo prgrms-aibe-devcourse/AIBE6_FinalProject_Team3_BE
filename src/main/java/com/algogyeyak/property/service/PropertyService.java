@@ -96,6 +96,7 @@ public class PropertyService {
                 .jibunAddress(addressResult.getJibunAddress())
                 .latitude(addressResult.getLatitude())
                 .longitude(addressResult.getLongitude())
+                .detailAddress(request.detailAddress())
                 .build();
         property.assignAddress(address);
 
@@ -289,6 +290,10 @@ public class PropertyService {
         property.updateArea(request.area());
         property.updateMaintenanceFee(request.maintenanceFee());
         property.updateDescription(request.description());
+        // roadAddress/jibunAddress/latitude/longitude와 달리 detailAddress는 예외적으로 수정
+        // 가능하다(PropertyUpdateRequest javadoc 참고) - property.getAddress()는 등록 시 항상
+        // 채워지므로(register()에서 필수 생성) null일 수 없다.
+        property.getAddress().updateDetailAddress(request.detailAddress());
 
         // images가 null이면 "이미지 변경 없음"(기존 유지) - null이 아니면(빈 리스트 포함) 통째로 교체.
         // 부분 추가/삭제 API가 없으므로 매번 전체 목록을 다시 제출해야 한다.

@@ -29,14 +29,16 @@ public record PropertyRegisterResponse(
             String roadAddress,
             String jibunAddress,
             Double latitude,
-            Double longitude
+            Double longitude,
+            String detailAddress
     ) {
         public static AddressResponse from(PropertyAddress address) {
             return new AddressResponse(
                     address.getRoadAddress(),
                     address.getJibunAddress(),
                     address.getLatitude(),
-                    address.getLongitude()
+                    address.getLongitude(),
+                    address.getDetailAddress()
             );
         }
     }

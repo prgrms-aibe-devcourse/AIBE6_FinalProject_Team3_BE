@@ -11,7 +11,7 @@
 | Entity | 요구사항 | 실제 |
 |---|---|---|
 | `Property` | id, userId, address, propertyType, transactionType, deposit, monthlyRent, askingPrice, area, status | **`askingPrice`가 없음.** `transactionType`은 `JEONSE`/`MONTHLY_RENT` 둘뿐이라 매매(SALE) 자체를 지원하지 않음 — 서비스 타겟(사회초년생/대학생)에 맞춘 의도적 축소로 보이나 확인 필요 |
-| `PropertyAddress` | id, propertyId, roadAddress, jibunAddress, latitude, longitude | 동일 |
+| `PropertyAddress` | id, propertyId, roadAddress, jibunAddress, latitude, longitude | `detailAddress`(동/호수 등 상세주소) 추가 — 5차 멘토링 피드백 3번(같은 건물이라도 호수가 다르면 다른 매물인데 구분할 방법이 없어 title에 호수를 끼워넣는 편법을 쓰고 있었음) 대응. Kakao 지오코딩 대상이 아닌 순수 사용자 입력 텍스트라 null 허용 + 등록 후에도 수정 가능하며(#286), 목록/상세 응답 모두에 노출됨 |
 | `PropertyImage` | id, propertyId, imageUrl, displayOrder | 거의 동일 — 필드명만 `displayOrder`→`sortOrder` |
 | `PropertyReport` | id, propertyId, reporterId, reason, detail, status, createdAt | 동일 |
 
