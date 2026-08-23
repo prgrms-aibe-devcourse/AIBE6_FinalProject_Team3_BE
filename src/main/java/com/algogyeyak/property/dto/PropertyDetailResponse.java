@@ -65,7 +65,8 @@ public record PropertyDetailResponse(
             String roadAddress,
             String jibunAddress,
             Double latitude,
-            Double longitude
+            Double longitude,
+            String detailAddress
     ) {
         public static AddressResponse from(PropertyAddress address) {
             if (address == null) {
@@ -75,7 +76,8 @@ public record PropertyDetailResponse(
                     address.getRoadAddress(),
                     address.getJibunAddress(),
                     address.getLatitude(),
-                    address.getLongitude()
+                    address.getLongitude(),
+                    address.getDetailAddress()
             );
         }
     }
