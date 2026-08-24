@@ -56,7 +56,10 @@ export function setup() {
     area: 20.0,
   }), { headers });
 
-  check(propertyRes, { '테스트 매물 생성 200/201': (r) => r.status === 200 || r.status === 201 });
+  const propertyCreated = check(propertyRes, { '테스트 매물 생성 200/201': (r) => r.status === 200 || r.status === 201 });
+  if (!propertyCreated) {
+    console.log(`[setup] 매물 생성 실패 status=${propertyRes.status} body=${propertyRes.body}`);
+  }
   const propertyId = propertyRes.json('data.propertyId');
 
   return { authCookies, propertyId };
@@ -66,8 +69,10 @@ export function checklistCreateScenario(data) {
   const headers = { Cookie: authCookieHeader(data.authCookies), ...CSRF_HEADERS };
   const res = http.post(`${BASE_URL}/properties/${data.propertyId}/checklists`, null, { headers });
 
-  check(res, {
+  const created = check(res, {
     '체크리스트 생성 200/201(동시 요청에도 정상 처리됨)': (r) => r.status === 200 || r.status === 201,
   });
-  console.log(`[checklistCreate] VU=${__VU} status=${res.status}`);
+  if (!created) {
+    console.log(`[checklistCreate] VU=${__VU} status=${res.status} body=${res.body}`);
+  }
 }
