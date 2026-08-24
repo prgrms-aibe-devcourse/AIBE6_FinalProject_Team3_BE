@@ -157,7 +157,7 @@ public class PropertyService {
         Page<Property> properties = propertyRepository.search(
                 userId,
                 PropertyStatus.ACTIVE,
-                condition.region(),
+                escapeLikePattern(condition.region()),
                 condition.minArea(),
                 condition.maxArea(),
                 condition.transactionType(),
@@ -248,6 +248,19 @@ public class PropertyService {
                     ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION, "월세 최소값이 최대값보다 클 수 없습니다."
             );
         }
+    }
+
+    // PropertyRepository.search()의 region LIKE 검색은 파라미터를 그대로 CONCAT('%', :x, '%')에
+    // 넣는다 - 완전히 파라미터화돼 있어 SQL 인젝션 위험은 없지만, 검색어에 리터럴 %나 _가 들어있으면
+    // 그 문자 자체가 SQL LIKE 와일드카드로 해석돼 사용자가 의도한 것보다 훨씬 넓거나 좁게 매칭된다
+    // (AdminUserService.escapeLikePattern과 동일한 패턴, 전수조사 결과 버그/정확성 1번). 역슬래시
+    // 자신부터 먼저 이스케이프해야 한다 - 순서를 바꾸면 방금 넣은 이스케이프용 역슬래시가 다시
+    // 이스케이프된다.
+    private static String escapeLikePattern(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     /**
@@ -399,14 +412,21 @@ public class PropertyService {
         }
     }
 
+    // sortOrder는 요청 리스트의 인덱스를 그대로 쓴다 - PropertyImageRequest 자체에 순서 필드가
+    // 없고, 이 리스트의 순서가 곧 사용자가 의도한 표시 순서다(FE가 업로드/재배열한 순서 그대로
+    // 제출). Property.images의 @OrderBy("sortOrder")가 이 값을 기준으로 조회 순서를 보장한다
+    // (전수조사 결과 버그/정확성 2번 - 예전엔 sortOrder가 항상 null로 남아있어 대표사진(첫 이미지)
+    // 지정이 삽입 순서라는 관찰된 동작에만 의존하고 있었다).
     private void applyImages(Property property, List<PropertyImageRequest> images) {
         if (images == null) {
             return;
         }
-        for (PropertyImageRequest image : images) {
+        for (int i = 0; i < images.size(); i++) {
+            PropertyImageRequest image = images.get(i);
             property.addImage(PropertyImage.builder()
                     .imageUrl(image.imageUrl())
                     .roomType(image.roomType())
+                    .sortOrder(i)
                     .build());
         }
     }

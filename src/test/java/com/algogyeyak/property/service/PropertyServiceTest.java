@@ -144,6 +144,48 @@ class PropertyServiceTest {
         verify(eventPublisher).publishEvent(any(PropertyUpdatedEvent.class));
     }
 
+    // 회귀 테스트 - 예전엔 sortOrder가 항상 null로 남아있어(applyImages()가 imageUrl/roomType만
+    // 설정) 대표사진(첫 이미지) 지정이 삽입 순서라는 관찰된 동작에만 암묵적으로 의존했다
+    // (전수조사 결과 버그/정확성 2번). 요청 리스트의 인덱스가 그대로 sortOrder로 저장되는지 확인한다.
+    @Test
+    void 등록_요청의_이미지_순서가_sortOrder로_저장된다() {
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                "역세권 오피스텔",
+                List.of(
+                        new PropertyImageRequest("https://cdn.algogyeyak.com/img/first.jpg", null),
+                        new PropertyImageRequest("https://cdn.algogyeyak.com/img/second.jpg", null)
+                )
+        );
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
+        )).thenReturn(false);
+        when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        propertyService.register(USER_ID, request);
+
+        org.mockito.ArgumentCaptor<Property> captor = org.mockito.ArgumentCaptor.forClass(Property.class);
+        verify(propertyRepository).save(captor.capture());
+        assertThat(captor.getValue().getImages()).extracting(
+                com.algogyeyak.property.entity.PropertyImage::getImageUrl,
+                com.algogyeyak.property.entity.PropertyImage::getSortOrder
+        ).containsExactly(
+                org.assertj.core.groups.Tuple.tuple("https://cdn.algogyeyak.com/img/first.jpg", 0),
+                org.assertj.core.groups.Tuple.tuple("https://cdn.algogyeyak.com/img/second.jpg", 1)
+        );
+    }
+
     @Test
     void 관리비를_입력하면_등록_응답에_반영된다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
@@ -734,6 +776,29 @@ class PropertyServiceTest {
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 eq("래미안"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable, condition);
+
+        assertThat(result.content()).isEmpty();
+    }
+
+    // 회귀 테스트 - region 검색어에 리터럴 "%"/"_"가 들어있으면 repository.search()에 넘기기 전에
+    // 이스케이프해야 한다(escapeLikePattern, 전수조사 결과 버그/정확성 1번). 그러지 않으면 이 문자들이
+    // SQL LIKE 와일드카드로 해석돼 사용자가 의도한 것보다 훨씬 넓거나 좁게 매칭된다 - 실제 이스케이프
+    // 해석(ESCAPE '\')이 결과에 반영되는지는 PropertyRepositoryTest가 검증하고, 여기서는 Service가
+    // repository에 넘기는 값 자체가 이스케이프됐는지만 확인한다.
+    @Test
+    void region_검색어의_와일드카드_문자는_이스케이프되어_repository_search에_전달된다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                "100%_동", null, null, null, null, null, null, null, null, null
+        );
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                eq("100\\%\\_동"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
                 isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
