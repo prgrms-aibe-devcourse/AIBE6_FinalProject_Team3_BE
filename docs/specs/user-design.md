@@ -13,16 +13,16 @@
 | Entity | 요구사항 | 실제 |
 |---|---|---|
 | `User` | id, nickname, email, profileImageUrl, status | 동일 (+ auth 관련 필드는 auth-design.md 참고) |
-| `UserPreference` | id, userId, interestRegion, transactionType, currentStage | 동일 — `User`와 `@OneToOne`(userId 유니크) |
+| `UserPreference` | id, userId, interestRegion, transactionType, currentStage | `User`와 `@OneToOne`(userId 유니크). **(2026-08-24 변경)** `currentStage` 필드는 제거됨 — 아래 "프로필 등록" 절과 "남은 이슈" 2번 참고 |
 
 ## 프로필 등록 (`POST /users/me/profile`) — 요구사항 대비
 
 | 요구사항 | 실제 구현 |
 |---|---|
-| 생성형 AI 기반 운용 사전 고지 | ❌ **백엔드에 관련 로직/응답 필드가 전혀 없습니다.** 프론트엔드가 화면에서만 고지 문구를 보여주는 것으로 추정 — 확인 필요 |
-| 입력값 검증 | 부분 구현 — 관심지역 필수(`@NotBlank`) + **(2026-08-14 추가)** 길이 제한(`@Size(max = 30)`), 거래유형 필수(`@NotNull`), 자취/취업여부(currentStage)는 선택. **(2026-08-12 변경)** 닉네임은 더 이상 이 API의 입력값이 아님 — 아래 참고 |
+| 생성형 AI 기반 운용 사전 고지 | ❌ **(2026-08-24 결정)** 프론트 책임으로 확정 — 백엔드는 관련 로직/응답 필드를 두지 않고, 프론트엔드가 화면에서 고지 문구를 표시 |
+| 입력값 검증 | 부분 구현 — 관심지역 필수(`@NotBlank`) + **(2026-08-14 추가)** 길이 제한(`@Size(max = 30)`), 거래유형 필수(`@NotNull`). ~~자취/취업여부(currentStage)는 선택~~ **(2026-08-24 삭제)** 아래 참고. **(2026-08-12 변경)** 닉네임은 더 이상 이 API의 입력값이 아님 — 아래 참고 |
 | UserPreference 저장 | ✅ |
-| currentStage에 따른 홈 위젯 우선순위 결정 | ❌ **백엔드는 currentStage 값을 그대로 저장만 하고, 우선순위를 계산하거나 응답에 담는 로직이 없습니다.** 위젯 우선순위 자체가 프론트엔드 책임으로 보임 — 확인 필요 |
+| ~~currentStage에 따른 홈 위젯 우선순위 결정~~ | **(2026-08-24 해결)** `currentStage` 필드 자체가 `ProfileRegisterRequest`/`ProfileUpdateRequest`/`UserProfileResponse`/`UserPreference`/`CurrentStage` enum에서 전부 제거됨(커밋 `2bed1d9`) — 더 이상 백엔드가 저장/응답하지 않으므로 "우선순위를 프론트가 계산하는지" 확인할 대상 자체가 없어짐 |
 | 성공: 온보딩 분기 반영된 홈으로 이동 | 백엔드는 이동 경로를 결정하지 않고 저장된 `UserProfileResponse`만 반환 — 라우팅은 프론트 담당으로 추정 |
 | 실패: 필수 입력값 누락 | ✅ 400 |
 | 실패: 인증되지 않은 사용자 | ✅ 401 (JWT 필터) |
@@ -90,7 +90,7 @@
 |---|---|
 | 본인 여부 확인 | ✅ |
 | 상태를 탈퇴로 변경 | ✅ |
-| 개인정보 삭제/익명화 | ✅ **(2026-08-10)** `User`의 nickname/email/passwordHash/profileImageUrl은 복원 불가능한 값으로 치환되고 `withdrawnAt`에 탈퇴 시각도 기록됩니다. `UserSocialAccount`(OAuth 연동정보)·`UserPreference`(관심지역/거래유형/자취여부)·본인 소유 `Checklist`는 하드 삭제되고, 본인 소유 `Property`는 기존 soft-delete(`Property.delete()`)를 재사용해 상태만 `DELETED`로 바꿉니다(다른 유저의 체크리스트·risk-analysis 기록이 이 매물을 참조하고 있어 row 자체는 보존) |
+| 개인정보 삭제/익명화 | ✅ **(2026-08-10)** `User`의 nickname/email/passwordHash/profileImageUrl은 복원 불가능한 값으로 치환되고 `withdrawnAt`에 탈퇴 시각도 기록됩니다. `UserSocialAccount`(OAuth 연동정보)·`UserPreference`(관심지역/거래유형, **(2026-08-24)** 자취여부는 필드 자체가 제거됨)·본인 소유 `Checklist`는 하드 삭제되고, 본인 소유 `Property`는 기존 soft-delete(`Property.delete()`)를 재사용해 상태만 `DELETED`로 바꿉니다(다른 유저의 체크리스트·risk-analysis 기록이 이 매물을 참조하고 있어 row 자체는 보존) |
 | 클라이언트 인증정보 제거 | ✅ **(2026-08-11)** `AuthController.logout()`에서 뽑아낸 `SessionLogoutService`를 재사용해, 탈퇴 커밋 후 refresh token 무효화(Redis)·access token jti 블랙리스트 등록·access/refresh 쿠키 삭제까지 처리합니다. 단, Redis 장애로 이 세션 무효화가 실패해도 탈퇴 자체는 이미 커밋된 뒤라 되돌리지 않고, `UserController.withdraw()`가 그 예외를 로그만 남기고 삼켜 응답은 항상 200으로 나갑니다 — 이 경우 쿠키가 자연 만료 전까지 남아있을 수 있지만, 이후 요청은 `JwtAuthenticationFilter`가 탈퇴 상태를 다시 확인해 차단하므로 보안 구멍은 아닙니다 |
 | 실패: 인증 실패 | ✅ 401 |
 | 실패: 이미 탈퇴한 사용자 | ✅ **(2026-08-11)** 도달 불가능했던 `User.withdraw()` 내부 가드는 제거했습니다 — 유일한 호출부인 `UserService.withdraw()`가 그보다 먼저 `getActiveUserOrThrow()`로 활성 사용자만 걸러내기 때문에 애초에 실행될 수 없는 코드였습니다. 대신 `getActiveUserOrThrow()` 자체가 탈퇴한 사용자를 404 `USER_WITHDRAWN`("이미 탈퇴한 사용자입니다.")으로, 정지된 사용자를 404 `USER_SUSPENDED`("정지된 사용자입니다.")로 구분해서 던지도록 변경해 실제로 구분되는 실패 사유를 응답합니다 |
@@ -107,7 +107,7 @@
 | 불필요한 개인정보 미수집 | O | 판단 어려움 — 확인 필요 |
 | 탈퇴 시 삭제/익명화 | O | ✅ **(2026-08-10)** `User` 익명화 + `UserSocialAccount`/`UserPreference`/본인 `Checklist` 하드 삭제 + 본인 `Property` soft-delete |
 | OAuth 연동정보 탈퇴 처리 기준 | O(별도 정의) | ✅ **(2026-08-10)** 하드 삭제로 확정 — 재가입 시 동일 소셜 계정 재연동이 가능해야 하므로 |
-| 선택 정보는 건너뛰기 가능 | O | ✅ `currentStage` 등 선택 필드는 실제로 선택 |
+| 선택 정보는 건너뛰기 가능 | O | ~~✅ `currentStage` 등 선택 필드는 실제로 선택~~ **(2026-08-24)** `currentStage` 필드가 제거되어 이제 프로필 등록의 선택 필드는 없음(관심지역/거래유형 모두 필수) |
 | 오류 항목/수정 방법 명확 표시 | O | ✅ Bean Validation 메시지가 필드별로 내려감 |
 | 불필요한 필수 입력 강제 안 함 | O | ✅ |
 | 닉네임 중복: 앱 검증 + DB 제약 동시 적용 | O | ✅ `existsByNicknameAndIdNot` + `User.nickname` DB unique 제약 |
@@ -125,14 +125,14 @@
 
 ## 남은 이슈 / 확인 필요 총정리
 
-1. "생성형 AI 서비스 사전 고지"가 백엔드에 전혀 없음 — 프론트 전담인지 확인
-2. `currentStage` 기반 홈 위젯 우선순위 로직이 백엔드에 없음 — 프론트가 currentStage 값만 받아서 직접 계산하는 구조인지 확인
+1. ~~"생성형 AI 서비스 사전 고지"가 백엔드에 전혀 없음 — 프론트 전담인지 확인~~ **(2026-08-24 해결)** 프론트 책임으로 확정 — 백엔드에 별도 구현 필요 없음
+2. ~~`currentStage` 기반 홈 위젯 우선순위 로직이 백엔드에 없음 — 프론트가 currentStage 값만 받아서 직접 계산하는 구조인지 확인~~ **(2026-08-24 해결)** `currentStage`(자취 단계) 필드 자체를 백엔드에서 제거함(`ProfileRegisterRequest`/`ProfileUpdateRequest`/`UserProfileResponse`/`UserPreference`/`CurrentStage` enum, 커밋 `2bed1d9`) — 위젯 우선순위 확인 대상 자체가 사라짐
 3. **(2026-08-10 해결됨)** 탈퇴 시 `UserPreference`(관심지역/거래유형/자취여부) 하드 삭제 처리 완료
 4. **(2026-08-10 해결됨)** 탈퇴 시 OAuth 연동 정보(하드 삭제) / `Checklist`(하드 삭제) / `Property`(soft-delete 재사용) 처리 완료. `ContractAnalysis`는 stateless라 처리 대상 자체가 없음을 확인
 5. **(2026-08-11 해결됨)** 탈퇴 시 쿠키를 지우지 않던 문제 — `SessionLogoutService`(auth 도메인에서 로그아웃 로직을 공용화) 도입 후 `UserController.withdraw()`에서 탈퇴 커밋 뒤 호출하도록 통합 완료. Redis 장애 시의 처리 방식(예외를 삼키고 200 응답)은 `SessionLogoutService` 클래스 주석과 위 표의 "클라이언트 인증정보 제거" 항목 참고
 6. **(2026-08-11 해결됨)** "이미 탈퇴한 사용자" 실패 사유가 "존재하지 않는 사용자"와 구분 없이 같은 404로 나가던 문제 해결 — 도달 불가능했던 `User.withdraw()` 내부 가드는 제거하고, 대신 `UserService.getActiveUserOrThrow()`에서 탈퇴(`USER_WITHDRAWN`)/정지(`USER_SUSPENDED`)를 서로 다른 `ErrorCode`로 구분해서 던지도록 변경(상태 코드는 여전히 404로 동일, `code`/`message`만 구분)
 7. **(2026-07-31 해결됨, 문서 반영 누락 상태였음)** 프로필 등록 시 "이미 등록됨" 실패가 400으로 처리되던 문제 — 커밋 `9daefca`("User 프로필/닉네임 중복을 409 CONFLICT로 정리")에서 `USER_PROFILE_ALREADY_EXISTS`/`USER_NICKNAME_ALREADY_EXISTS`(둘 다 409)를 신설해 이미 해결되어 있었습니다. `docs/specs/auth-design.md`의 `AUTH_EMAIL_ALREADY_EXISTS`/`AUTH_NICKNAME_ALREADY_EXISTS`(둘 다 409)와 동일한 패턴으로 정리된 것으로, 코드는 맞았는데 이 문서(위 "프로필 등록"/"프로필 수정" 표)만 갱신되지 않고 400으로 잘못 남아있었습니다 — 위 표도 함께 수정했습니다. **(2026-08-12, 전수조사로 재검증됨)** `UserServiceTest`의 여러 테스트가 `assertEquals(HttpStatus.CONFLICT, exception.getStatus())`로 이를 명시적으로 검증하고 있음을 확인 — 아래 "전수조사 결과" 코드 품질 1번 참고
-8. **(2026-08-04, `deleteReplacedObject`로 완화됨)** confirm/reset 시 이전 S3 이미지 삭제는 여전히 best-effort지만, 즉시 삭제 전에 `status=pending`으로 다시 태깅해두는 안전망이 추가됨 — 즉시 삭제가 실패해도 버킷 Lifecycle 규칙(만료 기간 1일, AWS 콘솔에서 설정 확인함)이 최대 1일 내로 정리해줌. 태깅 자체와 즉시 삭제가 둘 다 실패하는 이중 실패 케이스만 여전히 영구 고아로 남을 수 있음 — 발생 확률이 낮아 별도 정리 배치까지는 아직 논의 안 됨
+8. ~~**(2026-08-04, `deleteReplacedObject`로 완화됨)** confirm/reset 시 이전 S3 이미지 삭제는 여전히 best-effort지만, 즉시 삭제 전에 `status=pending`으로 다시 태깅해두는 안전망이 추가됨 — 즉시 삭제가 실패해도 버킷 Lifecycle 규칙(만료 기간 1일, AWS 콘솔에서 설정 확인함)이 최대 1일 내로 정리해줌. 태깅 자체와 즉시 삭제가 둘 다 실패하는 이중 실패 케이스만 여전히 영구 고아로 남을 수 있음 — 발생 확률이 낮아 별도 정리 배치까지는 아직 논의 안 됨.~~ **(2026-08-24 해결)** `property` 도메인의 `PropertyImageOrphanCleanupJob`을 그대로 미러링해 `ProfileImageOrphanCleanupJob`(`user/batch`)을 신설했다 — 태그/Lifecycle에 의존하지 않고 S3의 `profile-images/` prefix 전체 객체와 DB에 실제로 참조된 `profileImageUrl` 집합(`UserRepository.findAllProfileImageUrls()`, 신규)을 직접 대조해 그레이스 기간(24시간, `ProfileImageCleanupProperties`)이 지난 미참조 객체만 정리한다. 태깅과 즉시삭제가 둘 다 실패하는 이중 실패 케이스도 이 배치가 태그 상태와 무관하게 잡아내므로 더 이상 영구 고아로 남지 않는다. 매물 배치와 동일한 서킷브레이커(표본 10건 이상일 때 삭제 후보가 50% 넘으면 중단)를 포함했고, 같은 09시대 부하가 겹치지 않도록 09:35(`user.profile-image-cleanup.cron`)에 실행되도록 5분 오프셋을 뒀다. 테스트는 `ProfileImageOrphanCleanupJobTest`(`PropertyImageOrphanCleanupJobTest`와 동일한 4가지 케이스 검증).
 9. ~~닉네임 욕설/금칙어 필터링 미구현~~ **(2026-08-13 결정: 구현하지 않기로 확정)** 닉네임 검증은 형식(한글/영문/숫자)+길이(2~20자, `NicknamePolicy`) 검사까지만 하기로 하고, 욕설/금칙어 필터링은 범위에서 제외했다. (검토했던 방향은 어근 목록 + 정규화 방식의 자체 필터였으나 채택하지 않음 — `checkNicknameAvailable`/`UserService.updateMyProfile()` 모두 형식·중복 검사 이상은 하지 않는다)
 
 ## 전수조사 결과 (2026-08-12)
@@ -151,4 +151,4 @@
 
 1. **문서-코드 불일치 정정**: 이 문서의 "프로필 등록"/"프로필 수정" 표와 "남은 이슈" 7번은 "실패: 중복된 닉네임"과 "이미 프로필이 등록된 경우"를 모두 **400**으로 서술하고 있었으나(이후 회원탈퇴 작업 중 위 표는 이미 409로 정정됨), 실제 `ErrorCode.USER_NICKNAME_ALREADY_EXISTS`/`USER_PROFILE_ALREADY_EXISTS`(`global/error/ErrorCode.java:52-53`)는 `HttpStatus.CONFLICT`(**409**)로 정의되어 있고, `UserServiceTest`(`registerProfileThrowsWhenProfileAlreadyExists`/`registerProfileThrowsWhenNicknameAlreadyExists`/`updateMyProfileThrowsWhenNicknameAlreadyExists`/`updateMyProfileRecoversWithNicknameConflictWhenConcurrentChangeWinsTheRace`, 각각 `assertEquals(HttpStatus.CONFLICT, exception.getStatus())`)도 이를 명시적으로 검증한다. **(2026-08-12 추가 변경)** `registerProfileThrowsWhenNicknameAlreadyExists`는 프로필 등록에서 닉네임 처리 자체가 제거되면서 함께 삭제됨 — 아래 2번 참고.
 2. ~~`registerProfile()`(`service/UserService.java:80-85`)과 `updateMyProfile()`(`service/UserService.java:177-180`)이 "닉네임이 실제로 바뀌는지"를 판단하는 조건(`StringUtils.hasText(request.getNickname()) && !request.getNickname().equals(user.getNickname())`)을 각자 인라인으로 거의 동일하게 중복 구현하고 있다.~~ **(2026-08-12 해결됨)** 프로필 등록 화면에는 애초에 닉네임 입력 UI가 없었고(2026-07-31 프론트에서 숨김 처리), 백엔드의 `registerProfile()` 닉네임 분기는 실제로 호출될 수 없는 죽은 코드였음이 확인되어 제거했다(`registerProfile()`은 더 이상 닉네임을 다루지 않음). 이 판단 조건은 이제 `updateMyProfile()`에만 남아 중복이 아니다.
-3. `getActiveUserOrThrow()`가 던지는 "존재하지 않거나 탈퇴한 사용자입니다." 메시지 문자열이 `UserService.java` 안에 2곳(`getActiveUserOrThrow`, `changeNickname`)에서 각각 리터럴로 반복돼 있다. **(2026-08-12)** 이전에는 `registerProfileAtomically`도 이 메시지를 갖고 있어 3곳이었으나, 닉네임 처리 제거와 함께 해당 메서드가 `savePreferenceOrThrowIfAlreadyRegistered()`로 단순화되며 2곳으로 줄었다. 상수로 추출하면 이후 문구를 바꿀 때 일부만 놓치는 실수를 줄일 수 있다(기능적 문제는 아님). **(2026-08-14 해결됨, `UserService.java` 범위 한정)** `UserService`에 `INACTIVE_USER_MESSAGE` 상수를 추가해 두 호출부 모두 이를 참조하도록 정리했다. 단, 같은 문자열이 `RefreshTokenService.java`/`LocalAuthService.java`(auth 도메인)에도 별도로 존재하는데, 이번 정리는 `UserService` 내부 중복만 대상으로 했고 도메인 간 중복은 범위 밖으로 남겨뒀다.
+3. `getActiveUserOrThrow()`가 던지는 "존재하지 않거나 탈퇴한 사용자입니다." 메시지 문자열이 `UserService.java` 안에 2곳(`getActiveUserOrThrow`, `changeNickname`)에서 각각 리터럴로 반복돼 있다. **(2026-08-12)** 이전에는 `registerProfileAtomically`도 이 메시지를 갖고 있어 3곳이었으나, 닉네임 처리 제거와 함께 해당 메서드가 `savePreferenceOrThrowIfAlreadyRegistered()`로 단순화되며 2곳으로 줄었다. 상수로 추출하면 이후 문구를 바꿀 때 일부만 놓치는 실수를 줄일 수 있다(기능적 문제는 아님). **(2026-08-14 해결됨, `UserService.java` 범위 한정)** `UserService`에 `INACTIVE_USER_MESSAGE` 상수를 추가해 두 호출부 모두 이를 참조하도록 정리했다.
