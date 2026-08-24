@@ -143,4 +143,13 @@ public class UserController {
     ) {
         return ApiResponse.success(contractAnalysisHistoryService.getMyContractHistoryDetail(userDetails.userId(), id));
     }
+
+    @DeleteMapping("/me/contract-history/{id}")
+    public ApiResponse<Void> deleteMyContractHistory(
+            @AuthenticationPrincipal JwtUserPrincipal userDetails,
+            @PathVariable Long id
+    ) {
+        contractAnalysisHistoryService.deleteMyContractHistory(userDetails.userId(), id);
+        return ApiResponse.successWithoutData();
+    }
 }
