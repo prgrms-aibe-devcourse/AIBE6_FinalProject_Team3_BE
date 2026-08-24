@@ -44,6 +44,17 @@ export const options = {
       startTime: '35s',
       maxDuration: '30s',
     },
+    // 보증금 안전성 재계산 동시 요청 - DepositSafetyCheckService.upsertUnavailable()/upsertCalculated()도
+    // 동일한 REQUIRES_NEW insert-race 복구 패턴을 쓴다(2026-08-24 CannotAcquireLockException catch
+    // 보강). riskAnalysisRecalculate가 끝난 뒤 시작해서 시나리오 결과가 섞이지 않게 한다.
+    depositSafetyRecalculate: {
+      executor: 'per-vu-iterations',
+      exec: 'depositSafetyRecalculateScenario',
+      vus: 20,
+      iterations: 1,
+      startTime: '70s',
+      maxDuration: '30s',
+    },
   },
 };
 
@@ -98,5 +109,19 @@ export function riskAnalysisRecalculateScenario(data) {
   });
   if (!succeeded) {
     console.log(`[riskAnalysisRecalculate] VU=${__VU} status=${res.status} body=${res.body}`);
+  }
+}
+
+export function depositSafetyRecalculateScenario(data) {
+  const headers = { Cookie: authCookieHeader(data.authCookies), 'Content-Type': 'application/json', ...CSRF_HEADERS };
+  const res = http.post(`${BASE_URL}/properties/${data.propertyId}/deposit-safety/recalculate`, JSON.stringify({
+    seniorDeposit: 0,
+  }), { headers });
+
+  const succeeded = check(res, {
+    '보증금 안전성 재계산 200(동시 요청에도 정상 처리됨)': (r) => r.status === 200,
+  });
+  if (!succeeded) {
+    console.log(`[depositSafetyRecalculate] VU=${__VU} status=${res.status} body=${res.body}`);
   }
 }

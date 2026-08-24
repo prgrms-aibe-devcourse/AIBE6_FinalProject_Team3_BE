@@ -19,6 +19,7 @@ import com.algogyeyak.riskanalysis.policy.RiskPolicyConfig;
 import com.algogyeyak.riskanalysis.repository.DepositSafetyCheckRepository;
 import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -227,7 +228,11 @@ public class DepositSafetyCheckService {
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status -> depositSafetyCheckRepository.saveAndFlush(newCheck));
             return newCheck;
-        } catch (DataIntegrityViolationException e) {
+        } catch (DataIntegrityViolationException | CannotAcquireLockException e) {
+            // CannotAcquireLockException(TransientDataAccessException 계열)도 같이 잡는다 - 동시
+            // insert 요청 수가 많아지면 InnoDB가 단순 유니크 제약 위반이 아니라 데드락으로 감지하는
+            // 경우가 있는데, DataIntegrityViolationException만 잡던 코드는 이 경우를 놓쳐 500으로
+            // 새어나갔다(FakeListingSignalService.upsertCheck()와 동일한 이유로 동일하게 보강).
             // 재조회도 REQUIRES_NEW로 새 트랜잭션에서 한다 - 바깥 트랜잭션에서 그대로 재조회하면,
             // MySQL InnoDB의 기본 격리수준(REPEATABLE READ)에서는 이 트랜잭션이 이미 앞서 읽은 시점의
             // 스냅샷에 갇혀 있어 방금 다른 트랜잭션이 커밋한 승자 행이 안 보일 수 있다(H2는 기본이
@@ -294,8 +299,9 @@ public class DepositSafetyCheckService {
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status -> depositSafetyCheckRepository.saveAndFlush(newCheck));
             return newCheck;
-        } catch (DataIntegrityViolationException e) {
-            // upsertUnavailable()과 동일한 이유로 재조회도 REQUIRES_NEW 새 트랜잭션에서 한다.
+        } catch (DataIntegrityViolationException | CannotAcquireLockException e) {
+            // upsertUnavailable()과 동일한 이유로 CannotAcquireLockException도 같이 잡고, 재조회도
+            // REQUIRES_NEW 새 트랜잭션에서 한다.
             DepositSafetyCheck winner = requiresNewTransactionTemplate.execute(status ->
                     depositSafetyCheckRepository.findByPropertyId(property.getId())
                             .map(found -> {
