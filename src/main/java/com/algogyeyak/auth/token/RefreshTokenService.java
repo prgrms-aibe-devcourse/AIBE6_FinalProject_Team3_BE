@@ -192,7 +192,17 @@ public class RefreshTokenService {
             throw new BusinessException(ErrorCode.AUTH_REFRESH_TOKEN_INVALID);
         }
 
-        User user = userRepository.findById(Long.valueOf(userId)).orElse(null);
+        User user;
+        try {
+            user = userRepository.findById(Long.valueOf(userId)).orElse(null);
+        } catch (DataAccessException e) {
+            // ROTATE_SCRIPT는 이미 커밋되어 새 세션이 Redis에 살아있으므로, 이 DB 조회 실패를 조용히
+            // 넘기면 새로 발급된 rawToken이 클라이언트에 반환되지 못한 채(예외가 전파되어 응답이 안 감)
+            // Redis에만 고아로 남는다 - JwtAuthenticationFilter의 findById 실패 처리와 같은 이유로
+            // fail-closed 503(AUTH_TOKEN_STORE_UNAVAILABLE)으로 명시적으로 실패시킨다.
+            log.error("DB 장애로 refresh token rotate 중 사용자 조회 실패 userId={}", userId, e);
+            throw new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE);
+        }
         if (user == null || user.isWithdrawn() || user.isSuspended()) {
             // ROTATE_SCRIPT가 이미 새 by-hash/by-user를 써버린 뒤라, 여기서 둘 다 지워야 한다 -
             // by-user만 지우면 newHash를 가리키는 by-hash 항목이 TTL까지 고아로 남는다. newRawToken은

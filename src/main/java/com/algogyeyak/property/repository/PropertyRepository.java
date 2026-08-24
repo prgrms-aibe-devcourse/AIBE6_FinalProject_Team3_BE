@@ -99,15 +99,18 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
      * signalPropertyIds는 hasSignal=true 필터(#233)를 위한 것 - property는 위험신호 데이터를
      * 직접 모르므로(risk-analysis 소관), Service가 PropertyRiskSummaryProvider로 미리 구한 id
      * 목록을 여기 넘겨서 다른 조건들과 동일한 "(:param IS NULL OR ...)" 패턴으로 필터링한다.
+     * region 파라미터는 호출부(PropertyService.getMyProperties)가 LIKE 와일드카드(%, _)를 이스케이프한
+     * 뒤 넘긴다는 전제다 - ESCAPE '\'로 그 이스케이프를 실제로 해석한다(UserRepository.search와 동일한
+     * 패턴, 전수조사 결과 버그/정확성 1번).
      */
     @Query("""
             SELECT p FROM Property p
             LEFT JOIN FETCH p.address a
             WHERE p.userId = :userId
               AND p.status = :status
-              AND (:region IS NULL OR a.roadAddress LIKE CONCAT('%', :region, '%')
-                   OR a.jibunAddress LIKE CONCAT('%', :region, '%')
-                   OR p.title LIKE CONCAT('%', :region, '%'))
+              AND (:region IS NULL OR a.roadAddress LIKE CONCAT('%', :region, '%') ESCAPE '\\'
+                   OR a.jibunAddress LIKE CONCAT('%', :region, '%') ESCAPE '\\'
+                   OR p.title LIKE CONCAT('%', :region, '%') ESCAPE '\\')
               AND (:minArea IS NULL OR p.area >= :minArea)
               AND (:maxArea IS NULL OR p.area <= :maxArea)
               AND (:transactionType IS NULL OR p.transactionType = :transactionType)

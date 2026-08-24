@@ -11,7 +11,7 @@
 | Entity | 요구사항 | 실제 |
 |---|---|---|
 | `Property` | id, userId, address, propertyType, transactionType, deposit, monthlyRent, askingPrice, area, status | **`askingPrice`가 없음.** `transactionType`은 `JEONSE`/`MONTHLY_RENT` 둘뿐이라 매매(SALE) 자체를 지원하지 않음 — 서비스 타겟(사회초년생/대학생)에 맞춘 의도적 축소로 보이나 확인 필요 |
-| `PropertyAddress` | id, propertyId, roadAddress, jibunAddress, latitude, longitude | 동일 |
+| `PropertyAddress` | id, propertyId, roadAddress, jibunAddress, latitude, longitude | `detailAddress`(동/호수 등 상세주소) 추가 — 5차 멘토링 피드백 3번(같은 건물이라도 호수가 다르면 다른 매물인데 구분할 방법이 없어 title에 호수를 끼워넣는 편법을 쓰고 있었음) 대응. Kakao 지오코딩 대상이 아닌 순수 사용자 입력 텍스트라 null 허용 + 등록 후에도 수정 가능하며(#286), 목록/상세 응답 모두에 노출됨 |
 | `PropertyImage` | id, propertyId, imageUrl, displayOrder | 거의 동일 — 필드명만 `displayOrder`→`sortOrder` |
 | `PropertyReport` | id, propertyId, reporterId, reason, detail, status, createdAt | 동일 |
 
@@ -177,9 +177,9 @@
 ### 보안
 
 1. ~~`PropertyImageUploadController.confirm()`(`/properties/images/confirm`, `PropertyImageUploadController.java:53-61`)이 요청받은 `key`가 호출자 소유인지 전혀 검증하지 않는다. ... 수정 방향: 프로필과 동일하게 `confirm()`에 `@AuthenticationPrincipal`을 받아 `S3KeyGenerator.isPropertyImageOwnedBy(userId, key)`(공통 코드에 이미 준비되어 있음)로 소유권 검증을 추가.~~ — ✅ **(2026-08-13 해결 확인)** `dev`를 이 브랜치에 병합하는 과정에서 확인 — property 담당자가 정확히 이 방향대로 이미 수정해 `dev`에 올려뒀다. `confirm()`이 `@AuthenticationPrincipal`을 받아 `S3KeyGenerator.isPropertyImageOwnedBy(principal.userId(), request.key())`를 호출하고, 실패 시 `FILE_KEY_ACCESS_DENIED`를 던진다. 교차 도메인 오용(공통 코드의 `validatePurposePrefix()`)과 같은 purpose·다른 소유자(이번 수정) 두 경로 다 막혀 있다.
-2. `PropertyService.validateImages()`(`PropertyService.java:359-376`)는 `imageUrl`이 http(s)이고 허용 확장자로 끝나는지만 확인하며, 그 URL이 실제로 `POST /properties/images/confirm`을 거친 값인지·호출자 소유인지는 전혀 확인하지 않는다. 즉 `POST /properties`/`PATCH /properties/{id}`에 임의의 외부 http(s) 이미지 URL(예: 다른 사이트의 대용량 이미지, 또는 이미 확정된 타인의 매물 이미지 URL)을 그대로 넣어도 그대로 통과·저장된다. 새로 구축된 S3 presign 기반 바이트 크기/컨텐츠타입 검증(`S3PresignService.validateContentLength`/`confirmUpload`)은 "권장 경로"일 뿐 서버가 강제하지 않아, 이 경로를 건너뛰면 크기 제한 없는 임의 URL이 그대로 저장된다는 뜻이다. (참고: 기존 "남은 이슈" 10번은 "업로드 인프라가 없어 크기 검증이 애초에 불가능하다"였는데, 지금은 인프라·검증 로직 자체는 존재하되 등록/수정 API가 그 경로를 타도록 강제하지 않아 여전히 우회 가능하다는 쪽으로 성격이 바뀌었다 — 문서 갱신 필요.)
+2. ~~`PropertyService.validateImages()`(`PropertyService.java:359-376`)는 `imageUrl`이 http(s)이고 허용 확장자로 끝나는지만 확인하며, 그 URL이 실제로 `POST /properties/images/confirm`을 거친 값인지·호출자 소유인지는 전혀 확인하지 않는다. 즉 `POST /properties`/`PATCH /properties/{id}`에 임의의 외부 http(s) 이미지 URL(예: 다른 사이트의 대용량 이미지, 또는 이미 확정된 타인의 매물 이미지 URL)을 그대로 넣어도 그대로 통과·저장된다.~~ ✅ **(fix/property-image-ownership-check #291 해결)** `validateImages()`가 `S3PresignService.extractOwnedKey()`로 imageUrl에서 S3 key를 뽑고, `S3KeyGenerator.isPropertyImageOwnedBy(userId, key)`로 소유권을 검증하도록 수정함(`PropertyImageUploadController.confirm()`의 소유권 검증과 동일한 방식). 우리 버킷 URL이 아니면 key 자체가 없어 자연히 거부된다. 단, "presign/confirm을 실제로 거쳤는지"(S3 pending 태그 확인)까지는 범위 밖 — key 네임스페이스가 본인 것이기만 하면 통과한다(별도 후속 작업 필요 시 이슈화).
 
 ### 코드 품질 (중복/구조/일관성)
 
-1. `ErrorCode.PROPERTY_REQUIRED_FIELD_MISSING`(`ErrorCode.java:54`)도 `PROPERTY_TYPE_NOT_SUPPORTED`와 같은 패턴의 죽은 에러코드다 — 선언 외에 코드베이스 전체에서 참조되는 곳이 없다(필수값 검증은 실제로 Bean Validation `@NotBlank`/`@NotNull`이 처리하고 일반 400으로 응답됨). 기존 문서 14번이 `PROPERTY_TYPE_NOT_SUPPORTED`만 지적했는데, 동일한 성격의 죽은 코드가 하나 더 있다.
+1. ~~`ErrorCode.PROPERTY_REQUIRED_FIELD_MISSING`(`ErrorCode.java:54`)도 `PROPERTY_TYPE_NOT_SUPPORTED`와 같은 패턴의 죽은 에러코드다 — 선언 외에 코드베이스 전체에서 참조되는 곳이 없다(필수값 검증은 실제로 Bean Validation `@NotBlank`/`@NotNull`이 처리하고 일반 400으로 응답됨).~~ ✅ **(fix/property-audit-fixes 해결)** `PROPERTY_TYPE_NOT_SUPPORTED`는 2026-07-28 "의도적 유지" 결정이 있어 남겨두고, 근거 없는 `PROPERTY_REQUIRED_FIELD_MISSING`만 제거함.
 2. `S3KeyGenerator.normalizeExtension`(확장자 화이트리스트 검증)과 `S3PresignService.validateContentType`(Content-Type 화이트리스트 검증)이 서로 독립적으로만 검증되고 상호 일치 여부는 확인하지 않는다 — 예를 들어 `fileExtension="jpg"`, `contentType="image/gif"`처럼 서로 안 맞는 조합도 `S3ImagePurpose.PROPERTY`의 개별 화이트리스트 안에만 들면 presigned URL이 발급된다. 심각한 문제는 아니지만(실제 파일 바이트까지 확인하는 건 아니라 확장자-타입 위장은 애초에 완전히 막기 어려움), 확장자와 Content-Type이 다른 파일이 그대로 저장될 수 있다는 점은 향후 이미지 처리(리사이징 등) 도입 시 참고할 필요가 있다.

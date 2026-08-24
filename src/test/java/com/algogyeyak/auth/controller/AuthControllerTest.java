@@ -3,6 +3,7 @@ package com.algogyeyak.auth.controller;
 import com.algogyeyak.auth.dto.PasswordPolicy;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.auth.service.EmailVerificationService;
 import com.algogyeyak.auth.service.PasswordResetService;
 import com.algogyeyak.auth.token.RefreshTokenService;
@@ -94,6 +95,15 @@ class AuthControllerTest {
 
     @MockitoBean
     private PasswordResetService passwordResetService;
+
+    // JwtAuthenticationFilter가 매 요청 이 캐시(진짜 Redis, 30초 TTL)를 먼저 보고 미스일 때만
+    // userRepository(mock)로 폴백한다 - 이걸 막아두지 않으면, 같은 userId(1L)를 재사용하는 여러
+    // /auth/me 테스트가 앞선 테스트의 캐시를 그대로 물려받아(예: 정상 유저로 캐시된 뒤 "정지된
+    // 유저" 테스트가 돌아도 캐시부터 맞아 mock한 정지 상태를 못 봄) 순서에 따라 실패가 갈리는
+    // 테스트 오염이 생긴다. mock으로 등록만 해두면 find()가 항상 Optional.empty()를 반환해
+    // (Mockito의 Optional 기본 응답) 모든 테스트가 매번 DB(mock) 경로를 확실히 타게 된다.
+    @MockitoBean
+    private UserAuthStatusCacheService userAuthStatusCacheService;
 
     @Test
     void passwordPolicyReturnsPatternWithoutSurroundingAnchorsAndMessage() throws Exception {
