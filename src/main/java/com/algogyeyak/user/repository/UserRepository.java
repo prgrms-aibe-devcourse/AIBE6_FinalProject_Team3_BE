@@ -108,4 +108,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     int updateStatusIfNotWithdrawn(
             @Param("id") Long id, @Param("status") UserStatus status, @Param("excludedStatus") UserStatus excludedStatus,
             @Param("updatedAt") LocalDateTime updatedAt);
+
+    /**
+     * ProfileImageOrphanCleanupJob이 "S3에는 있는데 DB엔 참조가 없는" 프로필 이미지 객체를
+     * 가려내기 위한 조회. profileImageUrl이 null인 유저(기본 이미지)는 애초에 참조가 아니므로
+     * 제외한다. PropertyImageRepository.findAllImageUrls()와 동일하게 엔티티 전체를 로딩하지
+     * 않는 스칼라 쿼리다.
+     */
+    @Query("SELECT u.profileImageUrl FROM User u WHERE u.profileImageUrl IS NOT NULL")
+    List<String> findAllProfileImageUrls();
 }
