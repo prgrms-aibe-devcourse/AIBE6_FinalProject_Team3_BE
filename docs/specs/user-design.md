@@ -13,16 +13,16 @@
 | Entity | 요구사항 | 실제 |
 |---|---|---|
 | `User` | id, nickname, email, profileImageUrl, status | 동일 (+ auth 관련 필드는 auth-design.md 참고) |
-| `UserPreference` | id, userId, interestRegion, transactionType, currentStage | 동일 — `User`와 `@OneToOne`(userId 유니크) |
+| `UserPreference` | id, userId, interestRegion, transactionType, currentStage | `User`와 `@OneToOne`(userId 유니크). **(2026-08-24 변경)** `currentStage` 필드는 제거됨 — 아래 "프로필 등록" 절과 "남은 이슈" 2번 참고 |
 
 ## 프로필 등록 (`POST /users/me/profile`) — 요구사항 대비
 
 | 요구사항 | 실제 구현 |
 |---|---|
 | 생성형 AI 기반 운용 사전 고지 | ❌ **백엔드에 관련 로직/응답 필드가 전혀 없습니다.** 프론트엔드가 화면에서만 고지 문구를 보여주는 것으로 추정 — 확인 필요 |
-| 입력값 검증 | 부분 구현 — 관심지역 필수(`@NotBlank`) + **(2026-08-14 추가)** 길이 제한(`@Size(max = 30)`), 거래유형 필수(`@NotNull`), 자취/취업여부(currentStage)는 선택. **(2026-08-12 변경)** 닉네임은 더 이상 이 API의 입력값이 아님 — 아래 참고 |
+| 입력값 검증 | 부분 구현 — 관심지역 필수(`@NotBlank`) + **(2026-08-14 추가)** 길이 제한(`@Size(max = 30)`), 거래유형 필수(`@NotNull`). ~~자취/취업여부(currentStage)는 선택~~ **(2026-08-24 삭제)** 아래 참고. **(2026-08-12 변경)** 닉네임은 더 이상 이 API의 입력값이 아님 — 아래 참고 |
 | UserPreference 저장 | ✅ |
-| currentStage에 따른 홈 위젯 우선순위 결정 | ❌ **백엔드는 currentStage 값을 그대로 저장만 하고, 우선순위를 계산하거나 응답에 담는 로직이 없습니다.** 위젯 우선순위 자체가 프론트엔드 책임으로 보임 — 확인 필요 |
+| ~~currentStage에 따른 홈 위젯 우선순위 결정~~ | **(2026-08-24 해결)** `currentStage` 필드 자체가 `ProfileRegisterRequest`/`ProfileUpdateRequest`/`UserProfileResponse`/`UserPreference`/`CurrentStage` enum에서 전부 제거됨(커밋 `2bed1d9`) — 더 이상 백엔드가 저장/응답하지 않으므로 "우선순위를 프론트가 계산하는지" 확인할 대상 자체가 없어짐 |
 | 성공: 온보딩 분기 반영된 홈으로 이동 | 백엔드는 이동 경로를 결정하지 않고 저장된 `UserProfileResponse`만 반환 — 라우팅은 프론트 담당으로 추정 |
 | 실패: 필수 입력값 누락 | ✅ 400 |
 | 실패: 인증되지 않은 사용자 | ✅ 401 (JWT 필터) |
@@ -90,7 +90,7 @@
 |---|---|
 | 본인 여부 확인 | ✅ |
 | 상태를 탈퇴로 변경 | ✅ |
-| 개인정보 삭제/익명화 | ✅ **(2026-08-10)** `User`의 nickname/email/passwordHash/profileImageUrl은 복원 불가능한 값으로 치환되고 `withdrawnAt`에 탈퇴 시각도 기록됩니다. `UserSocialAccount`(OAuth 연동정보)·`UserPreference`(관심지역/거래유형/자취여부)·본인 소유 `Checklist`는 하드 삭제되고, 본인 소유 `Property`는 기존 soft-delete(`Property.delete()`)를 재사용해 상태만 `DELETED`로 바꿉니다(다른 유저의 체크리스트·risk-analysis 기록이 이 매물을 참조하고 있어 row 자체는 보존) |
+| 개인정보 삭제/익명화 | ✅ **(2026-08-10)** `User`의 nickname/email/passwordHash/profileImageUrl은 복원 불가능한 값으로 치환되고 `withdrawnAt`에 탈퇴 시각도 기록됩니다. `UserSocialAccount`(OAuth 연동정보)·`UserPreference`(관심지역/거래유형, **(2026-08-24)** 자취여부는 필드 자체가 제거됨)·본인 소유 `Checklist`는 하드 삭제되고, 본인 소유 `Property`는 기존 soft-delete(`Property.delete()`)를 재사용해 상태만 `DELETED`로 바꿉니다(다른 유저의 체크리스트·risk-analysis 기록이 이 매물을 참조하고 있어 row 자체는 보존) |
 | 클라이언트 인증정보 제거 | ✅ **(2026-08-11)** `AuthController.logout()`에서 뽑아낸 `SessionLogoutService`를 재사용해, 탈퇴 커밋 후 refresh token 무효화(Redis)·access token jti 블랙리스트 등록·access/refresh 쿠키 삭제까지 처리합니다. 단, Redis 장애로 이 세션 무효화가 실패해도 탈퇴 자체는 이미 커밋된 뒤라 되돌리지 않고, `UserController.withdraw()`가 그 예외를 로그만 남기고 삼켜 응답은 항상 200으로 나갑니다 — 이 경우 쿠키가 자연 만료 전까지 남아있을 수 있지만, 이후 요청은 `JwtAuthenticationFilter`가 탈퇴 상태를 다시 확인해 차단하므로 보안 구멍은 아닙니다 |
 | 실패: 인증 실패 | ✅ 401 |
 | 실패: 이미 탈퇴한 사용자 | ✅ **(2026-08-11)** 도달 불가능했던 `User.withdraw()` 내부 가드는 제거했습니다 — 유일한 호출부인 `UserService.withdraw()`가 그보다 먼저 `getActiveUserOrThrow()`로 활성 사용자만 걸러내기 때문에 애초에 실행될 수 없는 코드였습니다. 대신 `getActiveUserOrThrow()` 자체가 탈퇴한 사용자를 404 `USER_WITHDRAWN`("이미 탈퇴한 사용자입니다.")으로, 정지된 사용자를 404 `USER_SUSPENDED`("정지된 사용자입니다.")로 구분해서 던지도록 변경해 실제로 구분되는 실패 사유를 응답합니다 |
@@ -107,7 +107,7 @@
 | 불필요한 개인정보 미수집 | O | 판단 어려움 — 확인 필요 |
 | 탈퇴 시 삭제/익명화 | O | ✅ **(2026-08-10)** `User` 익명화 + `UserSocialAccount`/`UserPreference`/본인 `Checklist` 하드 삭제 + 본인 `Property` soft-delete |
 | OAuth 연동정보 탈퇴 처리 기준 | O(별도 정의) | ✅ **(2026-08-10)** 하드 삭제로 확정 — 재가입 시 동일 소셜 계정 재연동이 가능해야 하므로 |
-| 선택 정보는 건너뛰기 가능 | O | ✅ `currentStage` 등 선택 필드는 실제로 선택 |
+| 선택 정보는 건너뛰기 가능 | O | ~~✅ `currentStage` 등 선택 필드는 실제로 선택~~ **(2026-08-24)** `currentStage` 필드가 제거되어 이제 프로필 등록의 선택 필드는 없음(관심지역/거래유형 모두 필수) |
 | 오류 항목/수정 방법 명확 표시 | O | ✅ Bean Validation 메시지가 필드별로 내려감 |
 | 불필요한 필수 입력 강제 안 함 | O | ✅ |
 | 닉네임 중복: 앱 검증 + DB 제약 동시 적용 | O | ✅ `existsByNicknameAndIdNot` + `User.nickname` DB unique 제약 |
@@ -126,7 +126,7 @@
 ## 남은 이슈 / 확인 필요 총정리
 
 1. "생성형 AI 서비스 사전 고지"가 백엔드에 전혀 없음 — 프론트 전담인지 확인
-2. `currentStage` 기반 홈 위젯 우선순위 로직이 백엔드에 없음 — 프론트가 currentStage 값만 받아서 직접 계산하는 구조인지 확인
+2. ~~`currentStage` 기반 홈 위젯 우선순위 로직이 백엔드에 없음 — 프론트가 currentStage 값만 받아서 직접 계산하는 구조인지 확인~~ **(2026-08-24 해결)** `currentStage`(자취 단계) 필드 자체를 백엔드에서 제거함(`ProfileRegisterRequest`/`ProfileUpdateRequest`/`UserProfileResponse`/`UserPreference`/`CurrentStage` enum, 커밋 `2bed1d9`) — 위젯 우선순위 확인 대상 자체가 사라짐
 3. **(2026-08-10 해결됨)** 탈퇴 시 `UserPreference`(관심지역/거래유형/자취여부) 하드 삭제 처리 완료
 4. **(2026-08-10 해결됨)** 탈퇴 시 OAuth 연동 정보(하드 삭제) / `Checklist`(하드 삭제) / `Property`(soft-delete 재사용) 처리 완료. `ContractAnalysis`는 stateless라 처리 대상 자체가 없음을 확인
 5. **(2026-08-11 해결됨)** 탈퇴 시 쿠키를 지우지 않던 문제 — `SessionLogoutService`(auth 도메인에서 로그아웃 로직을 공용화) 도입 후 `UserController.withdraw()`에서 탈퇴 커밋 뒤 호출하도록 통합 완료. Redis 장애 시의 처리 방식(예외를 삼키고 200 응답)은 `SessionLogoutService` 클래스 주석과 위 표의 "클라이언트 인증정보 제거" 항목 참고
