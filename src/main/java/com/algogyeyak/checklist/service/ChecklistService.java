@@ -19,6 +19,7 @@ import com.algogyeyak.property.entity.PropertyStatus;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
+import org.hibernate.Hibernate;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -115,8 +116,26 @@ public class ChecklistService {
             // 재조회도 REQUIRES_NEW(새 스냅샷)에서 한다 - 바깥 트랜잭션에서 그대로 재조회하면 MySQL
             // InnoDB의 기본 격리수준(REPEATABLE READ)에서는 이미 확보한 스냅샷에 갇혀 방금 경쟁에서
             // 이긴 다른 트랜잭션의 커밋이 안 보일 수 있다(LocalAuthService.signup()과 동일 이유).
-            Checklist winner = requiresNewTransactionTemplate.execute(status ->
-                    checklistRepository.findByUserIdAndPropertyId(userId, propertyId).orElse(null));
+            Checklist winner = requiresNewTransactionTemplate.execute(status -> {
+                Checklist found = checklistRepository.findByUserIdAndPropertyId(userId, propertyId).orElse(null);
+                // items는 findByUserIdAndPropertyId()의 @EntityGraph로 이미 즉시 로딩되지만, 그
+                // 안의 item.template과 template.images는 여전히 LAZY라 컨트롤러가
+                // ChecklistItemResponse.from()에서 이걸 읽으려는 순간 이 세션이 이미 닫혀 있어
+                // LazyInitializationException이 난다(items 자체와 동일한 이유, k6
+                // 03-race-conditions.js로 재현 확인, 2026-08-24). items+template.images를
+                // 한 EntityGraph로 같이 즉시 로딩하면 List 컬렉션 두 개(items, template.images)를
+                // 동시에 fetch join하게 돼 MultipleBagFetchException 위험이 있어, 세션이 열려있는
+                // 지금 여기서 명시적으로 미리 초기화해둔다.
+                if (found != null) {
+                    found.getItems().forEach(item -> {
+                        if (item.getTemplate() != null) {
+                            Hibernate.initialize(item.getTemplate());
+                            Hibernate.initialize(item.getTemplate().getImages());
+                        }
+                    });
+                }
+                return found;
+            });
             if (winner == null) {
                 throw e;
             }

@@ -1,5 +1,6 @@
 package com.algogyeyak.checklist.service;
 
+import com.algogyeyak.checklist.dto.ChecklistResponse;
 import com.algogyeyak.checklist.entity.Checklist;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.property.entity.Property;
@@ -20,6 +21,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * ChecklistServiceTest는 Mockito 목 저장소라 createOrGetChecklist()의 "없으면 insert" 로직이 실제
@@ -74,5 +76,17 @@ class ChecklistServiceConcurrencyTest {
         assertThat(resultA.getId()).as("두 요청 모두 같은 체크리스트를 받아야 한다(경쟁에서 진 쪽도 승자를 그대로 반환)")
                 .isEqualTo(resultB.getId());
         assertThat(checklistRepository.findByUserIdAndPropertyId(user.getId(), property.getId())).isPresent();
+
+        // ChecklistController.createChecklist()가 실제로 호출하는 것과 동일한 코드 경로 - items 안의
+        // 각 item.getTemplate().getImages()까지 지연 로딩을 트리거한다. 두 Future 모두 이미 get()으로
+        // 완료돼 각자의 REQUIRES_NEW 세션(경쟁에서 졌다면 복구용 세션)이 닫힌 뒤이므로, 여기서 예외 없이
+        // 통과해야 재조회 경로가 items.template.images까지 미리 초기화해뒀다는 뜻이다(둘 중 어느 쪽이
+        // 승자/패자인지는 레이스 타이밍에 따라 달라 매번 다르므로 양쪽 다 확인한다).
+        assertThatCode(() -> ChecklistResponse.from(resultA))
+                .as("경쟁에서 진 쪽이 반환한 엔티티도 컨트롤러의 응답 변환(items.template.images 접근)이 예외 없이 끝나야 한다")
+                .doesNotThrowAnyException();
+        assertThatCode(() -> ChecklistResponse.from(resultB))
+                .as("경쟁에서 진 쪽이 반환한 엔티티도 컨트롤러의 응답 변환(items.template.images 접근)이 예외 없이 끝나야 한다")
+                .doesNotThrowAnyException();
     }
 }
