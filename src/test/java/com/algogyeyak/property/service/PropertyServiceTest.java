@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -17,6 +18,7 @@ import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.PageResponse;
+import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
@@ -84,6 +86,9 @@ class PropertyServiceTest {
     private PropertyRiskSummaryProvider propertyRiskSummaryProvider;
 
     @Mock
+    private S3PresignService s3PresignService;
+
+    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private PropertyService propertyService;
@@ -95,8 +100,13 @@ class PropertyServiceTest {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
                 checklistRepository, checklistItemRepository, propertyReportRepository,
-                propertyImageRepository, propertyRiskSummaryProvider, eventPublisher
+                propertyImageRepository, propertyRiskSummaryProvider, s3PresignService, eventPublisher
         );
+        // 이미지 소유권 검증(전수조사 결과 보안 2번)의 기본값 - 이 스텁을 실제로 쓰지 않는 테스트가
+        // 대부분이라 strict stubbing이 "unnecessary stubbing"으로 막지 않도록 lenient로 등록한다.
+        // 소유권 검증 자체를 테스트하는 케이스는 이 기본값을 필요에 따라 개별적으로 덮어쓴다.
+        lenient().when(s3PresignService.extractOwnedKey(anyString()))
+                .thenReturn(Optional.of("property-images/" + USER_ID + "/dummy.jpg"));
     }
 
     private AddressResolutionResult resolvedAddress() {
@@ -114,6 +124,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -143,11 +154,54 @@ class PropertyServiceTest {
         verify(eventPublisher).publishEvent(any(PropertyUpdatedEvent.class));
     }
 
+    // 회귀 테스트 - 예전엔 sortOrder가 항상 null로 남아있어(applyImages()가 imageUrl/roomType만
+    // 설정) 대표사진(첫 이미지) 지정이 삽입 순서라는 관찰된 동작에만 암묵적으로 의존했다
+    // (전수조사 결과 버그/정확성 2번). 요청 리스트의 인덱스가 그대로 sortOrder로 저장되는지 확인한다.
+    @Test
+    void 등록_요청의_이미지_순서가_sortOrder로_저장된다() {
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                "역세권 오피스텔",
+                List.of(
+                        new PropertyImageRequest("https://cdn.algogyeyak.com/img/first.jpg", null),
+                        new PropertyImageRequest("https://cdn.algogyeyak.com/img/second.jpg", null)
+                )
+        );
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
+        )).thenReturn(false);
+        when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        propertyService.register(USER_ID, request);
+
+        org.mockito.ArgumentCaptor<Property> captor = org.mockito.ArgumentCaptor.forClass(Property.class);
+        verify(propertyRepository).save(captor.capture());
+        assertThat(captor.getValue().getImages()).extracting(
+                com.algogyeyak.property.entity.PropertyImage::getImageUrl,
+                com.algogyeyak.property.entity.PropertyImage::getSortOrder
+        ).containsExactly(
+                org.assertj.core.groups.Tuple.tuple("https://cdn.algogyeyak.com/img/first.jpg", 0),
+                org.assertj.core.groups.Tuple.tuple("https://cdn.algogyeyak.com/img/second.jpg", 1)
+        );
+    }
+
     @Test
     void 관리비를_입력하면_등록_응답에_반영된다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -179,6 +233,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -206,6 +261,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "존재하지 않는 주소",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -228,6 +284,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -252,6 +309,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 종로구 충신동 1",
+                null,
                 PropertyType.DETACHED_HOUSE,
                 TransactionType.JEONSE,
                 200_000_000L,
@@ -284,6 +342,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 종로구 청운동 1",
+                null,
                 PropertyType.MULTI_FAMILY,
                 TransactionType.JEONSE,
                 200_000_000L,
@@ -319,6 +378,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -340,6 +400,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -364,6 +425,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -380,11 +442,68 @@ class PropertyServiceTest {
                 .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
     }
 
+    // 회귀 테스트 - 이미지 URL이 우리 S3 버킷을 가리키지 않으면(extractOwnedKey가 empty) 소유권
+    // 검증 자체가 불가능하다고 보고 거부한다. 예전엔 확장자/프로토콜만 맞으면 임의의 외부 URL도
+    // 그대로 통과·저장됐다(전수조사 결과 보안 2번).
+    @Test
+    void 우리_버킷_URL이_아닌_이미지면_예외가_발생한다() {
+        when(s3PresignService.extractOwnedKey("https://cdn.algogyeyak.com/img/abc.jpg"))
+                .thenReturn(Optional.empty());
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                null,
+                List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.jpg", null))
+        );
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
+    // 회귀 테스트 - 우리 버킷 URL이더라도 key가 다른 유저(property-images/{다른 userId}/...) 소유면
+    // 거부한다. 이미 확정된 타인의 매물 이미지 URL을 그대로 넣는 시나리오를 막는다.
+    @Test
+    void 타인_소유의_이미지_key면_예외가_발생한다() {
+        Long otherUserId = 999L;
+        when(s3PresignService.extractOwnedKey("https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg"))
+                .thenReturn(Optional.of("property-images/" + otherUserId + "/abc.jpg"));
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                null,
+                List.of(new PropertyImageRequest(
+                        "https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg", null
+                ))
+        );
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
     @Test
     void 월세인데_월임대료가_없으면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.MONTHLY_RENT,
                 5_000_000L,
@@ -404,6 +523,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -731,6 +851,29 @@ class PropertyServiceTest {
         assertThat(result.content()).isEmpty();
     }
 
+    // 회귀 테스트 - region 검색어에 리터럴 "%"/"_"가 들어있으면 repository.search()에 넘기기 전에
+    // 이스케이프해야 한다(escapeLikePattern, 전수조사 결과 버그/정확성 1번). 그러지 않으면 이 문자들이
+    // SQL LIKE 와일드카드로 해석돼 사용자가 의도한 것보다 훨씬 넓거나 좁게 매칭된다 - 실제 이스케이프
+    // 해석(ESCAPE '\')이 결과에 반영되는지는 PropertyRepositoryTest가 검증하고, 여기서는 Service가
+    // repository에 넘기는 값 자체가 이스케이프됐는지만 확인한다.
+    @Test
+    void region_검색어의_와일드카드_문자는_이스케이프되어_repository_search에_전달된다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                "100%_동", null, null, null, null, null, null, null, null, null
+        );
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                eq("100\\%\\_동"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable, condition);
+
+        assertThat(result.content()).isEmpty();
+    }
+
     @Test
     void 면적_거래유형_매물유형_보증금_조건이_repository_search에_그대로_전달된다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
@@ -964,7 +1107,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, "수정된 설명", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, "수정된 설명", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -977,6 +1120,41 @@ class PropertyServiceTest {
         // risk-analysis가 위험 신호·전세가율을 재계산할 수 있도록 이벤트를 발행한다 - property는
         // risk-analysis를 직접 참조하지 않고 이벤트로만 알린다(도메인 결합 방지).
         verify(eventPublisher).publishEvent(new PropertyUpdatedEvent(1L));
+    }
+
+    // 회귀 테스트 - 이미지 소유권 검증(전수조사 결과 보안 2번)이 register()뿐 아니라 update()에서도
+    // 동작하는지 확인한다. register() 쪽 검증은 위쪽 이미지 테스트들이 이미 커버하므로, 여기서는
+    // update()가 userId를 validateImages()에 제대로 전달하는지만 별도로 확인한다.
+    @Test
+    void 매물_수정_시_타인_소유의_이미지_key면_예외가_발생한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description("역세권 오피스텔")
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+
+        Long otherUserId = 999L;
+        when(s3PresignService.extractOwnedKey("https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg"))
+                .thenReturn(Optional.of("property-images/" + otherUserId + "/abc.jpg"));
+        PropertyUpdateRequest request = new PropertyUpdateRequest(
+                "테스트 매물", null, 35_000_000L, null, 25.0, null, "수정된 설명",
+                List.of(new PropertyImageRequest(
+                        "https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg", null
+                ))
+        );
+
+        assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
     }
 
     @Test
@@ -996,7 +1174,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("", 35_000_000L, null, 25.0, null, "수정된 설명", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("", null, 35_000_000L, null, 25.0, null, "수정된 설명", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -1021,7 +1199,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 30_000_000L, null, 23.5, 200_000L, "역세권 오피스텔", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 30_000_000L, null, 23.5, 200_000L, "역세권 오피스텔", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -1032,7 +1210,7 @@ class PropertyServiceTest {
     void 존재하지_않는_매물을_수정하면_예외가_발생한다() {
         when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 999L, request))
                 .isInstanceOf(BusinessException.class);
@@ -1055,7 +1233,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
@@ -1077,7 +1255,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, 500_000L, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);

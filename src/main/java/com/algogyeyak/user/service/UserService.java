@@ -110,7 +110,6 @@ public class UserService {
                 .user(user)
                 .interestRegion(request.getInterestRegion())
                 .transactionType(request.getTransactionType())
-                .currentStage(request.getCurrentStage())
                 .build();
 
         savePreferenceOrThrowIfAlreadyRegistered(userId, preference);
@@ -202,9 +201,6 @@ public class UserService {
         }
         if (request.getTransactionType() != null) {
             preference.updateTransactionType(request.getTransactionType());
-        }
-        if (request.getCurrentStage() != null) {
-            preference.updateCurrentStage(request.getCurrentStage());
         }
 
         return toResponse(user, preference);
@@ -348,7 +344,6 @@ public class UserService {
                 .interestRegion(preference != null ? preference.getInterestRegion() : null)
                 .transactionType(preference != null && preference.getTransactionType() != null
                         ? preference.getTransactionType().name() : null)
-                .currentStage(preference != null ? preference.getCurrentStage() : null)
                 .hasPassword(user.getPasswordHash() != null)
                 .build();
     }

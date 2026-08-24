@@ -83,4 +83,19 @@ public class ContractAnalysisHistoryService {
 
         return ContractHistoryDetailResponse.from(contractRequest, propertyTitle);
     }
+
+    // 매물(soft delete)과 달리 이력은 활성 상태가 없는 단순 로그성 기록이라 상태 플래그 없이
+    // 바로 물리 삭제한다. clauses는 ContractRequest에 cascade=ALL + orphanRemoval=true로
+    // 걸려있어 별도 삭제 호출 없이 함께 지워진다.
+    @Transactional
+    public void deleteMyContractHistory(Long userId, Long id) {
+        ContractRequest contractRequest = contractRequestRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CONTRACT_ANALYSIS_HISTORY_NOT_FOUND));
+
+        if (!contractRequest.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_FORBIDDEN, "본인의 계약 분석 이력만 삭제할 수 있습니다.");
+        }
+
+        contractRequestRepository.delete(contractRequest);
+    }
 }

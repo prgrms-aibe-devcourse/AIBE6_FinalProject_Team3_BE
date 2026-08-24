@@ -13,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -93,7 +94,12 @@ public class Property {
     @OneToOne(mappedBy = "property", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private PropertyAddress address;
 
+    // sortOrder는 PropertyService.applyImages()가 등록/수정 요청 리스트의 인덱스로 채운다 -
+    // @OrderBy가 없으면 조회 순서가 DB/쿼리 플랜에 따라 흔들릴 수 있어, 대표사진(첫 이미지) 지정이
+    // 삽입 순서라는 관찰된 동작에만 암묵적으로 의존하던 문제를 명시적 정렬로 해소한다
+    // (전수조사 결과 버그/정확성 2번).
     @OneToMany(mappedBy = "property", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC")
     private List<PropertyImage> images = new ArrayList<>();
 
     @CreatedDate

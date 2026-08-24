@@ -175,7 +175,7 @@ risk-policy:
   jeonse-ratio-caution-from: 80
   jeonse-ratio-warn-from: 100
   jeonse-ratio-warn-to: 150
-  multi-account-detection-enabled: false
+  multi-account-detection-enabled: true
   same-account-threshold-count: 3
   same-account-window-days: 7
   short-term-relisting-window-days: 30
@@ -200,6 +200,16 @@ property:
     grace-period-hours: 24
     # 삭제 후보가 전체 S3 객체의 50%를 넘으면 이번 실행을 건너뛰고 경고만 남긴다(서킷브레이커,
     # PropertyImageCleanupProperties 참고).
+    max-delete-ratio: 0.5
+
+# 프로필 이미지 고아 객체 정리 배치(ProfileImageOrphanCleanupJob) 정책값. property.image-cleanup과
+# 같은 이유로 09:30에 잡되, 같은 시각에 두 배치가 동시에 S3/DB에 부하를 주지 않도록 5분 늦춘다.
+user:
+  profile-image-cleanup:
+    cron: 0 35 9 * * *
+    grace-period-hours: 24
+    # 삭제 후보가 전체 S3 객체의 50%를 넘으면 이번 실행을 건너뛰고 경고만 남긴다(서킷브레이커,
+    # ProfileImageCleanupProperties 참고).
     max-delete-ratio: 0.5
 
 server:

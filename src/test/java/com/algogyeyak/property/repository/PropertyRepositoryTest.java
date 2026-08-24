@@ -136,6 +136,30 @@ class PropertyRepositoryTest {
         assertThat(result.getContent()).extracting(Property::getId).containsExactly(raemian.getId());
     }
 
+    // 회귀 테스트 - ESCAPE '\'가 없으면 title에 포함된 리터럴 "_"가 SQL LIKE 와일드카드(임의의 한
+    // 글자)로 해석돼, 이 검색이 "104_1호"뿐 아니라 "104X1호" 같은 매물까지 걸려버린다.
+    // PropertyService.escapeLikePattern()이 넘기는 것과 동일하게 이미 이스케이프된 입력("104\\_1호")을
+    // 직접 주어, ESCAPE '\'가 그 이스케이프를 실제로 해석해 "_"를 리터럴 문자로만 매칭하는지 확인한다
+    // (UserRepositoryTest의 동일 회귀 테스트와 같은 패턴, 전수조사 결과 버그/정확성 1번).
+    @Test
+    void region_검색어의_이스케이프된_밑줄은_와일드카드가_아니라_리터럴_문자로_매칭된다() {
+        Property target = propertyRepository.save(Property.builder()
+                .userId(1L).title("104_1호").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(10_000_000L).area(20.0).build());
+        propertyRepository.save(Property.builder()
+                .userId(1L).title("104X1호").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(10_000_000L).area(20.0).build());
+
+        Page<Property> result = propertyRepository.search(
+                1L, PropertyStatus.ACTIVE,
+                "104\\_1호", null, null, null, null, null, null, null, null,
+                null,
+                defaultPageable()
+        );
+
+        assertThat(result.getContent()).extracting(Property::getId).containsExactly(target.getId());
+    }
+
     @Test
     void signalPropertyIds가_null이면_필터링_없이_전체_매물을_반환한다() {
         Property property1 = save(1L);

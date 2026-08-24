@@ -9,10 +9,11 @@ public interface PropertyImageRepository extends JpaRepository<PropertyImage, Lo
 
     /**
      * 매물 목록 조회(PropertyService.getMyProperties())에서 대표 이미지를 배치로 가져오기 위한
-     * 조회. sortOrder는 현재 업로드 플로우(PropertyService.applyImages())에서 채워지지 않아
-     * 항상 null이라 정렬 기준으로 못 쓰고, id 오름차순(=업로드된 순서)을 대표 이미지 판단 기준으로
-     * 쓴다. 매물별로 가장 먼저 업로드된 한 장만 필요하므로, 호출부에서 propertyId별로 묶은 뒤
-     * 이 정렬 순서상 처음 나오는 행만 취한다.
+     * 조회. sortOrder는 PropertyService.applyImages()가 요청 리스트 인덱스로 채우지만, 등록/수정
+     * 시점의 insert 순서와 항상 같은 값이라(전수조사 결과 버그/정확성 2번 이후) id 오름차순
+     * (=업로드된 순서)을 그대로 대표 이미지 판단 기준으로 써도 결과가 갈리지 않는다. 매물별로
+     * 가장 먼저 업로드된 한 장만 필요하므로, 호출부에서 propertyId별로 묶은 뒤 이 정렬 순서상
+     * 처음 나오는 행만 취한다.
      */
     List<PropertyImage> findByProperty_IdInOrderByProperty_IdAscIdAsc(List<Long> propertyIds);
 

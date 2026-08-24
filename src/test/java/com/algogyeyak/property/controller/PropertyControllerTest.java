@@ -78,6 +78,7 @@ class PropertyControllerTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -96,7 +97,8 @@ class PropertyControllerTest {
                         "서울특별시 강남구 테헤란로 123",
                         "서울특별시 강남구 역삼동 123-45",
                         37.4995539438207,
-                        127.031393491745
+                        127.031393491745,
+                        null
                 ),
                 MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
                 null
@@ -123,6 +125,7 @@ class PropertyControllerTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -141,7 +144,8 @@ class PropertyControllerTest {
                         "서울특별시 강남구 테헤란로 123",
                         "서울특별시 강남구 역삼동 123-45",
                         37.4995539438207,
-                        127.031393491745
+                        127.031393491745,
+                        null
                 ),
                 MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
                 null
@@ -163,6 +167,7 @@ class PropertyControllerTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -194,6 +199,7 @@ class PropertyControllerTest {
                 100_000L,
                 "서울특별시 강남구 테헤란로 123",
                 "서울특별시 강남구 역삼동 123-45",
+                null,
                 "ACTIVE",
                 LocalDateTime.of(2026, 7, 23, 10, 0),
                 75,
@@ -291,7 +297,8 @@ class PropertyControllerTest {
                         "서울특별시 강남구 테헤란로 123",
                         "서울특별시 강남구 역삼동 123-45",
                         37.4995539438207,
-                        127.031393491745
+                        127.031393491745,
+                        null
                 ),
                 List.of(new PropertyImageResponse("https://cdn.algogyeyak.com/img/abc.jpg", null)),
                 MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
@@ -338,7 +345,7 @@ class PropertyControllerTest {
 
     @Test
     void 매물_수정에_성공하면_200과_수정된_정보를_반환한다() throws Exception {
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, "수정된 설명", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, "수정된 설명", null);
 
         PropertyDetailResponse response = new PropertyDetailResponse(
                 101L,
@@ -354,7 +361,8 @@ class PropertyControllerTest {
                         "서울특별시 강남구 테헤란로 123",
                         "서울특별시 강남구 역삼동 123-45",
                         37.4995539438207,
-                        127.031393491745
+                        127.031393491745,
+                        null
                 ),
                 List.of(),
                 MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"),
@@ -380,7 +388,7 @@ class PropertyControllerTest {
 
     @Test
     void 존재하지_않는_매물을_수정하면_404를_반환한다() throws Exception {
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, null, null);
 
         when(propertyService.update(anyLong(), anyLong(), any(PropertyUpdateRequest.class)))
                 .thenThrow(new BusinessException(ErrorCode.PROPERTY_NOT_FOUND));
@@ -395,7 +403,7 @@ class PropertyControllerTest {
 
     @Test
     void 본인_소유가_아닌_매물을_수정하면_403을_반환한다() throws Exception {
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, null, null);
 
         when(propertyService.update(anyLong(), anyLong(), any(PropertyUpdateRequest.class)))
                 .thenThrow(new BusinessException(ErrorCode.PROPERTY_ACCESS_DENIED));
@@ -410,7 +418,7 @@ class PropertyControllerTest {
 
     @Test
     void 보증금이_없으면_수정요청은_400을_반환한다() throws Exception {
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, null, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, null, null, 25.0, null, null, null);
 
         mockMvc.perform(patch("/properties/101")
                         .with(asUser(USER_ID))

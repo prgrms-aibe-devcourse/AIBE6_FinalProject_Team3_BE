@@ -21,6 +21,9 @@ public record PropertyListResponse(
         Long maintenanceFee,
         String roadAddress,
         String jibunAddress,
+        // 동/호수 등 상세주소(5차 멘토링 피드백 3번) - 같은 건물 안 여러 매물을 목록에서도 구분할
+        // 수 있어야 해서 목록 응답에도 노출한다(상세조회와 동일하게).
+        String detailAddress,
         String status,
         LocalDateTime createdAt,
         Integer checklistProgress,
@@ -66,6 +69,7 @@ public record PropertyListResponse(
                 property.getMaintenanceFee(),
                 address != null ? address.getRoadAddress() : null,
                 address != null ? address.getJibunAddress() : null,
+                address != null ? address.getDetailAddress() : null,
                 property.getStatus().name(),
                 property.getCreatedAt(),
                 checklistProgress,

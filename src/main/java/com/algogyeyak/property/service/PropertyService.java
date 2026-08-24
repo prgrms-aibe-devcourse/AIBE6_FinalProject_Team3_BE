@@ -7,6 +7,8 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.pagination.PageableUtils;
 import com.algogyeyak.global.response.PageResponse;
+import com.algogyeyak.global.s3.service.S3PresignService;
+import com.algogyeyak.global.s3.util.S3KeyGenerator;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
@@ -54,6 +56,7 @@ public class PropertyService {
     private final PropertyReportRepository propertyReportRepository;
     private final PropertyImageRepository propertyImageRepository;
     private final PropertyRiskSummaryProvider propertyRiskSummaryProvider;
+    private final S3PresignService s3PresignService;
     private final ApplicationEventPublisher eventPublisher;
 
     // 목록 조회 정렬 허용 필드 - PageableUtils.validateSort가 이 밖의 필드는 INVALID_SORT_FIELD로 막는다.
@@ -68,7 +71,7 @@ public class PropertyService {
     @Transactional
     public PropertyRegisterResponse register(Long userId, PropertyRegisterRequest request) {
         validatePriceCombination(request.transactionType(), request.deposit(), request.monthlyRent());
-        validateImages(request.images());
+        validateImages(userId, request.images());
 
         AddressResolutionResult addressResult = kakaoAddressClient.resolve(request.address());
         if (!addressResult.isResolved()) {
@@ -96,6 +99,7 @@ public class PropertyService {
                 .jibunAddress(addressResult.getJibunAddress())
                 .latitude(addressResult.getLatitude())
                 .longitude(addressResult.getLongitude())
+                .detailAddress(request.detailAddress())
                 .build();
         property.assignAddress(address);
 
@@ -156,7 +160,7 @@ public class PropertyService {
         Page<Property> properties = propertyRepository.search(
                 userId,
                 PropertyStatus.ACTIVE,
-                condition.region(),
+                escapeLikePattern(condition.region()),
                 condition.minArea(),
                 condition.maxArea(),
                 condition.transactionType(),
@@ -249,6 +253,19 @@ public class PropertyService {
         }
     }
 
+    // PropertyRepository.search()의 region LIKE 검색은 파라미터를 그대로 CONCAT('%', :x, '%')에
+    // 넣는다 - 완전히 파라미터화돼 있어 SQL 인젝션 위험은 없지만, 검색어에 리터럴 %나 _가 들어있으면
+    // 그 문자 자체가 SQL LIKE 와일드카드로 해석돼 사용자가 의도한 것보다 훨씬 넓거나 좁게 매칭된다
+    // (AdminUserService.escapeLikePattern과 동일한 패턴, 전수조사 결과 버그/정확성 1번). 역슬래시
+    // 자신부터 먼저 이스케이프해야 한다 - 순서를 바꾸면 방금 넣은 이스케이프용 역슬래시가 다시
+    // 이스케이프된다.
+    private static String escapeLikePattern(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+    }
+
     /**
      * 매물 상세조회. 존재하지 않거나 이미 삭제된 매물은 PROPERTY_NOT_FOUND,
      * 존재하지만 본인 소유가 아니면 PROPERTY_ACCESS_DENIED로 구분한다.
@@ -282,13 +299,17 @@ public class PropertyService {
         }
 
         validatePriceCombination(property.getTransactionType(), request.deposit(), request.monthlyRent());
-        validateImages(request.images());
+        validateImages(userId, request.images());
 
         property.updateTitle(resolveTitle(request.title(), property.getPropertyType()));
         property.updatePriceInfo(request.deposit(), request.monthlyRent());
         property.updateArea(request.area());
         property.updateMaintenanceFee(request.maintenanceFee());
         property.updateDescription(request.description());
+        // roadAddress/jibunAddress/latitude/longitude와 달리 detailAddress는 예외적으로 수정
+        // 가능하다(PropertyUpdateRequest javadoc 참고) - property.getAddress()는 등록 시 항상
+        // 채워지므로(register()에서 필수 생성) null일 수 없다.
+        property.getAddress().updateDetailAddress(request.detailAddress());
 
         // images가 null이면 "이미지 변경 없음"(기존 유지) - null이 아니면(빈 리스트 포함) 통째로 교체.
         // 부분 추가/삭제 API가 없으므로 매번 전체 목록을 다시 제출해야 한다.
@@ -370,12 +391,18 @@ public class PropertyService {
 
     /**
      * 이미지 검증. http(s) 프로토콜 + 허용된 확장자(jpg/jpeg/png/webp/gif)인지, 개수가
-     * MAX_IMAGE_COUNT(10)를 넘지 않는지 확인한다. imageUrl은 업로드 API(POST /properties/images/*)를
-     * 거쳐 이미 S3ImagePurpose.PROPERTY 기준(확장자/컨텐츠타입/용량)으로 검증된 값이 들어오는 게
-     * 정상이지만, 여기서도 형식/개수만큼은 한 번 더 방어적으로 확인한다 - roomType은 선택값이라
-     * 별도 검증 없음(enum 자체가 잘못된 값이면 역직렬화 단계에서 400).
+     * MAX_IMAGE_COUNT(10)를 넘지 않는지 확인한 뒤, 마지막으로 이 URL이 실제로 호출자 본인이 업로드
+     * API(POST /properties/images/upload-url → /confirm)를 거쳐 발급받은 S3 key를 가리키는지
+     * 확인한다 - 이 확인이 없으면 임의의 외부 http(s) 이미지 URL이나 이미 확정된 타인의 매물 이미지
+     * URL을 그대로 넣어도 통과·저장됐다(전수조사 결과 보안 2번). PropertyImageUploadController.confirm()의
+     * 소유권 검증(전수조사 결과 보안 1번, #168)과 동일한 방식이지만 그건 "업로드 확정 시점"만 막고
+     * 있었고, 여기(등록/수정 시점)는 이번에 새로 막는 것이다.
+     * S3PresignService.extractOwnedKey()가 우리 버킷 URL이 아니면 empty를 반환하므로, 외부 URL은
+     * 이 단계에서 자연히 걸러진다(key가 없으면 소유권 검증 자체가 불가능하다고 보고 거부).
+     * "presign/confirm을 실제로 거쳤는지"(S3 pending 태그 확인)까지는 이번 검증 범위 밖이다 - 그건
+     * S3 HeadObject 호출이 필요한 별도 작업으로 분리했다.
      */
-    private void validateImages(List<PropertyImageRequest> images) {
+    private void validateImages(Long userId, List<PropertyImageRequest> images) {
         if (images == null || images.isEmpty()) {
             return;
         }
@@ -391,17 +418,30 @@ public class PropertyService {
                         ErrorCode.PROPERTY_IMAGE_INVALID, "지원하지 않는 이미지 형식입니다: " + imageUrl
                 );
             }
+            String key = s3PresignService.extractOwnedKey(imageUrl).orElse(null);
+            if (key == null || !S3KeyGenerator.isPropertyImageOwnedBy(userId, key)) {
+                throw new BusinessException(
+                        ErrorCode.PROPERTY_IMAGE_INVALID, "본인이 업로드한 이미지만 등록할 수 있습니다: " + imageUrl
+                );
+            }
         }
     }
 
+    // sortOrder는 요청 리스트의 인덱스를 그대로 쓴다 - PropertyImageRequest 자체에 순서 필드가
+    // 없고, 이 리스트의 순서가 곧 사용자가 의도한 표시 순서다(FE가 업로드/재배열한 순서 그대로
+    // 제출). Property.images의 @OrderBy("sortOrder")가 이 값을 기준으로 조회 순서를 보장한다
+    // (전수조사 결과 버그/정확성 2번 - 예전엔 sortOrder가 항상 null로 남아있어 대표사진(첫 이미지)
+    // 지정이 삽입 순서라는 관찰된 동작에만 의존하고 있었다).
     private void applyImages(Property property, List<PropertyImageRequest> images) {
         if (images == null) {
             return;
         }
-        for (PropertyImageRequest image : images) {
+        for (int i = 0; i < images.size(); i++) {
+            PropertyImageRequest image = images.get(i);
             property.addImage(PropertyImage.builder()
                     .imageUrl(image.imageUrl())
                     .roomType(image.roomType())
+                    .sortOrder(i)
                     .build());
         }
     }

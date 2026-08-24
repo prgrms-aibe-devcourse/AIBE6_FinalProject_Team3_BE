@@ -26,6 +26,10 @@ public record PropertyRegisterRequest(
         @NotBlank(message = "주소는 필수입니다.")
         String address,
 
+        // 선택 입력 - 동/호수 등 상세주소. Kakao 지오코딩 대상이 아닌 순수 표시·식별용 값이라
+        // address와 달리 형식 검증을 두지 않는다(5차 멘토링 피드백 3번).
+        String detailAddress,
+
         @NotNull(message = "매물 유형은 필수입니다.")
         PropertyType propertyType,
 
