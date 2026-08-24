@@ -90,7 +90,9 @@ public enum ErrorCode {
     // Property 도메인
     PROPERTY_NOT_FOUND(HttpStatus.NOT_FOUND, "PROPERTY_NOT_FOUND", "존재하지 않는 매물입니다."),
     PROPERTY_ACCESS_DENIED(HttpStatus.FORBIDDEN, "PROPERTY_ACCESS_DENIED", "본인이 등록한 매물만 접근할 수 있습니다."),
-    PROPERTY_REQUIRED_FIELD_MISSING(HttpStatus.BAD_REQUEST, "PROPERTY_REQUIRED_FIELD_MISSING", "필수 입력값이 누락되었습니다."),
+    // PROPERTY_REQUIRED_FIELD_MISSING은 죽은 에러코드였다 - 필수값 검증은 Bean Validation
+    // (@NotBlank/@NotNull)이 처리하고 일반 400으로 응답되어 이 코드는 선언 외에 참조되는 곳이 없었다
+    // (전수조사 결과 코드 품질 1번). PROPERTY_TYPE_NOT_SUPPORTED와 달리 "의도적 유지" 근거가 없어 제거함.
     PROPERTY_INVALID_PRICE(HttpStatus.BAD_REQUEST, "PROPERTY_INVALID_PRICE", "거래 유형에 맞지 않는 가격 정보입니다."),
     // propertyType이 enum 타입이라 잘못된 값은 Jackson 파싱 단계(HttpMessageNotReadableException)에서
     // 걸러져 이 코드까지 도달하지 않는다 - 의도적으로 유지한다. String으로 바꿔 직접 검증하는 것보다

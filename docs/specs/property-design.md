@@ -181,5 +181,5 @@
 
 ### 코드 품질 (중복/구조/일관성)
 
-1. `ErrorCode.PROPERTY_REQUIRED_FIELD_MISSING`(`ErrorCode.java:54`)도 `PROPERTY_TYPE_NOT_SUPPORTED`와 같은 패턴의 죽은 에러코드다 — 선언 외에 코드베이스 전체에서 참조되는 곳이 없다(필수값 검증은 실제로 Bean Validation `@NotBlank`/`@NotNull`이 처리하고 일반 400으로 응답됨). 기존 문서 14번이 `PROPERTY_TYPE_NOT_SUPPORTED`만 지적했는데, 동일한 성격의 죽은 코드가 하나 더 있다.
+1. ~~`ErrorCode.PROPERTY_REQUIRED_FIELD_MISSING`(`ErrorCode.java:54`)도 `PROPERTY_TYPE_NOT_SUPPORTED`와 같은 패턴의 죽은 에러코드다 — 선언 외에 코드베이스 전체에서 참조되는 곳이 없다(필수값 검증은 실제로 Bean Validation `@NotBlank`/`@NotNull`이 처리하고 일반 400으로 응답됨).~~ ✅ **(fix/property-audit-fixes 해결)** `PROPERTY_TYPE_NOT_SUPPORTED`는 2026-07-28 "의도적 유지" 결정이 있어 남겨두고, 근거 없는 `PROPERTY_REQUIRED_FIELD_MISSING`만 제거함.
 2. `S3KeyGenerator.normalizeExtension`(확장자 화이트리스트 검증)과 `S3PresignService.validateContentType`(Content-Type 화이트리스트 검증)이 서로 독립적으로만 검증되고 상호 일치 여부는 확인하지 않는다 — 예를 들어 `fileExtension="jpg"`, `contentType="image/gif"`처럼 서로 안 맞는 조합도 `S3ImagePurpose.PROPERTY`의 개별 화이트리스트 안에만 들면 presigned URL이 발급된다. 심각한 문제는 아니지만(실제 파일 바이트까지 확인하는 건 아니라 확장자-타입 위장은 애초에 완전히 막기 어려움), 확장자와 Content-Type이 다른 파일이 그대로 저장될 수 있다는 점은 향후 이미지 처리(리사이징 등) 도입 시 참고할 필요가 있다.
