@@ -315,6 +315,21 @@ class PasswordResetServiceTest {
         assertEquals(ErrorCode.AUTH_PASSWORD_RESET_TOKEN_INVALID, exception.getErrorCode());
     }
 
+    // 회귀 테스트(2026-08-24) - CONSUME_SCRIPT로 재설정 토큰을 이미 돌이킬 수 없이 소각한 뒤라,
+    // 그 다음 사용자 조회가 DB 일시 장애로 실패하면 비밀번호는 안 바뀐 채 토큰만 사라진다 -
+    // RefreshTokenService.rotate()와 같은 이유로 fail-closed 503(AUTH_TOKEN_STORE_UNAVAILABLE)으로
+    // 명시적으로 실패해야 한다(예외를 조용히 전파시켜 컨테이너 기본 500으로 새어나가면 안 됨).
+    @Test
+    void confirmResetThrowsServiceUnavailableWhenUserLookupFailsDueToTransientDbError() {
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), anyString());
+        when(userRepository.findById(1L)).thenThrow(new QueryTimeoutException("db down"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.confirmReset("some-token", "newPassword1"));
+
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
+    }
+
     @Test
     void confirmResetThrowsServiceUnavailableWhenRedisFails() {
         doThrow(new QueryTimeoutException("redis down"))
