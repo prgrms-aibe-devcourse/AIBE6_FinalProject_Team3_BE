@@ -7,6 +7,8 @@ import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.pagination.PageableUtils;
 import com.algogyeyak.global.response.PageResponse;
+import com.algogyeyak.global.s3.service.S3PresignService;
+import com.algogyeyak.global.s3.util.S3KeyGenerator;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
 import com.algogyeyak.property.client.AddressResolutionResult;
@@ -54,6 +56,7 @@ public class PropertyService {
     private final PropertyReportRepository propertyReportRepository;
     private final PropertyImageRepository propertyImageRepository;
     private final PropertyRiskSummaryProvider propertyRiskSummaryProvider;
+    private final S3PresignService s3PresignService;
     private final ApplicationEventPublisher eventPublisher;
 
     // 목록 조회 정렬 허용 필드 - PageableUtils.validateSort가 이 밖의 필드는 INVALID_SORT_FIELD로 막는다.
@@ -68,7 +71,7 @@ public class PropertyService {
     @Transactional
     public PropertyRegisterResponse register(Long userId, PropertyRegisterRequest request) {
         validatePriceCombination(request.transactionType(), request.deposit(), request.monthlyRent());
-        validateImages(request.images());
+        validateImages(userId, request.images());
 
         AddressResolutionResult addressResult = kakaoAddressClient.resolve(request.address());
         if (!addressResult.isResolved()) {
@@ -296,7 +299,7 @@ public class PropertyService {
         }
 
         validatePriceCombination(property.getTransactionType(), request.deposit(), request.monthlyRent());
-        validateImages(request.images());
+        validateImages(userId, request.images());
 
         property.updateTitle(resolveTitle(request.title(), property.getPropertyType()));
         property.updatePriceInfo(request.deposit(), request.monthlyRent());
@@ -388,12 +391,18 @@ public class PropertyService {
 
     /**
      * 이미지 검증. http(s) 프로토콜 + 허용된 확장자(jpg/jpeg/png/webp/gif)인지, 개수가
-     * MAX_IMAGE_COUNT(10)를 넘지 않는지 확인한다. imageUrl은 업로드 API(POST /properties/images/*)를
-     * 거쳐 이미 S3ImagePurpose.PROPERTY 기준(확장자/컨텐츠타입/용량)으로 검증된 값이 들어오는 게
-     * 정상이지만, 여기서도 형식/개수만큼은 한 번 더 방어적으로 확인한다 - roomType은 선택값이라
-     * 별도 검증 없음(enum 자체가 잘못된 값이면 역직렬화 단계에서 400).
+     * MAX_IMAGE_COUNT(10)를 넘지 않는지 확인한 뒤, 마지막으로 이 URL이 실제로 호출자 본인이 업로드
+     * API(POST /properties/images/upload-url → /confirm)를 거쳐 발급받은 S3 key를 가리키는지
+     * 확인한다 - 이 확인이 없으면 임의의 외부 http(s) 이미지 URL이나 이미 확정된 타인의 매물 이미지
+     * URL을 그대로 넣어도 통과·저장됐다(전수조사 결과 보안 2번). PropertyImageUploadController.confirm()의
+     * 소유권 검증(전수조사 결과 보안 1번, #168)과 동일한 방식이지만 그건 "업로드 확정 시점"만 막고
+     * 있었고, 여기(등록/수정 시점)는 이번에 새로 막는 것이다.
+     * S3PresignService.extractOwnedKey()가 우리 버킷 URL이 아니면 empty를 반환하므로, 외부 URL은
+     * 이 단계에서 자연히 걸러진다(key가 없으면 소유권 검증 자체가 불가능하다고 보고 거부).
+     * "presign/confirm을 실제로 거쳤는지"(S3 pending 태그 확인)까지는 이번 검증 범위 밖이다 - 그건
+     * S3 HeadObject 호출이 필요한 별도 작업으로 분리했다.
      */
-    private void validateImages(List<PropertyImageRequest> images) {
+    private void validateImages(Long userId, List<PropertyImageRequest> images) {
         if (images == null || images.isEmpty()) {
             return;
         }
@@ -407,6 +416,12 @@ public class PropertyService {
             if (imageUrl == null || !hasValidImageExtension(imageUrl) || !hasHttpProtocol(imageUrl)) {
                 throw new BusinessException(
                         ErrorCode.PROPERTY_IMAGE_INVALID, "지원하지 않는 이미지 형식입니다: " + imageUrl
+                );
+            }
+            String key = s3PresignService.extractOwnedKey(imageUrl).orElse(null);
+            if (key == null || !S3KeyGenerator.isPropertyImageOwnedBy(userId, key)) {
+                throw new BusinessException(
+                        ErrorCode.PROPERTY_IMAGE_INVALID, "본인이 업로드한 이미지만 등록할 수 있습니다: " + imageUrl
                 );
             }
         }
