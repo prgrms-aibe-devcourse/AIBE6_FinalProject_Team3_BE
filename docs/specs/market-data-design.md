@@ -176,3 +176,13 @@
    `MarketComparisonUnavailableReason.NOT_YET_CALCULATED`로 응답하며, 실제 계산은 등록/수정/상세조회(모두
    단일 매물 호출이라 증폭되지 않음)에서만 트리거된다. FE는 이미 `AVAILABLE`이 아닌 모든 경우를 "실거래가 연동
    예정"으로 처리하고 있어 변경이 필요 없었다.
+8. ~~**`MarketSaleComparisonService.compare()`(매매 시세비교, 전세가율 분모)는 캐싱이 전혀 없다** — 형제 메서드인
+   `MarketComparisonService.compare()`(전세)는 `@Cacheable(cacheNames = "marketComparison")`로 이미 캐싱돼
+   있는데, 이 메서드만 호출마다 국토부 실거래가 API를 최대 6회 순차 호출한다. `risk-analysis-design.md` 15번
+   항목(2026-08-24 성능 감사)에서 함께 발견됨.~~ ✅ **(2026-08-24 해결, #295)** `compare()`에
+   `@Cacheable(cacheNames = "marketSaleComparison", key = "#property.id")`를 추가하고 `evictCache(Long propertyId)`를
+   신설(`@CacheEvict`) — `MarketComparisonService`와 완전히 동일한 패턴. `RedisCacheConfig`가 `marketComparison`과
+   같은 `marketComparisonProperties.cacheTtlMinutes()` TTL로 `marketSaleComparison` 캐시명을 새로 등록한다(두 캐시가
+   조회 대상 데이터 성격·갱신 주기가 같아 별도 TTL 정책값을 새로 만들지 않음). evict 호출부는
+   `FakeListingSignalService.checkAndSave(Property)`에 `marketComparisonService.evictCache()`와 나란히 추가함(자세한
+   내용은 risk-analysis-design.md 15번 참고).

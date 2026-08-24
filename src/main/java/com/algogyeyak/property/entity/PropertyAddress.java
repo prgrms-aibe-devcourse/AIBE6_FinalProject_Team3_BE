@@ -6,6 +6,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
@@ -19,7 +20,16 @@ import lombok.NoArgsConstructor;
  * 단독/다가구는 지번 일부가 비공개라 roadAddress가 null일 수 있음 (jibunAddress는 항상 존재).
  */
 @Entity
-@Table(name = "property_address")
+@Table(name = "property_address", indexes = {
+        // DuplicateListingDetector/ShortTermRelistingDetector가 매물 등록·수정마다(위험 신호
+        // 재계산 경로) property를 이 컬럼으로 join해서 동일 주소 매물을 찾는다(주소 매칭은
+        // roadAddress 우선, 없으면 jibunAddress). 매물 수가 늘어날수록 이 join이 풀스캔이 되는
+        // 구조였다(전수조사 성능 감사 결과, 2026-08-24). DuplicateListingDetector는 다른 계정
+        // 매물도 찾아야 하는 로직이라 user_id로 좁히지 않는다 - 그래서 인덱스도 주소 컬럼
+        // 단독으로 둔다(user_id 복합 인덱스로는 이 조회를 못 커버함).
+        @Index(name = "idx_property_address_road_address", columnList = "road_address"),
+        @Index(name = "idx_property_address_jibun_address", columnList = "jibun_address")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class PropertyAddress {

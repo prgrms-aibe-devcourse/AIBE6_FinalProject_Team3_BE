@@ -33,9 +33,14 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
  * 쓴다 - market-data 도메인의 다른 정책값과 마찬가지로 재배포 없이 튜닝 가능하게 두기 위해
  * 하드코딩하지 않았다.
  *
- * CacheErrorHandler로 fail-open을 명시한다: 이 캐시(marketComparison)는 어디까지나
- * 성능 최적화용이라 Redis 장애 시에도 서비스가 죽으면 안 된다 - 캐시 조회/저장/삭제가 실패하면
- * 경고 로그만 남기고 호출부는 캐시가 비어있던 것처럼(=원본 로직으로) 계속 진행한다.
+ * marketSaleComparison 캐시(MarketSaleComparisonService.compare(), 매매 시세비교)는 이전까지
+ * 캐싱이 전혀 없어 요청마다 국토부 API를 최대 6회 순차 호출했다(전수조사 성능 감사 결과,
+ * 2026-08-24). marketComparison과 조회 대상 데이터 성격·갱신 주기가 동일해 별도 TTL 정책값을
+ * 새로 만들지 않고 같은 marketComparisonProperties.cacheTtlMinutes()를 재사용한다.
+ *
+ * CacheErrorHandler로 fail-open을 명시한다: 이 캐시들(marketComparison, marketSaleComparison)은
+ * 어디까지나 성능 최적화용이라 Redis 장애 시에도 서비스가 죽으면 안 된다 - 캐시 조회/저장/삭제가
+ * 실패하면 경고 로그만 남기고 호출부는 캐시가 비어있던 것처럼(=원본 로직으로) 계속 진행한다.
  * (참고: AccessTokenRevocationService의 토큰 블랙리스트 캐시는 보안 목적이라 반대로
  * fail-closed를 의도적으로 유지한다 - 그 클래스의 javadoc 참고.)
  */
@@ -55,6 +60,7 @@ public class RedisCacheConfig implements CachingConfigurer {
         return RedisCacheManager.builder(redisConnectionFactory)
                 .cacheDefaults(defaultConfig())
                 .withCacheConfiguration("marketComparison", marketComparisonConfig)
+                .withCacheConfiguration("marketSaleComparison", marketComparisonConfig)
                 .build();
     }
 

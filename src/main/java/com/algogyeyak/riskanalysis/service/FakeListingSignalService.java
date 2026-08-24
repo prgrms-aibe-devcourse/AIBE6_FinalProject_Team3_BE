@@ -3,6 +3,7 @@ package com.algogyeyak.riskanalysis.service;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
+import com.algogyeyak.marketdata.service.MarketSaleComparisonService;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
@@ -42,6 +43,7 @@ public class FakeListingSignalService {
     private final List<SignalDetector> detectors;
     private final MarketDataClient marketDataClient;
     private final MarketComparisonService marketComparisonService;
+    private final MarketSaleComparisonService marketSaleComparisonService;
     private final PropertyRiskCheckRepository riskCheckRepository;
     private final PropertyRiskRepository riskRepository;
     private final PropertyRepository propertyRepository;
@@ -53,6 +55,7 @@ public class FakeListingSignalService {
             List<SignalDetector> detectors,
             MarketDataClient marketDataClient,
             MarketComparisonService marketComparisonService,
+            MarketSaleComparisonService marketSaleComparisonService,
             PropertyRiskCheckRepository riskCheckRepository,
             PropertyRiskRepository riskRepository,
             PropertyRepository propertyRepository,
@@ -62,6 +65,7 @@ public class FakeListingSignalService {
         this.detectors = detectors;
         this.marketDataClient = marketDataClient;
         this.marketComparisonService = marketComparisonService;
+        this.marketSaleComparisonService = marketSaleComparisonService;
         this.riskCheckRepository = riskCheckRepository;
         this.riskRepository = riskRepository;
         this.propertyRepository = propertyRepository;
@@ -152,6 +156,12 @@ public class FakeListingSignalService {
         // 호출되는 모든 경우(재계산 배치, 다른 트리거 등)에도 PRICE_ANOMALY가 항상 최신 보증금 기준
         // 시세비교 결과를 보게 된다. evict는 멱등이라 이미 최신이어도 다시 불러 안전하다.
         marketComparisonService.evictCache(property.getId());
+        // 아래 depositSafetyCheckService.checkAndSave()가 MarketSaleDataClientImpl을 거쳐
+        // MarketSaleComparisonService.compare()(매매 시세비교, 전세가율 분모)를 호출한다. 이 캐시도
+        // marketComparison과 마찬가지로 propertyId 키로 Redis에 캐싱되므로(2026-08-24 성능 감사
+        // 결과로 신규 추가), 같은 이유로 여기서 함께 비워야 가격/면적 변경 후 재계산이 옛 매매
+        // 기준가를 캐시 히트로 재사용하지 않는다.
+        marketSaleComparisonService.evictCache(property.getId());
         MarketComparison comparison = marketDataClient.getComparison(property.getId())
                 .orElse(null);
 

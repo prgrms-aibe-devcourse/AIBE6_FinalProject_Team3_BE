@@ -183,3 +183,7 @@
 
 1. ~~`ErrorCode.PROPERTY_REQUIRED_FIELD_MISSING`(`ErrorCode.java:54`)도 `PROPERTY_TYPE_NOT_SUPPORTED`와 같은 패턴의 죽은 에러코드다 — 선언 외에 코드베이스 전체에서 참조되는 곳이 없다(필수값 검증은 실제로 Bean Validation `@NotBlank`/`@NotNull`이 처리하고 일반 400으로 응답됨).~~ ✅ **(fix/property-audit-fixes 해결)** `PROPERTY_TYPE_NOT_SUPPORTED`는 2026-07-28 "의도적 유지" 결정이 있어 남겨두고, 근거 없는 `PROPERTY_REQUIRED_FIELD_MISSING`만 제거함.
 2. `S3KeyGenerator.normalizeExtension`(확장자 화이트리스트 검증)과 `S3PresignService.validateContentType`(Content-Type 화이트리스트 검증)이 서로 독립적으로만 검증되고 상호 일치 여부는 확인하지 않는다 — 예를 들어 `fileExtension="jpg"`, `contentType="image/gif"`처럼 서로 안 맞는 조합도 `S3ImagePurpose.PROPERTY`의 개별 화이트리스트 안에만 들면 presigned URL이 발급된다. 심각한 문제는 아니지만(실제 파일 바이트까지 확인하는 건 아니라 확장자-타입 위장은 애초에 완전히 막기 어려움), 확장자와 Content-Type이 다른 파일이 그대로 저장될 수 있다는 점은 향후 이미지 처리(리사이징 등) 도입 시 참고할 필요가 있다.
+
+### 성능
+
+1. ~~`PropertyAddress`(`property_address` 테이블)의 `roadAddress`/`jibunAddress` 컬럼에 인덱스가 없다~~ ✅ **(2026-08-24 해결, #295)** risk-analysis의 `DuplicateListingDetector`/`ShortTermRelistingDetector`가 매물 등록·수정마다(위험 신호 재계산 경로) `property`를 이 두 컬럼으로 join해 동일 주소 매물을 찾는데(주소 매칭은 roadAddress 우선, 없으면 jibunAddress), 매물 수가 늘어날수록 이 join이 풀스캔이 되는 구조였다(전수조사 성능 감사 결과, 자세한 내용은 risk-analysis-design.md 15번 참고). `PropertyAddress`에 `idx_property_address_road_address`/`idx_property_address_jibun_address` 단일 컬럼 인덱스를 추가함 — `DuplicateListingDetector`는 다른 계정 매물도 찾아야 하는 로직이라 `user_id`로 좁히지 않으므로(요구사항상 의도적), `(user_id, ...)` 복합 인덱스로는 이 조회를 커버할 수 없어 주소 컬럼 단독 인덱스로 뒀다.
