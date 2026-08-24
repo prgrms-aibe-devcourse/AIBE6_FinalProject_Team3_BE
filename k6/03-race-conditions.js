@@ -32,6 +32,18 @@ export const options = {
       startTime: '0s',
       maxDuration: '30s',
     },
+    // 위험 신호 재계산 동시 요청 - FakeListingSignalService.upsertCheck()/upsertRisk()도 checklist와
+    // 동일한 REQUIRES_NEW insert-race 복구 패턴을 쓴다(2026-08-24 CannotAcquireLockException catch
+    // 보강). checklistCreate와 같은 매물을 재사용하되, 두 시나리오 결과가 섞이지 않도록
+    // checklistCreate(최대 30s)가 끝난 뒤 시작한다.
+    riskAnalysisRecalculate: {
+      executor: 'per-vu-iterations',
+      exec: 'riskAnalysisRecalculateScenario',
+      vus: 20,
+      iterations: 1,
+      startTime: '35s',
+      maxDuration: '30s',
+    },
   },
 };
 
@@ -74,5 +86,17 @@ export function checklistCreateScenario(data) {
   });
   if (!created) {
     console.log(`[checklistCreate] VU=${__VU} status=${res.status} body=${res.body}`);
+  }
+}
+
+export function riskAnalysisRecalculateScenario(data) {
+  const headers = { Cookie: authCookieHeader(data.authCookies), ...CSRF_HEADERS };
+  const res = http.post(`${BASE_URL}/properties/${data.propertyId}/risk-analysis`, null, { headers });
+
+  const succeeded = check(res, {
+    '위험 신호 재계산 200(동시 요청에도 정상 처리됨)': (r) => r.status === 200,
+  });
+  if (!succeeded) {
+    console.log(`[riskAnalysisRecalculate] VU=${__VU} status=${res.status} body=${res.body}`);
   }
 }
