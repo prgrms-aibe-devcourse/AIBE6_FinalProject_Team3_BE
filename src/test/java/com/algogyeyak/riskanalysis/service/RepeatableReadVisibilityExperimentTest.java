@@ -1,6 +1,7 @@
 package com.algogyeyak.riskanalysis.service;
 
 import com.algogyeyak.marketdata.service.MarketComparisonService;
+import com.algogyeyak.marketdata.service.MarketSaleComparisonService;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyType;
 import com.algogyeyak.property.entity.TransactionType;
@@ -65,6 +66,11 @@ class RepeatableReadVisibilityExperimentTest {
     @MockitoBean
     private MarketComparisonService marketComparisonService;
 
+    // marketComparisonService와 동일한 이유(위 주석 참고) - checkAndSave()가 이번에 함께 비우도록
+    // 추가된 marketSaleComparisonService.evictCache()도 실제 빈이면 Redis 연결을 시도한다.
+    @MockitoBean
+    private MarketSaleComparisonService marketSaleComparisonService;
+
     @MockitoBean
     private DepositSafetyCheckService depositSafetyCheckService;
 
@@ -78,8 +84,9 @@ class RepeatableReadVisibilityExperimentTest {
         when(alwaysFindsRisk.detect(any(), any())).thenReturn(SignalCheckResult.success("실험용 리스크 발견"));
 
         FakeListingSignalService serviceWithMockDetector = new FakeListingSignalService(
-                List.of(alwaysFindsRisk), marketDataClient, marketComparisonService, riskCheckRepository, riskRepository,
-                propertyRepository, depositSafetyCheckService, policyConfig, transactionManager);
+                List.of(alwaysFindsRisk), marketDataClient, marketComparisonService, marketSaleComparisonService,
+                riskCheckRepository, riskRepository, propertyRepository, depositSafetyCheckService, policyConfig,
+                transactionManager);
 
         Property property = propertyRepository.saveAndFlush(Property.builder()
                 .userId(1L)
