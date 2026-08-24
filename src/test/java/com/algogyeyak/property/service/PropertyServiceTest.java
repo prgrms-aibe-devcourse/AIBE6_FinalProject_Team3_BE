@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -17,6 +18,7 @@ import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.PageResponse;
+import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
@@ -84,6 +86,9 @@ class PropertyServiceTest {
     private PropertyRiskSummaryProvider propertyRiskSummaryProvider;
 
     @Mock
+    private S3PresignService s3PresignService;
+
+    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private PropertyService propertyService;
@@ -95,8 +100,13 @@ class PropertyServiceTest {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
                 checklistRepository, checklistItemRepository, propertyReportRepository,
-                propertyImageRepository, propertyRiskSummaryProvider, eventPublisher
+                propertyImageRepository, propertyRiskSummaryProvider, s3PresignService, eventPublisher
         );
+        // 이미지 소유권 검증(전수조사 결과 보안 2번)의 기본값 - 이 스텁을 실제로 쓰지 않는 테스트가
+        // 대부분이라 strict stubbing이 "unnecessary stubbing"으로 막지 않도록 lenient로 등록한다.
+        // 소유권 검증 자체를 테스트하는 케이스는 이 기본값을 필요에 따라 개별적으로 덮어쓴다.
+        lenient().when(s3PresignService.extractOwnedKey(anyString()))
+                .thenReturn(Optional.of("property-images/" + USER_ID + "/dummy.jpg"));
     }
 
     private AddressResolutionResult resolvedAddress() {
@@ -424,6 +434,62 @@ class PropertyServiceTest {
                 null,
                 null,
                 tooManyImages
+        );
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
+    // 회귀 테스트 - 이미지 URL이 우리 S3 버킷을 가리키지 않으면(extractOwnedKey가 empty) 소유권
+    // 검증 자체가 불가능하다고 보고 거부한다. 예전엔 확장자/프로토콜만 맞으면 임의의 외부 URL도
+    // 그대로 통과·저장됐다(전수조사 결과 보안 2번).
+    @Test
+    void 우리_버킷_URL이_아닌_이미지면_예외가_발생한다() {
+        when(s3PresignService.extractOwnedKey("https://cdn.algogyeyak.com/img/abc.jpg"))
+                .thenReturn(Optional.empty());
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                null,
+                List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.jpg", null))
+        );
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
+    // 회귀 테스트 - 우리 버킷 URL이더라도 key가 다른 유저(property-images/{다른 userId}/...) 소유면
+    // 거부한다. 이미 확정된 타인의 매물 이미지 URL을 그대로 넣는 시나리오를 막는다.
+    @Test
+    void 타인_소유의_이미지_key면_예외가_발생한다() {
+        Long otherUserId = 999L;
+        when(s3PresignService.extractOwnedKey("https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg"))
+                .thenReturn(Optional.of("property-images/" + otherUserId + "/abc.jpg"));
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                null,
+                List.of(new PropertyImageRequest(
+                        "https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg", null
+                ))
         );
 
         assertThatThrownBy(() -> propertyService.register(USER_ID, request))
@@ -1054,6 +1120,41 @@ class PropertyServiceTest {
         // risk-analysis가 위험 신호·전세가율을 재계산할 수 있도록 이벤트를 발행한다 - property는
         // risk-analysis를 직접 참조하지 않고 이벤트로만 알린다(도메인 결합 방지).
         verify(eventPublisher).publishEvent(new PropertyUpdatedEvent(1L));
+    }
+
+    // 회귀 테스트 - 이미지 소유권 검증(전수조사 결과 보안 2번)이 register()뿐 아니라 update()에서도
+    // 동작하는지 확인한다. register() 쪽 검증은 위쪽 이미지 테스트들이 이미 커버하므로, 여기서는
+    // update()가 userId를 validateImages()에 제대로 전달하는지만 별도로 확인한다.
+    @Test
+    void 매물_수정_시_타인_소유의_이미지_key면_예외가_발생한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description("역세권 오피스텔")
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+
+        Long otherUserId = 999L;
+        when(s3PresignService.extractOwnedKey("https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg"))
+                .thenReturn(Optional.of("property-images/" + otherUserId + "/abc.jpg"));
+        PropertyUpdateRequest request = new PropertyUpdateRequest(
+                "테스트 매물", null, 35_000_000L, null, 25.0, null, "수정된 설명",
+                List.of(new PropertyImageRequest(
+                        "https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg", null
+                ))
+        );
+
+        assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
     }
 
     @Test
