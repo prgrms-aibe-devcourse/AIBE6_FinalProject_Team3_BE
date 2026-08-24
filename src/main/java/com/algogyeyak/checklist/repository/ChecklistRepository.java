@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,6 +14,12 @@ import org.springframework.data.repository.query.Param;
 public interface ChecklistRepository extends JpaRepository<Checklist, Long> {
 
     // 유저-매물 조합당 활성 체크리스트는 1개뿐이므로, 생성 요청이 멱등인지 확인할 때 사용한다.
+    // items까지 즉시 로딩한다 - ChecklistService.createChecklist()의 동시 생성 경쟁 복구 경로가
+    // 이 메서드를 REQUIRES_NEW(별도 세션)에서 호출하는데, 그 세션은 execute()가 끝나면 바로 닫혀서
+    // items가 LAZY면 컨트롤러가 ChecklistResponse.from()에서 items를 읽으려는 순간
+    // LazyInitializationException(no session)이 터진다(k6 03-race-conditions.js로 재현 확인,
+    // 2026-08-24). 단일 Optional 결과라 컬렉션 fetch join이어도 페이지네이션 row 배수 문제는 없다.
+    @EntityGraph(attributePaths = "items")
     Optional<Checklist> findByUserIdAndPropertyId(Long userId, Long propertyId);
 
     // 매물 하나당 체크리스트는(소유자만 만들 수 있어) 최대 1개뿐이라, propertyId만으로 조회해도 안전하다.
