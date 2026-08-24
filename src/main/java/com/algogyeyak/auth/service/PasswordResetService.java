@@ -220,10 +220,19 @@ public class PasswordResetService {
             throw new BusinessException(ErrorCode.AUTH_PASSWORD_RESET_TOKEN_INVALID);
         }
 
-        User user = userRepository.findById(Long.valueOf(userId))
-                .filter(found -> !found.isWithdrawn() && !found.isSuspended())
-                .filter(found -> found.getPasswordHash() != null)
-                .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_PASSWORD_RESET_TOKEN_INVALID));
+        User user;
+        try {
+            user = userRepository.findById(Long.valueOf(userId))
+                    .filter(found -> !found.isWithdrawn() && !found.isSuspended())
+                    .filter(found -> found.getPasswordHash() != null)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.AUTH_PASSWORD_RESET_TOKEN_INVALID));
+        } catch (DataAccessException e) {
+            // CONSUME_SCRIPT로 재설정 토큰을 이미 돌이킬 수 없이 소각한 뒤라, 이 DB 조회 실패를 조용히
+            // 넘기면 비밀번호는 안 바뀐 채 토큰만 사라진다 - RefreshTokenService.rotate()와 같은 이유로
+            // fail-closed 503(AUTH_TOKEN_STORE_UNAVAILABLE)으로 명시적으로 실패시킨다.
+            log.error("DB 장애로 비밀번호 재설정 중 사용자 조회 실패 userId={}", userId, e);
+            throw new BusinessException(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE);
+        }
 
         user.updatePasswordHash(passwordEncoder.encode(newPassword));
         // LocalAuthService.setPassword()와 동일한 이유 - passwordChangedAt 캐시가 stale하면

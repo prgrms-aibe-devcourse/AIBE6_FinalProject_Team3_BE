@@ -192,6 +192,20 @@ class RefreshTokenServiceTest {
         assertCleansUpBothOrphanedKeysFor("1");
     }
 
+    // 회귀 테스트(2026-08-24) - ROTATE_SCRIPT는 이미 Redis에 커밋되어 새 세션이 실제로 살아있는데,
+    // 그 직후 사용자 조회가 DB 일시 장애로 실패하면 예외를 조용히 전파시키는 대신(컨테이너 기본
+    // 500) fail-closed 503(AUTH_TOKEN_STORE_UNAVAILABLE)으로 명시적으로 응답해야 한다 -
+    // JwtAuthenticationFilter의 findById 실패 처리와 같은 이유.
+    @Test
+    void rotateThrowsServiceUnavailableWhenUserLookupFailsDueToTransientDbError() {
+        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
+        when(userRepository.findById(1L)).thenThrow(new QueryTimeoutException("db down"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> refreshTokenService.rotate("some-token"));
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
+    }
+
     @Test
     void rotateThrowsAndCleansUpOrphanedSessionWhenUserNoLongerExists() {
         doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any(), any());
