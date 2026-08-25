@@ -2,7 +2,7 @@
 
 이 문서는 도메인별 실제 구현 상태를 요약합니다. 상세 설계 이력·트러블슈팅·남은 이슈는 각 `docs/specs/{도메인}-design.md`를 참고하세요. 도메인 간에 반복적으로 나타나는 패턴(죽은 에러코드, 권한 처리 방식 등)은 `docs/specs/cross-domain-summary.md`에 모아뒀습니다.
 
-마지막 갱신: 2026-08-11
+마지막 갱신: 2026-08-25 (contract-analysis/admin 두 줄만 최신화, 나머지 도메인은 미검토)
 
 ## auth — 거의 완전 구현
 
@@ -40,15 +40,17 @@
 
 → 상세: [`docs/specs/risk-analysis-design.md`](./docs/specs/risk-analysis-design.md)
 
-## contract-analysis — 부분 구현
+## contract-analysis — 거의 완전 구현
 
-입력(이미지/텍스트) → Clova OCR → 개인정보 마스킹(전화번호/주민번호/계좌/성명) 3단계는 동작합니다. 파이프라인의 핵심인 AI 계약 분석(`/analyze`)은 아직 없고(에러코드만 미리 정의됨), 매물 소유권 검증도 TODO 상태입니다. 챗봇(`/chat`) 기능이 최근 추가됐습니다.
+입력(이미지/텍스트) → Clova OCR → 개인정보 마스킹(전화번호/주민번호/계좌/성명) → AI 계약 분석(Gemini, `/analyze`) → 챗봇(`/chat`) → 히스토리 저장(`ContractAnalysisHistoryService`)까지 파이프라인 전체가 동작합니다. Gemini 무료 티어 한도를 서버가 먼저 방어하는 요청 단위 rate limit(`GeminiRateLimiterService`, 분당/일 한도 + 최소 호출 간격, Redis 장애 시 fail-open)도 붙어 있습니다. 남은 건 매물 소유권 검증 연결(`ContractAnalysisInputService`에 TODO로 남음 — `PropertyRepository`는 이미 있어 호출만 연결하면 됨) 정도입니다.
 
 → 상세: [`docs/specs/contract-analysis-design.md`](./docs/specs/contract-analysis-design.md)
 
 ## admin — 부분 구현, 여러 패키지에 분산
 
-별도 도메인 패키지로 통합돼 있지 않고 기능별로 흩어져 있습니다: `admin.controller.AdminStatsController`(대시보드 통계), `user.controller.AdminUserController`(유저 목록/역할/상태 변경), `property.controller.AdminPropertyReportController`(매물 신고 검토), `checklist.controller.AdminChecklistTemplateController`(문항 템플릿 CRUD). 전부 `/admin/**` 경로로 `ROLE_ADMIN`만 접근 가능합니다. 별도 설계 문서는 아직 없습니다.
+별도 도메인 패키지로 통합돼 있지 않고 기능별로 흩어져 있습니다: `admin.controller.AdminStatsController`(대시보드 통계), `user.controller.AdminUserController`(유저 목록/역할/상태 변경), `property.controller.AdminPropertyReportController`(매물 신고 검토), `checklist.controller.AdminChecklistTemplateController`(문항 템플릿 CRUD). 전부 `/admin/**` 경로로 `ROLE_ADMIN`만 접근 가능합니다.
+
+→ 상세: [`docs/specs/admin-design.md`](./docs/specs/admin-design.md)
 
 ---
 

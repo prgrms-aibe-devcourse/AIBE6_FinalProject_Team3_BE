@@ -177,7 +177,7 @@ JPA 엔티티를 제안한 사전 설계안이었으나 실제로는 채택되�
 
 - `PATCH /auth/password` — 로그인 후 비밀번호 설정/변경 (소셜 전용 계정이 로컬 로그인 수단을 추가하는 용도 포함)
 - **(2026-07-28)** `GET /auth/password-policy` — frontend가 회원가입/비밀번호 변경 폼의 `<input pattern="...">`/안내 문구를 하드코딩하는 대신 이 엔드포인트로 런타임에 받아오도록 만든 것. `PasswordPolicy`(SignupRequest/PasswordUpdateRequest가 실제 검증에 쓰는 바로 그 상수)가 유일한 소스가 되어, 여기만 바꾸면 백엔드 검증과 프론트 폼 힌트가 항상 같이 바뀐다. 인증 불필요(로그인 전 회원가입 폼에서도 호출)
-- `POST /auth/dev-login` — 개발/데모용 관리자 로그인 백도어 (`app.dev-login.enabled`일 때만 동작, 평소엔 404). 관리자 계정은 앱 기동 시 자동 시딩/복구됨
+- `POST /auth/dev-login` — 개발/데모용 관리자 로그인 백도어 (`app.dev-login.enabled`일 때만 동작, 평소엔 404). 관리자 계정은 앱 기동 시 자동 시딩됨. 단, 이미 그 이메일로 계정이 있으면 건드리지 않고 건너뜀(healing/복구 로직 제거됨 — 아래 참고)
 - 이메일 정규화(trim+lowercase)를 모든 저장/조회 지점에 일관 적용
 - 회원가입 INSERT를 별도 트랜잭션으로 분리해 Hibernate 세션 오염 방지 (동시 가입 레이스 대응)
 
