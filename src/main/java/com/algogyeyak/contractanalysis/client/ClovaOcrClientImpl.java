@@ -11,6 +11,8 @@ import java.net.SocketTimeoutException;
 import java.util.List;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.hc.client5.http.ConnectTimeoutException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
@@ -42,7 +44,7 @@ public class ClovaOcrClientImpl implements ClovaOcrClient {
     @Value("${clova.ocr.secret-key}")
     private String secretKey;
 
-    public ClovaOcrClientImpl(RestTemplate restTemplate) {
+    public ClovaOcrClientImpl(@Qualifier("clovaRestTemplate") RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
     }
 
@@ -61,7 +63,11 @@ public class ClovaOcrClientImpl implements ClovaOcrClient {
         try {
             return restTemplate.postForEntity(invokeUrl, requestEntity, ClovaOcrResponse.class).getBody();
         } catch (ResourceAccessException e) {
-            if (e.getCause() instanceof SocketTimeoutException) {
+            // clovaRestTemplate(ContractAnalysisRestTemplateConfig)는 Apache HttpClient5 기반이라,
+            // 연결 후 응답 대기 중 타임아웃은 SocketTimeoutException으로, connect 단계 타임아웃은
+            // 별도의 ConnectTimeoutException(SocketTimeoutException이 아님)으로 던져진다 - 둘 다
+            // 사용자 입장에서는 동일한 "시간 초과"이므로 함께 잡는다.
+            if (e.getCause() instanceof SocketTimeoutException || e.getCause() instanceof ConnectTimeoutException) {
                 log.error("Clova OCR API 호출 시간 초과");
                 throw new BusinessException(
                         ErrorCode.CONTRACT_ANALYSIS_OCR_API_ERROR,

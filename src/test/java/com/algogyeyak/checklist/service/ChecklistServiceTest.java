@@ -10,6 +10,8 @@ import com.algogyeyak.checklist.entity.ChecklistItemTemplate;
 import com.algogyeyak.checklist.entity.ChecklistItemType;
 import com.algogyeyak.checklist.entity.ChecklistResult;
 import com.algogyeyak.checklist.entity.ChecklistStatus;
+import com.algogyeyak.checklist.repository.ChecklistItemRepository;
+import com.algogyeyak.checklist.repository.ChecklistItemRepository.ChecklistProgressProjection;
 import com.algogyeyak.checklist.repository.ChecklistItemTemplateRepository;
 import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
@@ -23,6 +25,9 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
@@ -42,10 +47,12 @@ class ChecklistServiceTest {
 
     private final ChecklistRepository checklistRepository = mock(ChecklistRepository.class);
     private final ChecklistItemTemplateRepository templateRepository = mock(ChecklistItemTemplateRepository.class);
+    private final ChecklistItemRepository checklistItemRepository = mock(ChecklistItemRepository.class);
     private final UserRepository userRepository = mock(UserRepository.class);
     private final PropertyRepository propertyRepository = mock(PropertyRepository.class);
     private final ChecklistService checklistService =
-            new ChecklistService(checklistRepository, templateRepository, userRepository, propertyRepository);
+            new ChecklistService(checklistRepository, templateRepository, checklistItemRepository, userRepository, propertyRepository,
+                    mock(PlatformTransactionManager.class));
 
     private User user(Long id) {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
@@ -96,13 +103,13 @@ class ChecklistServiceTest {
                         .active(true)
                         .build()
         ));
-        when(checklistRepository.save(any(Checklist.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(checklistRepository.saveAndFlush(any(Checklist.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Checklist result = checklistService.createOrGetChecklist(1L, 10L);
 
         assertThat(result.getTemplateVersion()).isEqualTo(3);
         assertThat(result.getItems()).hasSize(1);
-        verify(checklistRepository).save(any(Checklist.class));
+        verify(checklistRepository).saveAndFlush(any(Checklist.class));
     }
 
     @Test
@@ -134,6 +141,48 @@ class ChecklistServiceTest {
 
         assertThat(result.getItems()).hasSize(1);
         assertThat(result.getItems().get(0).getContent()).isEqualTo("공동현관과 현관문 잠금장치가 모두 정상 작동하나요?");
+    }
+
+    @Test
+    @DisplayName("체크리스트 생성 중 동시 insert로 유니크 제약을 위반하면 재조회해서 기존 체크리스트를 반환한다")
+    void createOrGetChecklistRecoversFromConcurrentInsertRace() {
+        User user = user(1L);
+        Checklist winner = Checklist.createFrom(user, property(10L, 1L), 1, List.of());
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
+        when(templateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistRepository.saveAndFlush(any(Checklist.class)))
+                .thenThrow(new DataIntegrityViolationException("unique constraint violation"));
+
+        Checklist result = checklistService.createOrGetChecklist(1L, 10L);
+
+        assertThat(result).isEqualTo(winner);
+    }
+
+    @Test
+    @DisplayName("체크리스트 생성 중 데드락(락 획득 실패)이 나도 재조회해서 기존 체크리스트를 반환한다")
+    void createOrGetChecklistRecoversFromLockAcquisitionFailure() {
+        // 30명 가까이 동시에 같은 유니크 키로 insert를 시도하면, 단순 유니크 제약 위반이 아니라
+        // InnoDB 데드락(CannotAcquireLockException)이 날 수 있다(실제 k6 03-race-conditions.js
+        // 부하 테스트로 확인함) - DataIntegrityViolationException만 잡던 기존 코드는 이 예외 타입을
+        // 놓쳐서 500으로 새어나갔다.
+        User user = user(1L);
+        Checklist winner = Checklist.createFrom(user, property(10L, 1L), 1, List.of());
+        when(checklistRepository.findByUserIdAndPropertyId(1L, 10L))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(propertyRepository.findById(10L)).thenReturn(Optional.of(property(10L, 1L)));
+        when(templateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of());
+        when(checklistRepository.saveAndFlush(any(Checklist.class)))
+                .thenThrow(new CannotAcquireLockException("Deadlock found when trying to get lock"));
+
+        Checklist result = checklistService.createOrGetChecklist(1L, 10L);
+
+        assertThat(result).isEqualTo(winner);
     }
 
     @Test
@@ -211,6 +260,43 @@ class ChecklistServiceTest {
         assertThat(result.content().get(1).checklistId()).isNull();
         assertThat(result.content().get(1).status()).isEqualTo(ChecklistStatus.NOT_STARTED);
         assertThat(result.totalElements()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("매물별 진행률·주의 항목 개수를 붙이고, 체크리스트를 시작 안 한 매물은 둘 다 null이다")
+    void listMyChecklistsAttachesProgressAndCautionCount() {
+        Property started = property(10L, 1L);
+        Property notStarted = property(20L, 1L);
+
+        Checklist checklist = checklistWithOneCheckItem(user(1L));
+        ReflectionTestUtils.setField(checklist, "id", 100L);
+
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        org.springframework.data.domain.Page<Object[]> page = new org.springframework.data.domain.PageImpl<>(
+                List.of(new Object[]{started, checklist}, new Object[]{notStarted, null}),
+                pageable, 2);
+        when(checklistRepository.findOverviewByUserId(1L, PropertyStatus.ACTIVE, pageable)).thenReturn(page);
+
+        ChecklistProgressProjection progress = mock(ChecklistProgressProjection.class);
+        when(progress.getPropertyId()).thenReturn(10L);
+        when(progress.getTotalCount()).thenReturn(4L);
+        when(progress.getCheckedCount()).thenReturn(3L);
+        when(progress.getIssueCount()).thenReturn(2L);
+        when(progress.getGeneralMissingCount()).thenReturn(1L);
+        when(progress.getRequiredMissingCount()).thenReturn(0L);
+        when(checklistItemRepository.findProgressByUserId(1L)).thenReturn(List.of(progress));
+
+        com.algogyeyak.global.response.PageResponse<ChecklistOverviewResponse> result =
+                checklistService.listMyChecklists(1L, pageable);
+
+        assertThat(result.content().get(0).progressPercent()).isEqualTo(75);
+        assertThat(result.content().get(0).cautionCount()).isEqualTo(2);
+        assertThat(result.content().get(0).generalMissingCount()).isEqualTo(1);
+        assertThat(result.content().get(0).requiredMissingCount()).isEqualTo(0);
+        assertThat(result.content().get(1).progressPercent()).isNull();
+        assertThat(result.content().get(1).cautionCount()).isNull();
+        assertThat(result.content().get(1).generalMissingCount()).isNull();
+        assertThat(result.content().get(1).requiredMissingCount()).isNull();
     }
 
     @Test

@@ -19,11 +19,16 @@ import java.util.List;
  * 케이스가 나오면 그때 거래유형별로 분기해서 완화하는 게 맞다고 판단해 지금은 유지한다.
  */
 public record PropertyRegisterRequest(
-        @NotBlank(message = "매물 이름은 필수입니다.")
+        // 선택 입력 - 이름 없는 건물도 있어 필수를 두지 않는다. 비어 있으면 PropertyService가
+        // propertyType의 한글 라벨(예: "오피스텔")로 대체해서 저장한다(#222).
         String title,
 
         @NotBlank(message = "주소는 필수입니다.")
         String address,
+
+        // 선택 입력 - 동/호수 등 상세주소. Kakao 지오코딩 대상이 아닌 순수 표시·식별용 값이라
+        // address와 달리 형식 검증을 두지 않는다(5차 멘토링 피드백 3번).
+        String detailAddress,
 
         @NotNull(message = "매물 유형은 필수입니다.")
         PropertyType propertyType,

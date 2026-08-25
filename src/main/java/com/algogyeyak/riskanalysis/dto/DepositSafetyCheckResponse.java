@@ -28,6 +28,7 @@ public record DepositSafetyCheckResponse(
         LocalDateTime calculatedAt,
         String disclaimer,
         boolean recentOwnershipChangeWarning, // 최근 소유권 변경 + 높은 전세가율(jeonseRatioWarnFrom 이상) 조합일 때만 true
+        boolean priceAnomalyWarning,     // 같은 매물에 PRICE_ANOMALY(시세 이상 저가) 신호가 있으면 true - 전세가율 구간과 무관
         Integer cautionFrom,             // 전세가율 판정 기준값(%) - 이 값부터 "주의"
         Integer warnFrom,                // 이 값부터 "위험"
         Integer warnTo                   // 이 값을 넘으면 "입력값 재확인 안내"
@@ -38,10 +39,11 @@ public record DepositSafetyCheckResponse(
     // 판정 기준값(cautionFrom/warnFrom/warnTo)은 계산 여부와 무관하게 항상 내려준다 - "근거가 되는 기준"을
     // 노출해달라는 피드백에 맞춰, 계산 전에도 사용자가 기준 자체는 확인할 수 있게 한다.
     public static DepositSafetyCheckResponse from(Long propertyId, DepositSafetyCheck check, boolean recentOwnershipChangeWarning,
+                                                   boolean priceAnomalyWarning,
                                                    Integer cautionFrom, Integer warnFrom, Integer warnTo) {
         if (check == null) {
             return new DepositSafetyCheckResponse(
-                    propertyId, null, null, false, null, null, null, null, null, null, null, null, DISCLAIMER, false,
+                    propertyId, null, null, false, null, null, null, null, null, null, null, null, DISCLAIMER, false, false,
                     cautionFrom, warnFrom, warnTo);
         }
 
@@ -61,6 +63,7 @@ public record DepositSafetyCheckResponse(
                 check.getCalculatedAt(),
                 DISCLAIMER,
                 calculated && recentOwnershipChangeWarning,
+                calculated && priceAnomalyWarning,
                 cautionFrom,
                 warnFrom,
                 warnTo

@@ -2,6 +2,8 @@ package com.algogyeyak.riskanalysis.service;
 
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
+import com.algogyeyak.marketdata.service.MarketComparisonService;
+import com.algogyeyak.marketdata.service.MarketSaleComparisonService;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.repository.PropertyRepository;
 import com.algogyeyak.riskanalysis.client.MarketDataClient;
@@ -20,6 +22,7 @@ import com.algogyeyak.riskanalysis.repository.PropertyRiskCheckRepository;
 import com.algogyeyak.riskanalysis.repository.PropertyRiskRepository;
 import com.algogyeyak.riskanalysis.signal.SignalDetector;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -40,6 +43,8 @@ import java.util.stream.Collectors;
 public class FakeListingSignalService {
     private final List<SignalDetector> detectors;
     private final MarketDataClient marketDataClient;
+    private final MarketComparisonService marketComparisonService;
+    private final MarketSaleComparisonService marketSaleComparisonService;
     private final PropertyRiskCheckRepository riskCheckRepository;
     private final PropertyRiskRepository riskRepository;
     private final PropertyRepository propertyRepository;
@@ -50,6 +55,8 @@ public class FakeListingSignalService {
     public FakeListingSignalService(
             List<SignalDetector> detectors,
             MarketDataClient marketDataClient,
+            MarketComparisonService marketComparisonService,
+            MarketSaleComparisonService marketSaleComparisonService,
             PropertyRiskCheckRepository riskCheckRepository,
             PropertyRiskRepository riskRepository,
             PropertyRepository propertyRepository,
@@ -58,6 +65,8 @@ public class FakeListingSignalService {
             PlatformTransactionManager transactionManager) {
         this.detectors = detectors;
         this.marketDataClient = marketDataClient;
+        this.marketComparisonService = marketComparisonService;
+        this.marketSaleComparisonService = marketSaleComparisonService;
         this.riskCheckRepository = riskCheckRepository;
         this.riskRepository = riskRepository;
         this.propertyRepository = propertyRepository;
@@ -141,6 +150,19 @@ public class FakeListingSignalService {
      */
     @Transactional
     public int checkAndSave(Property property) {
+        // marketDataClient.getComparison()이 내부적으로 쓰는 MarketComparisonService.compare()는
+        // propertyId만 키로 Redis에 캐싱된다(TTL 30분). PropertyService.update()가 자기 응답을
+        // 만들 때는 스스로 evictCache()를 부르지만, 이 메서드는 그 호출자에 의존하지 않고 여기서도
+        // 직접 한 번 더 비운다 - 그래야 이 메서드가 PropertyService.update() 경로를 거치지 않고
+        // 호출되는 모든 경우(재계산 배치, 다른 트리거 등)에도 PRICE_ANOMALY가 항상 최신 보증금 기준
+        // 시세비교 결과를 보게 된다. evict는 멱등이라 이미 최신이어도 다시 불러 안전하다.
+        marketComparisonService.evictCache(property.getId());
+        // 아래 depositSafetyCheckService.checkAndSave()가 MarketSaleDataClientImpl을 거쳐
+        // MarketSaleComparisonService.compare()(매매 시세비교, 전세가율 분모)를 호출한다. 이 캐시도
+        // marketComparison과 마찬가지로 propertyId 키로 Redis에 캐싱되므로(2026-08-24 성능 감사
+        // 결과로 신규 추가), 같은 이유로 여기서 함께 비워야 가격/면적 변경 후 재계산이 옛 매매
+        // 기준가를 캐시 히트로 재사용하지 않는다.
+        marketSaleComparisonService.evictCache(property.getId());
         MarketComparison comparison = marketDataClient.getComparison(property.getId())
                 .orElse(null);
 
@@ -196,7 +218,11 @@ public class FakeListingSignalService {
 
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status2 -> riskCheckRepository.saveAndFlush(newCheck));
-        } catch (DataIntegrityViolationException e) {
+        } catch (DataIntegrityViolationException | CannotAcquireLockException e) {
+            // CannotAcquireLockException(TransientDataAccessException 계열)도 같이 잡는다 - 동시
+            // insert 요청 수가 많아지면 InnoDB가 단순 유니크 제약 위반이 아니라 데드락으로 감지하는
+            // 경우가 있는데, DataIntegrityViolationException만 잡던 코드는 이 경우를 놓쳐 500으로
+            // 새어나갔다(ChecklistService.createChecklist()와 동일한 이유로 동일하게 보강).
             // 재조회도 REQUIRES_NEW로 새 트랜잭션에서 한다 - 바깥(이 메서드가 속한) 트랜잭션에서 그대로
             // 재조회하면, MySQL InnoDB의 기본 격리수준(REPEATABLE READ)에서는 그 트랜잭션이 이미 앞서
             // 읽은 시점의 스냅샷에 갇혀 있어서 방금 다른 트랜잭션이 커밋한 승자 행이 안 보일 수 있다
@@ -231,7 +257,16 @@ public class FakeListingSignalService {
     // 결과 1건만 유지한다. insert 경쟁 대비는 upsertCheck()와 동일한 이유·동일한 패턴.
     private void upsertRisk(Property property, RiskSignalType signalType, SignalCheckResult result) {
         if (result.status() != RiskCheckStatus.SUCCESS || result.description() == null) {
-            riskRepository.deleteByPropertyIdAndSignalType(property.getId(), signalType);
+            // 이 메서드의 다른 모든 쓰기(update/insert)는 REQUIRES_NEW로 격리돼 있는데 이 delete만
+            // 바깥(ambient) 트랜잭션에서 그대로 실행되고 있었다 - checkAndSave(Property) 안에서 이
+            // 호출 "이후"에 실행되는 다른 코드(예: depositSafetyCheckService.checkAndSave())가 예외를
+            // 던지면, 그 예외를 밖에서 잡아 흡수하더라도 Spring이 이미 공유 트랜잭션을
+            // rollback-only로 표시해버려 이 delete까지 통째로 롤백된다 - "신호가 해소돼서 사라져야
+            // 하는 리스크가 DB에 그대로 남는" 버그로 실제 재현됨(신호가 새로 발견되는 insert/update
+            // 케이스는 이미 REQUIRES_NEW라 이 문제가 없었음). insert/update와 동일하게 REQUIRES_NEW로
+            // 격리해 바깥 트랜잭션의 이후 실패와 무관하게 항상 커밋되게 한다.
+            requiresNewTransactionTemplate.executeWithoutResult(status ->
+                    riskRepository.deleteByPropertyIdAndSignalType(property.getId(), signalType));
             return;
         }
 
@@ -244,8 +279,9 @@ public class FakeListingSignalService {
         PropertyRisk newRisk = PropertyRisk.of(property, signalType, result.description());
         try {
             requiresNewTransactionTemplate.executeWithoutResult(status -> riskRepository.saveAndFlush(newRisk));
-        } catch (DataIntegrityViolationException e) {
-            // upsertCheck()와 동일한 이유로 재조회도 REQUIRES_NEW 새 트랜잭션에서 한다.
+        } catch (DataIntegrityViolationException | CannotAcquireLockException e) {
+            // upsertCheck()와 동일한 이유로 CannotAcquireLockException도 같이 잡고, 재조회도
+            // REQUIRES_NEW 새 트랜잭션에서 한다.
             boolean recovered = Boolean.TRUE.equals(requiresNewTransactionTemplate.execute(status ->
                     riskRepository.findByPropertyIdAndSignalType(property.getId(), signalType)
                             .map(winner -> {

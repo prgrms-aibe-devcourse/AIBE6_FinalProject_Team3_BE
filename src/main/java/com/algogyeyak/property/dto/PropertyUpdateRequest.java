@@ -1,6 +1,5 @@
 package com.algogyeyak.property.dto;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -9,13 +8,21 @@ import java.util.List;
 /**
  * 매물 수정 요청. 주소/매물유형/거래유형은 등록 시 확정된 값으로 수정 대상에서 제외하고
  * (변경하려면 재등록), 이름/가격/면적/설명/이미지만 수정 대상으로 한다.
- * title/deposit/area는 등록과 동일하게 항상 필수, monthlyRent는 거래유형에 따라 Service에서 검증한다.
+ * title은 등록과 동일하게 선택 입력(#222), deposit/area는 항상 필수, monthlyRent는 거래유형에
+ * 따라 Service에서 검증한다.
  * images는 null이면 "이미지 변경 없음"(기존 이미지 그대로 유지), 값이 있으면(빈 리스트 포함) 기존
  * 이미지를 전부 지우고 통째로 교체한다 - 부분 추가/삭제가 아니라 항상 전체 목록을 새로 제출해야 한다.
+ * detailAddress(동/호수 등)는 예외적으로 수정 가능하다 - Kakao 지오코딩 대상인 roadAddress/
+ * jibunAddress/latitude/longitude와 달리 사용자가 직접 입력하는 표시용 값이라 "주소는 등록 시
+ * 확정"이라는 제약과 무관하다(5차 멘토링 피드백 3번).
  */
 public record PropertyUpdateRequest(
-        @NotBlank(message = "매물 이름은 필수입니다.")
+        // 선택 입력 - 등록 때와 동일하게 필수를 두지 않는다. 비어 있으면 PropertyService가
+        // propertyType의 한글 라벨로 대체해서 저장한다(#222).
         String title,
+
+        // 선택 입력 - 등록 때와 동일하게 형식 검증 없음.
+        String detailAddress,
 
         @NotNull(message = "보증금은 필수입니다.")
         @Positive(message = "보증금은 0보다 커야 합니다.")

@@ -3,8 +3,6 @@ package com.algogyeyak.admin.service;
 import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.entity.AdminAuditLog;
 import com.algogyeyak.admin.repository.AdminAuditLogRepository;
-import com.algogyeyak.user.entity.User;
-import com.algogyeyak.user.repository.UserRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
@@ -33,23 +31,25 @@ public class AdminAuditLogger {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final AdminAuditLogRepository adminAuditLogRepository;
-    private final UserRepository userRepository;
 
     /**
+     * @param adminEmail 행위자(관리자)의 현재 이메일 스냅샷. 호출부가 이미 인증 컨텍스트(JwtUserPrincipal
+     *                   등)에서 들고 있는 값을 그대로 넘겨받는다 - 예전에는 여기서 매 호출마다
+     *                   userRepository.findById(adminUserId)로 같은 관리자 row를 다시 조회했는데,
+     *                   벌크 관리자 액션(N건 루프)에서 같은 관리자에 대해 이 SELECT가 N번 반복되는
+     *                   문제가 있었다. 호출부가 요청 컨텍스트에서 이미 확보한 값을 그대로 전달하면
+     *                   이 재조회 자체가 필요 없다.
      * @param detail 사람이 읽기 좋은 문자열이 아니라 나중에 조회/필터링이 가능하도록
      *               {"beforeRole": "USER", "afterRole": "ADMIN"}처럼 JSON 직렬화할 Map으로 받는다.
      */
-    public void log(Long adminUserId, AdminAuditAction action, Long targetId, Map<String, Object> detail) {
+    public void log(Long adminUserId, String adminEmail, AdminAuditAction action, Long targetId, Map<String, Object> detail) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException(
                     "AdminAuditLogger.log()는 실제 변경과 같은 트랜잭션 안에서만 호출할 수 있습니다 - "
                             + "호출부가 @Transactional 메서드 안에 있는지 확인하세요.");
         }
-        String adminEmailSnapshot = userRepository.findById(adminUserId)
-                .map(User::getEmail)
-                .orElse(null);
         adminAuditLogRepository.save(
-                AdminAuditLog.of(adminUserId, adminEmailSnapshot, action, targetId, toJson(detail)));
+                AdminAuditLog.of(adminUserId, adminEmail, action, targetId, toJson(detail)));
     }
 
     private String toJson(Map<String, Object> detail) {

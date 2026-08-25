@@ -10,6 +10,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
@@ -28,7 +29,13 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
  */
 @Entity
 @Table(name = "property_report",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"property_id", "reporter_id"}))
+        uniqueConstraints = @UniqueConstraint(columnNames = {"property_id", "reporter_id"}),
+        indexes = {
+                // 관리자 페이지 신고 목록 조회(PropertyReportRepository.search)의 status+reason 필터용.
+                @Index(name = "idx_property_report_status_reason", columnList = "status, reason"),
+                // 관리자 통계 대시보드 기간 조회(countByStatusAndCreatedAtBetween/countGroupedByReasonAndCreatedAtBetween)용.
+                @Index(name = "idx_property_report_created_at", columnList = "created_at")
+        })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)

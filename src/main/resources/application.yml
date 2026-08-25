@@ -1,6 +1,21 @@
 spring:
   application:
     name: algogyeyak
+  datasource:
+    hikari:
+      # RDS max_connections=60, 백엔드 인스턴스는 현재 1개뿐이라 20이면 여유 있게 안전(2026-08-20 확인).
+      maximum-pool-size: 20
+  jpa:
+    properties:
+      hibernate:
+        # 체크리스트 상세 조회 시 문항(ChecklistItem)마다 개별로 나가던 template/template.images
+        # LAZY 연관 로딩을 IN 절 배치 쿼리로 묶는다(64쿼리→7쿼리, 실측 확인). 페이지 크기(기본 20)를
+        # 한 배치로 충분히 덮도록 100으로 잡음. 매물 목록/체크리스트 목록의 PropertyAddress N+1은
+        # 이걸로 안 잡힌다 - mappedBy(비소유) 쪽 @OneToOne은 Hibernate가 프록시 자체를 못 만들어
+        # 배치 대상이 없기 때문(실측으로 확인, IN 절로 안 묶이고 매물마다 개별 SELECT가 그대로 나감).
+        # 그쪽은 PropertyRepository.search()/ChecklistRepository.findOverviewByUserId()의
+        # LEFT JOIN FETCH p.address로 별도 해결함.
+        default_batch_fetch_size: 100
   servlet:
     multipart:
       # contract-analysis /inputs, /ocr가 자체적으로 10MB까지 허용하므로, Spring의 기본값(1MB)에
@@ -87,6 +102,10 @@ app:
   password-reset:
     token-validity-seconds: 1800 # 30분
     request-cooldown-seconds: 60
+  login:
+    max-attempts: 10
+    lockout-window-seconds: 300 # 5분 - 윈도우 내 시도 횟수가 이 값을 넘으면 이후 시도를 거부한다.
+
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   cookie:
@@ -103,7 +122,15 @@ app:
   dev-login:
     enabled: ${DEV_LOGIN_ENABLED:false}
     email: ${DEV_LOGIN_EMAIL:admin@algogyeyak.local}
+    # 관리자 계정과 별개로, 일반(USER) 역할로 로그인해 화면을 확인할 수 있는 테스트 계정 -
+    # DevTestUserSeeder가 시딩한다.
+    user-email: ${DEV_LOGIN_USER_EMAIL:tester@algogyeyak.local}
     secret: ${DEV_LOGIN_SECRET:local-dev-secret}
+  # /actuator/prometheus 전용 공유 비밀(MetricsScrapeTokenFilter) - Prometheus의 bearer_token
+  # 스크래핑 옵션과 짝을 맞춘다(monitoring/prometheus.yml 참고). 로컬은 팀 전체가 같은 더미 값을
+  # 쓰도록 기본값을 둔다(운영은 application-prod.yml에서 기본값 없이 강제).
+  metrics:
+    scrape-token: ${METRICS_SCRAPE_TOKEN:local-dev-only-scrape-token-please-override}
 
 kakao:
   rest-api-key: ${KAKAO_REST_API_KEY:dummy-key-for-local}
@@ -116,6 +143,13 @@ clova:
 gemini:
   api-key: ${GEMINI_API_KEY:dummy-gemini-api-key-for-local}
   model: gemini-3.5-flash
+  # Gemini 무료 티어 한도(분당 5회, 일 20회)를 서버가 먼저 방어하기 위한 값. 유료 티어로
+  # 전환되면 재배포 없이 여기 값만 올리면 된다(GeminiRateLimitProperties/GeminiRateLimiterService 참고).
+  rate-limit:
+    per-minute-limit: 5
+    per-day-limit: 20
+    # 공유 한도를 한 유저가 짧은 간격의 연속 호출로 독점하지 못하게 하는 최소 호출 간격.
+    min-interval-seconds: 10
 
 # 국토교통부 실거래가 API(공공데이터포털). 반드시 "일반 인증키(Decoding)" 값을 사용할 것 -
 # Encoding 키를 넣으면 UriComponentsBuilder가 다시 인코딩해 이중 인코딩으로 인증에 실패한다.
@@ -141,7 +175,7 @@ risk-policy:
   jeonse-ratio-caution-from: 80
   jeonse-ratio-warn-from: 100
   jeonse-ratio-warn-to: 150
-  multi-account-detection-enabled: false
+  multi-account-detection-enabled: true
   same-account-threshold-count: 3
   same-account-window-days: 7
   short-term-relisting-window-days: 30
@@ -151,10 +185,45 @@ risk-policy:
 
 aws:
   s3:
-    bucket: 3team-storage-495264909330-ap-northeast-2-an
+    bucket: ${AWS_S3_BUCKET:dummy-bucket-for-local}
     region: ap-northeast-2
     access-key: ${AWS_ACCESS_KEY:dummy-access-key-for-local}
     secret-key: ${AWS_SECRET_KEY:dummy-secret-key-for-local}
+
+# 매물 이미지 고아 객체 정리 배치(PropertyImageOrphanCleanupJob, #214) 정책값. 서버가 24시간
+# 상시 기동이 아니라 09~18시에만 켜져 있어서(비용 절감), 새벽 시간대로 잡으면 서버가 꺼져 있어
+# @Scheduled 자체가 절대 실행되지 않는다 - 대신 서버가 켜지는 시각(09:00) 이후 애플리케이션
+# 컨텍스트가 완전히 뜰 시간을 감안해 09:30으로 잡았다.
+property:
+  image-cleanup:
+    cron: 0 30 9 * * *
+    grace-period-hours: 24
+    # 삭제 후보가 전체 S3 객체의 50%를 넘으면 이번 실행을 건너뛰고 경고만 남긴다(서킷브레이커,
+    # PropertyImageCleanupProperties 참고).
+    max-delete-ratio: 0.5
+
+# 프로필 이미지 고아 객체 정리 배치(ProfileImageOrphanCleanupJob) 정책값. property.image-cleanup과
+# 같은 이유로 09:30에 잡되, 같은 시각에 두 배치가 동시에 S3/DB에 부하를 주지 않도록 5분 늦춘다.
+user:
+  profile-image-cleanup:
+    cron: 0 35 9 * * *
+    grace-period-hours: 24
+    # 삭제 후보가 전체 S3 객체의 50%를 넘으면 이번 실행을 건너뛰고 경고만 남긴다(서킷브레이커,
+    # ProfileImageCleanupProperties 참고).
+    max-delete-ratio: 0.5
+
+server:
+  tomcat:
+    mbeanregistry:
+      enabled: true
+
+# 요청 단위 상관관계 ID(RequestIdLoggingFilter가 MDC에 심음)를 로그 라인에 붙인다 - 로그 레벨
+# 뒤에 붙이는 게 Spring Boot가 MDC/트레이싱 값을 넣으라고 제공하는 표준 확장 지점(logging.pattern.level)
+# 이라, 기본 콘솔/파일 패턴 전체를 갈아엎지 않고도 안전하게 추가할 수 있다. 요청 밖(앱 기동 로그 등)엔
+# MDC 값이 없어 '-'로 대체된다.
+logging:
+  pattern:
+    level: '%5p [%X{requestId:--}]'
 
 # Prometheus
 management:
@@ -165,6 +234,11 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+      # roles를 안 두면 Boot는 "인증된 사용자면 누구나"를 authorized로 취급한다 - health는
+      # permitAll(SecurityConfig)이지만 JWT가 유효하면 어떤 role이든 SecurityContext가 채워지므로,
+      # 일반(비관리자) 로그인 사용자도 컴포넌트별 상세(DB/Redis 연결 상태 등)를 볼 수 있었다.
+      # ADMIN만 상세를 보게 제한한다(둘 다 permitAll이라 미인증 요청은 원래도 상세 없이 UP/DOWN만 봄).
+      roles: ADMIN
   metrics:
     tags:
       application: algogyeyak-backend

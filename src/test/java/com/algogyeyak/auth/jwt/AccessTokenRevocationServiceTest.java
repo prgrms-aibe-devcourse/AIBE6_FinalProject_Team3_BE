@@ -88,13 +88,16 @@ class AccessTokenRevocationServiceTest {
         verify(redisTemplate, never()).hasKey(any());
     }
 
-    // fail-closed 정책의 핵심 — JwtAuthenticationFilter는 예외를 던지지 않는 설계라, Redis 장애를
-    // "블랙리스트에 없음"(false)이 아니라 "무효화된 것으로 간주"(true)로 처리해야 로그아웃된 토큰이
-    // 장애 상황에서 재사용되는 것을 막을 수 있다.
+    // fail-closed 정책의 핵심 — Redis 장애 시 "블랙리스트에 없음"(false)으로 조용히 통과시키면
+    // 안 된다. 예전엔 이 경우도 "무효화된 것으로 간주"(true)로 뭉뚱그렸는데, 그러면 호출부
+    // (JwtAuthenticationFilter)가 진짜 블랙리스트된 토큰과 장애 상황을 구분할 수 없어 둘 다
+    // 401로 응답했다 - 지금은 예외로 던져 revoke()의 장애 처리와 동일하게 503으로 구분되게 한다.
     @Test
-    void isRevokedFailsClosedWhenRedisIsUnreachable() {
+    void isRevokedThrowsServiceUnavailableWhenRedisIsUnreachable() {
         when(redisTemplate.hasKey(anyString())).thenThrow(new QueryTimeoutException("redis down"));
 
-        assertTrue(accessTokenRevocationService.isRevoked("some-jti"));
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> accessTokenRevocationService.isRevoked("some-jti"));
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, exception.getErrorCode());
     }
 }

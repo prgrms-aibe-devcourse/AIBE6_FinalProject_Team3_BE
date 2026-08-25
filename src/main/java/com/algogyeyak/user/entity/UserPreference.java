@@ -1,6 +1,5 @@
 package com.algogyeyak.user.entity;
 
-import com.algogyeyak.user.enums.CurrentStage;
 import com.algogyeyak.user.enums.TransactionType;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
@@ -39,9 +38,6 @@ public class UserPreference {
     @Enumerated(EnumType.STRING)
     private TransactionType transactionType;
 
-    @Enumerated(EnumType.STRING)
-    private CurrentStage currentStage;
-
     @CreatedDate
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -51,11 +47,10 @@ public class UserPreference {
     private LocalDateTime updatedAt;
 
     @Builder
-    private UserPreference(User user, String interestRegion, TransactionType transactionType, CurrentStage currentStage) {
+    private UserPreference(User user, String interestRegion, TransactionType transactionType) {
         this.user = user;
         this.interestRegion = interestRegion;
         this.transactionType = transactionType;
-        this.currentStage = currentStage;
     }
 
     public void updateInterestRegion(String interestRegion) {
@@ -64,9 +59,5 @@ public class UserPreference {
 
     public void updateTransactionType(TransactionType transactionType) {
         this.transactionType = transactionType;
-    }
-
-    public void updateCurrentStage(CurrentStage currentStage) {
-        this.currentStage = currentStage;
     }
 }

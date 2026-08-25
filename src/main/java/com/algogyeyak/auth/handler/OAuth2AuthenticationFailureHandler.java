@@ -44,9 +44,18 @@ public class OAuth2AuthenticationFailureHandler extends SimpleUrlAuthenticationF
                 ? oauth2Exception.getError().getErrorCode()
                 : GENERIC_ERROR_CODE;
 
+        // errorCode는 CustomOAuth2UserService가 내부에서 만든 고정 코드뿐 아니라, provider가
+        // OAuth2 콜백(/login/oauth2/code/{registrationId})에 실어 보낸 error 쿼리 파라미터에서도
+        // 그대로 올 수 있어(OAuth2LoginAuthenticationFilter) 외부 입력이다 - queryParam(String, Object)
+        // 뒤 build().toUriString()은 값을 percent-encode하지 않으므로, 그대로 이어붙이면 리다이렉트
+        // URL에 추가 쿼리 파라미터를 주입할 수 있었다. URI 템플릿 변수로 넣고 expand() 이후
+        // encode()해서 값만 안전하게 percent-encode한다.
         String targetUrl = UriComponentsBuilder.fromUriString(authorizedRedirectUri)
-                .queryParam("error", errorCode)
-                .build().toUriString();
+                .queryParam("error", "{error}")
+                .build()
+                .expand(errorCode)
+                .encode()
+                .toUriString();
 
         getRedirectStrategy().sendRedirect(request, response, targetUrl);
     }

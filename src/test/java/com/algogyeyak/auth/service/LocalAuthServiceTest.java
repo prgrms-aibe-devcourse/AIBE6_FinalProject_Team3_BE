@@ -1,11 +1,15 @@
 package com.algogyeyak.auth.service;
 
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -17,7 +21,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -28,8 +34,21 @@ class LocalAuthServiceTest {
     private final UserRepository userRepository = mock(UserRepository.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
     private final EmailVerificationService emailVerificationService = mock(EmailVerificationService.class);
+    private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+    @SuppressWarnings("unchecked")
+    private final ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+    private final UserAuthStatusCacheService userAuthStatusCacheService = mock(UserAuthStatusCacheService.class);
     private final LocalAuthService localAuthService = new LocalAuthService(
-            userRepository, passwordEncoder, emailVerificationService, mock(PlatformTransactionManager.class));
+            userRepository, passwordEncoder, emailVerificationService, mock(PlatformTransactionManager.class),
+            redisTemplate, userAuthStatusCacheService);
+
+    {
+        // 대부분의 테스트는 로그인 시도 횟수 제한과 무관하므로, opsForValue().increment()가
+        // 스텁되지 않은 기본 상태(Mockito 기본 응답 = null)에서는 attempts != null 가드 덕분에
+        // 제한 로직 자체를 타지 않는다 - 아래에서 rate-limit을 실제로 검증하는 테스트만 별도로
+        // increment()를 스텁한다.
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+    }
 
     @Test
     void signupCreatesLocalUserWithEncodedPassword() {
@@ -160,6 +179,16 @@ class LocalAuthServiceTest {
         assertEquals(original, thrown);
     }
 
+    // signup() 직후 refresh token 발급 실패 등으로 세션을 만들지 못했을 때 AuthController가 호출하는
+    // 보상 트랜잭션 - 지금까지 AuthControllerTest의 MockMvc 레벨 테스트에서만 간접적으로 거쳐갔을 뿐,
+    // 이 서비스 메서드를 직접 호출하는 단위 테스트가 없었다.
+    @Test
+    void deleteNewlyCreatedUserAfterSessionSetupFailureDeletesTheUser() {
+        localAuthService.deleteNewlyCreatedUserAfterSessionSetupFailure(1L);
+
+        verify(userRepository).deleteById(1L);
+    }
+
     @Test
     void loginSucceedsWithMatchingPassword() {
         User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
@@ -265,6 +294,125 @@ class LocalAuthServiceTest {
         assertEquals(ErrorCode.AUTH_INVALID_CREDENTIALS, exception.getErrorCode());
     }
 
+    // 회귀 테스트 - login()에 무차별대입 방지 장치가 전혀 없어(EmailVerificationService.confirmCode()의
+    // maxAttempts와 달리) 같은 이메일로 무제한 로그인 시도가 가능했던 문제를 막는다.
+    @Test
+    void loginThrowsTooManyAttemptsWhenAttemptCounterExceedsLimit() {
+        ReflectionTestUtils.setField(localAuthService, "loginMaxAttempts", 10);
+        ReflectionTestUtils.setField(localAuthService, "loginLockoutWindowSeconds", 300L);
+        when(valueOps.increment(anyString())).thenReturn(11L);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> localAuthService.login("unknown@example.com", "password1"));
+
+        assertEquals(ErrorCode.AUTH_TOO_MANY_LOGIN_ATTEMPTS, exception.getErrorCode());
+        // 시도 횟수 초과 시엔 실제 계정 조회/BCrypt 비교까지 갈 필요가 없다 - 바로 거부한다.
+        verify(userRepository, never()).findByEmail(any());
+    }
+
+    // 회귀 테스트 - 존재하지 않는 이메일에도 존재하는 이메일과 동일하게 카운트해야
+    // 계정 존재 여부가 시도 제한 발동 시점 차이로 새어나가지 않는다.
+    @Test
+    void loginRateLimitCountsAttemptsRegardlessOfAccountExistence() {
+        ReflectionTestUtils.setField(localAuthService, "loginMaxAttempts", 10);
+        ReflectionTestUtils.setField(localAuthService, "loginLockoutWindowSeconds", 300L);
+        when(valueOps.increment(anyString())).thenReturn(11L);
+
+        BusinessException unknown = assertThrows(BusinessException.class,
+                () -> localAuthService.login("unknown@example.com", "password1"));
+        assertEquals(ErrorCode.AUTH_TOO_MANY_LOGIN_ATTEMPTS, unknown.getErrorCode());
+
+        User user = User.createLocalUser("known@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("known@example.com")).thenReturn(Optional.of(user));
+        BusinessException known = assertThrows(BusinessException.class,
+                () -> localAuthService.login("known@example.com", "password1"));
+        assertEquals(ErrorCode.AUTH_TOO_MANY_LOGIN_ATTEMPTS, known.getErrorCode());
+    }
+
+    @Test
+    void loginSucceedsAndResetsAttemptCounterWithinLimit() {
+        ReflectionTestUtils.setField(localAuthService, "loginMaxAttempts", 10);
+        ReflectionTestUtils.setField(localAuthService, "loginLockoutWindowSeconds", 300L);
+        when(valueOps.increment(anyString())).thenReturn(3L);
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+
+        User result = localAuthService.login("test@example.com", "password1");
+
+        assertEquals(user, result);
+        verify(redisTemplate).delete("auth:login:attempts:test@example.com");
+    }
+
+    // 회귀 테스트 - increment() 성공 후 expire()만 별도로 실패하면 카운터 키가 TTL 없이 영구히
+    // 남아 이후 그 이메일이 사실상 영구 잠금될 수 있었던 문제(setIfAbsent로 키 생성과 동시에
+    // TTL을 먼저 확정해두는 방식으로 수정) - increment 이전에 항상 setIfAbsent가 호출되는지 고정.
+    @Test
+    void loginEstablishesAttemptCounterTtlBeforeIncrementing() {
+        ReflectionTestUtils.setField(localAuthService, "loginMaxAttempts", 10);
+        ReflectionTestUtils.setField(localAuthService, "loginLockoutWindowSeconds", 300L);
+        when(valueOps.increment(anyString())).thenReturn(3L);
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+
+        localAuthService.login("test@example.com", "password1");
+
+        verify(valueOps).setIfAbsent(
+                "auth:login:attempts:test@example.com", "0", java.time.Duration.ofSeconds(300L));
+    }
+
+    // 회귀 테스트 - Redis 장애 시에는 가용성을 우선해 로그인 자체를 막지 않아야 한다(다른
+    // Redis 기반 카운터들의 fail-open/기존 로그인 가용성 우선 정책과 동일).
+    @Test
+    void loginProceedsWhenRedisFailsDuringAttemptCounting() {
+        when(valueOps.increment(anyString())).thenThrow(new QueryTimeoutException("redis down"));
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+
+        User result = localAuthService.login("test@example.com", "password1");
+
+        assertEquals(user, result);
+    }
+
+    // 위 loginProceedsWhenRedisFailsDuringAttemptCounting()의 대칭 케이스 - 로그인 자체는 이미
+    // 성공한 뒤 시도 횟수를 리셋하는 delete()만 Redis 장애로 실패해도, 로그인 결과에는 영향을 주면
+    // 안 된다(카운터는 TTL로 자연 정리되므로 무시해도 무방하다는 판단, LocalAuthService.login()의
+    // 해당 catch(DataAccessException) 주석 참고).
+    @Test
+    void loginSucceedsWhenRedisFailsDuringAttemptCounterReset() {
+        ReflectionTestUtils.setField(localAuthService, "loginMaxAttempts", 10);
+        ReflectionTestUtils.setField(localAuthService, "loginLockoutWindowSeconds", 300L);
+        when(valueOps.increment(anyString())).thenReturn(3L);
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+        doThrow(new QueryTimeoutException("redis down"))
+                .when(redisTemplate).delete("auth:login:attempts:test@example.com");
+
+        User result = localAuthService.login("test@example.com", "password1");
+
+        assertEquals(user, result);
+    }
+
+    // 경계값 테스트 - attempts가 loginMaxAttempts를 "초과"할 때만(> 비교) 잠가야 하고, 정확히
+    // 한도에 도달한 시도는 여전히 성공해야 한다(>= 비교였다면 여기서 잘못 잠겼을 것). 기존
+    // 테스트들은 attempts=11 vs loginMaxAttempts=10처럼 이미 초과한 값만 다뤘다.
+    @Test
+    void loginSucceedsWhenAttemptsExactlyAtMaxAttemptsLimit() {
+        ReflectionTestUtils.setField(localAuthService, "loginMaxAttempts", 10);
+        ReflectionTestUtils.setField(localAuthService, "loginLockoutWindowSeconds", 300L);
+        when(valueOps.increment(anyString())).thenReturn(10L);
+        User user = User.createLocalUser("test@example.com", "encoded-hash", "테스트유저");
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password1", "encoded-hash")).thenReturn(true);
+
+        User result = localAuthService.login("test@example.com", "password1");
+
+        assertEquals(user, result);
+    }
+
     @Test
     void setPasswordSucceedsForOAuthOnlyAccountWithoutCurrentPassword() {
         User user = User.createOAuthUser("social@example.com", "소셜유저", null);
@@ -275,6 +423,20 @@ class LocalAuthServiceTest {
         localAuthService.setPassword(1L, null, "newPassword1");
 
         assertEquals("new-encoded-hash", user.getPasswordHash());
+    }
+
+    // 회귀 테스트 - user-status 캐시가 stale한 passwordChangedAt을 최대 30초 들고 있으면, 방금
+    // 바꾼 비밀번호 이전에 발급된 access token이 그동안 계속 통과한다.
+    @Test
+    void setPasswordEvictsUserStatusCacheAfterChange() {
+        User user = User.createOAuthUser("social@example.com", "소셜유저", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("newPassword1")).thenReturn("new-encoded-hash");
+
+        localAuthService.setPassword(1L, null, "newPassword1");
+
+        verify(userAuthStatusCacheService).evictAfterCommit(1L);
     }
 
     @Test

@@ -18,7 +18,7 @@ class CustomOAuth2UserTest {
         ReflectionTestUtils.setField(user, "id", 1L);
         Map<String, Object> attributes = Map.of("id", "123");
 
-        CustomOAuth2User customUser = new CustomOAuth2User(user, attributes);
+        CustomOAuth2User customUser = new CustomOAuth2User(user, attributes, false);
 
         assertEquals(user, customUser.getUser());
         assertEquals(attributes, customUser.getAttributes());
@@ -30,7 +30,7 @@ class CustomOAuth2UserTest {
         User user = User.createOAuthUser("test@example.com", "테스트유저", "http://img");
         ReflectionTestUtils.setField(user, "id", 1L);
 
-        CustomOAuth2User customUser = new CustomOAuth2User(user, Map.of());
+        CustomOAuth2User customUser = new CustomOAuth2User(user, Map.of(), false);
 
         assertTrue(customUser.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)

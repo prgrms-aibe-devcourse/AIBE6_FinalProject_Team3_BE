@@ -1,5 +1,6 @@
 package com.algogyeyak.checklist.service;
 
+import com.algogyeyak.admin.entity.AdminAuditAction;
 import com.algogyeyak.admin.service.AdminAuditLogger;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateCreateRequest;
 import com.algogyeyak.checklist.dto.AdminChecklistItemTemplateImageCreateRequest;
@@ -20,11 +21,14 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -39,6 +43,7 @@ import static org.mockito.Mockito.when;
 class AdminChecklistTemplateServiceTest {
 
     private static final Long ACTOR_ID = 100L;
+    private static final String ACTOR_EMAIL = "actor@example.com";
 
     private final ChecklistItemTemplateRepository checklistItemTemplateRepository = mock(ChecklistItemTemplateRepository.class);
     private final ChecklistItemTemplateImageRepository checklistItemTemplateImageRepository = mock(ChecklistItemTemplateImageRepository.class);
@@ -80,7 +85,7 @@ class AdminChecklistTemplateServiceTest {
     }
 
     private void verifyNoAuditLog() {
-        verify(adminAuditLogger, never()).log(any(), any(), any(), any());
+        verify(adminAuditLogger, never()).log(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -104,7 +109,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 30, null
@@ -128,7 +133,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 30, null
@@ -147,7 +152,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, null
@@ -164,7 +169,7 @@ class AdminChecklistTemplateServiceTest {
         // 저장 시점에 막지 않으면 ChecklistItemTemplate.isApplicableTo()가 이 토큰을 어떤
         // 매물유형과도 매칭시키지 못해 그 문항이 조용히 전체 매물유형에서 노출되지 않게 된다.
         assertThatThrownBy(() -> adminChecklistTemplateService.create(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, "OFFICETEL,TYPO"
@@ -187,7 +192,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, "OFFICETEL,"
@@ -205,7 +210,7 @@ class AdminChecklistTemplateServiceTest {
         // "전체 적용"으로 봐주지 않고 빈 배열과 어떤 매물유형도 매칭시키지 못해 그 문항이 모든
         // 매물유형에서 조용히 숨겨진다 - 이 검증 메서드가 원래 막으려던 바로 그 실패 모드다.
         assertThatThrownBy(() -> adminChecklistTemplateService.create(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.AREA, "주차 공간이 충분한가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.CHECK, null, null, 1, " , "
@@ -225,7 +230,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.create(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.INDOOR, "보일러 종류가 무엇인가요?", null, null,
                         ChecklistImportance.GENERAL, ChecklistItemType.MULTIPLE_CHOICE,
@@ -247,7 +252,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(existing, template(2L, 2, 2)));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", "안내", null,
@@ -276,7 +281,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(currentlyActive));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
@@ -295,7 +300,7 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> adminChecklistTemplateService.update(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
@@ -314,7 +319,7 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> adminChecklistTemplateService.update(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 999L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.AREA, "내용", null, null,
@@ -331,7 +336,7 @@ class AdminChecklistTemplateServiceTest {
     @DisplayName("code에 맞지 않는 itemType으로 생성하면 ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE 예외가 발생한다")
     void createThrowsWhenCodeAndItemTypeMismatch() {
         assertThatThrownBy(() -> adminChecklistTemplateService.create(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
                         ChecklistImportance.REQUIRED, ChecklistItemType.CHECK, null,
@@ -351,7 +356,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(templateWithCode(1L, ChecklistItemCode.TRUST_REGISTRATION, ChecklistItemType.YES_NO)));
 
         assertThatThrownBy(() -> adminChecklistTemplateService.create(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 new AdminChecklistItemTemplateCreateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (중복)", null, null,
                         ChecklistImportance.REQUIRED, ChecklistItemType.YES_NO, null,
@@ -373,7 +378,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(existing));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요? (문구 수정)", null, null,
@@ -395,7 +400,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(other));
 
         assertThatThrownBy(() -> adminChecklistTemplateService.update(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.DOCUMENTS, "신탁등기가 되어 있나요?", null, null,
@@ -420,9 +425,28 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
                 .thenReturn(List.of(existing, template(2L, 2, 2)));
 
-        adminChecklistTemplateService.delete(ACTOR_ID, 1L);
+        adminChecklistTemplateService.delete(ACTOR_ID, ACTOR_EMAIL, 1L);
 
         verify(checklistItemTemplateRepository).delete(existing);
+    }
+
+    @Test
+    @DisplayName("예시 이미지가 있는 문항을 삭제하면 템플릿 삭제 전에 이미지부터 지운다 (FK 위반 회귀 테스트)")
+    void deleteRemovesAssociatedImagesBeforeDeletingTemplate() {
+        // 회귀 테스트 - template_id는 nullable=false FK라, 이미지가 하나라도 남아있는 채로 템플릿만
+        // 지우면 DataIntegrityViolationException(500)이 났다. deleteByTemplateId()를 먼저 호출해야
+        // FK 위반 없이 삭제가 끝난다.
+        ChecklistItemTemplate existing = template(1L, 2, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(checklistItemTemplateRepository.count()).thenReturn(2L);
+        when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
+                .thenReturn(List.of(existing, template(2L, 2, 2)));
+
+        adminChecklistTemplateService.delete(ACTOR_ID, ACTOR_EMAIL, 1L);
+
+        InOrder order = inOrder(checklistItemTemplateImageRepository, checklistItemTemplateRepository);
+        order.verify(checklistItemTemplateImageRepository).deleteByTemplateId(1L);
+        order.verify(checklistItemTemplateRepository).delete(existing);
     }
 
     @Test
@@ -437,7 +461,7 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc())
                 .thenReturn(List.of(activeTemplate));
 
-        assertThatThrownBy(() -> adminChecklistTemplateService.delete(ACTOR_ID, 1L))
+        assertThatThrownBy(() -> adminChecklistTemplateService.delete(ACTOR_ID, ACTOR_EMAIL, 1L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
@@ -451,7 +475,7 @@ class AdminChecklistTemplateServiceTest {
     void deleteThrowsWhenTemplateNotFound() {
         when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> adminChecklistTemplateService.delete(ACTOR_ID, 999L))
+        assertThatThrownBy(() -> adminChecklistTemplateService.delete(ACTOR_ID, ACTOR_EMAIL, 999L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
@@ -469,7 +493,7 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findByActiveTrueOrderByDisplayOrderAsc()).thenReturn(List.of(existing));
 
         assertThatThrownBy(() -> adminChecklistTemplateService.update(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
@@ -492,7 +516,7 @@ class AdminChecklistTemplateServiceTest {
                 .thenReturn(List.of(existing, other));
 
         AdminChecklistItemTemplateResponse result = adminChecklistTemplateService.update(
-                ACTOR_ID,
+                ACTOR_ID, ACTOR_EMAIL,
                 1L,
                 new AdminChecklistItemTemplateUpdateRequest(
                         ChecklistCategory.SAFETY, "창문 잠금장치가 정상 작동하나요?", null, null,
@@ -510,7 +534,7 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
         when(checklistItemTemplateRepository.count()).thenReturn(1L);
 
-        assertThatThrownBy(() -> adminChecklistTemplateService.delete(ACTOR_ID, 1L))
+        assertThatThrownBy(() -> adminChecklistTemplateService.delete(ACTOR_ID, ACTOR_EMAIL, 1L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM));
@@ -572,11 +596,13 @@ class AdminChecklistTemplateServiceTest {
                 });
 
         AdminChecklistItemTemplateImageResponse result = adminChecklistTemplateService.addImage(
-                ACTOR_ID, 1L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/2.jpg"));
+                ACTOR_ID, ACTOR_EMAIL,1L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/2.jpg"));
 
         assertThat(result.imageUrl()).isEqualTo("https://example.com/2.jpg");
         assertThat(result.displayOrder()).isEqualTo(2);
-        verify(adminAuditLogger).log(any(), any(), any(), any());
+        // 회귀 테스트(2026-08-20) - targetType이 CHECKLIST_TEMPLATE이므로 targetId는 새로 생성된
+        // 이미지 id(20L)가 아니라 소속 템플릿 id(1L)여야 한다.
+        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE), eq(1L), any());
     }
 
     @Test
@@ -585,11 +611,34 @@ class AdminChecklistTemplateServiceTest {
         when(checklistItemTemplateRepository.findById(999L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> adminChecklistTemplateService.addImage(
-                ACTOR_ID, 999L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/1.jpg")))
+                ACTOR_ID, ACTOR_EMAIL,999L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/1.jpg")))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_NOT_FOUND));
         verify(checklistItemTemplateImageRepository, never()).save(any());
+        verifyNoAuditLog();
+    }
+
+    // 회귀 테스트 - ChecklistItemTemplateImage의 (template_id, display_order) 유니크 제약(체크리스트
+    // 시더의 동시 기동 중복 삽입을 막기 위해 추가됨)이 관리자 두 명이 거의 동시에 이미지를 추가하는
+    // 레이스도 함께 막는다. 그 예외가 그대로 새어나가면 사용자 친화적인 응답 없이 500으로 올라가므로,
+    // 재시도를 안내하는 409(ADMIN_CHECKLIST_TEMPLATE_IMAGE_ORDER_CONFLICT)로 변환돼야 한다.
+    @Test
+    @DisplayName("동시에 같은 표시순서로 이미지가 저장되면(다른 관리자와의 레이스) 재시도를 안내하는 409로 변환된다")
+    void addImageTranslatesDisplayOrderConflictToBusinessException() {
+        ChecklistItemTemplate template = template(1L, 3, 1);
+        when(checklistItemTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        when(checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(1L))
+                .thenReturn(List.of(image(10L, template, "https://example.com/1.jpg", 1)));
+        when(checklistItemTemplateImageRepository.save(any(ChecklistItemTemplateImage.class)))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException(
+                        "Duplicate entry for key 'uk_checklist_item_template_image_template_display_order'"));
+
+        assertThatThrownBy(() -> adminChecklistTemplateService.addImage(
+                ACTOR_ID, ACTOR_EMAIL, 1L, new AdminChecklistItemTemplateImageCreateRequest("https://example.com/2.jpg")))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
+                        .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_ORDER_CONFLICT));
         verifyNoAuditLog();
     }
 
@@ -600,9 +649,11 @@ class AdminChecklistTemplateServiceTest {
         ChecklistItemTemplateImage image = image(10L, template, "https://example.com/1.jpg", 1);
         when(checklistItemTemplateImageRepository.findById(10L)).thenReturn(Optional.of(image));
 
-        adminChecklistTemplateService.deleteImage(ACTOR_ID, 1L, 10L);
+        adminChecklistTemplateService.deleteImage(ACTOR_ID, ACTOR_EMAIL, 1L, 10L);
 
         verify(checklistItemTemplateImageRepository).delete(image);
+        // 회귀 테스트(2026-08-20) - targetId는 삭제된 이미지 id(10L)가 아니라 소속 템플릿 id(1L)여야 한다.
+        verify(adminAuditLogger).log(any(), any(), eq(AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE), eq(1L), any());
     }
 
     @Test
@@ -610,7 +661,7 @@ class AdminChecklistTemplateServiceTest {
     void deleteImageThrowsWhenImageNotFound() {
         when(checklistItemTemplateImageRepository.findById(999L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> adminChecklistTemplateService.deleteImage(ACTOR_ID, 1L, 999L))
+        assertThatThrownBy(() -> adminChecklistTemplateService.deleteImage(ACTOR_ID, ACTOR_EMAIL, 1L, 999L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND));
@@ -624,7 +675,7 @@ class AdminChecklistTemplateServiceTest {
         ChecklistItemTemplateImage image = image(10L, otherTemplate, "https://example.com/1.jpg", 1);
         when(checklistItemTemplateImageRepository.findById(10L)).thenReturn(Optional.of(image));
 
-        assertThatThrownBy(() -> adminChecklistTemplateService.deleteImage(ACTOR_ID, 1L, 10L))
+        assertThatThrownBy(() -> adminChecklistTemplateService.deleteImage(ACTOR_ID, ACTOR_EMAIL, 1L, 10L))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(((BusinessException) exception).getErrorCode())
                         .isEqualTo(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND));

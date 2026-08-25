@@ -72,14 +72,20 @@ public class AdminAccountSeeder implements ApplicationRunner {
         try {
             userRepository.save(admin);
         } catch (DataIntegrityViolationException e) {
-            // 닉네임 "관리자"가 이미(다른 실제 사용자가 가입 시점에 우연히 골랐거나) 존재하는 값이면
-            // User.nickname의 전역 유니크 제약에 걸린다. 이메일 충돌과 달리 이 예외를 그냥 흘려보내면
-            // ApplicationRunner의 예외는 앱 기동 자체를 실패시킨다 - dev-login이 시딩 실패 하나로
-            // 전체 배포를 막아서는 안 되므로, 이메일 충돌과 동일하게 경고만 남기고 계속 기동한다.
+            // 가장 흔한 원인은 닉네임 "관리자"를 이미(다른 실제 사용자가 가입 시점에 우연히
+            // 골랐거나) 다른 사용자가 쓰고 있어 User.nickname의 전역 유니크 제약에 걸리는 것이지만,
+            // 유일한 원인은 아니다 - 여러 인스턴스가 동시에 기동하면서 둘 다 위 findByEmail에서는
+            // "계정 없음"을 봤지만 그 사이 다른 인스턴스가 먼저 save()를 커밋해버리면, 늦게 커밋을
+            // 시도한 쪽은 이메일 유니크 제약에 걸려 같은 DataIntegrityViolationException을 받는다
+            // (원인 원문(e.getMessage())을 로그에 함께 남겨 실제 어떤 제약에 걸렸는지 구분 가능하게
+            // 한다). 어느 쪽이든 이 예외를 그냥 흘려보내면 ApplicationRunner의 예외는 앱 기동 자체를
+            // 실패시킨다 - dev-login이 시딩 실패 하나로 전체 배포를 막아서는 안 되므로, 원인과
+            // 무관하게 경고만 남기고 계속 기동한다.
             log.warn(
-                    "app.dev-login.email({})용 관리자 계정 시딩 실패 - 닉네임 '관리자'를 이미 다른 사용자가"
-                            + " 사용 중입니다. 그 사용자의 닉네임을 바꾸거나 이 계정을 수동으로 만든 뒤 다시"
-                            + " 기동해야 dev-login을 쓸 수 있습니다.",
+                    "app.dev-login.email({})용 관리자 계정 시딩 실패 - 닉네임 '관리자'가 이미 사용 중이거나"
+                            + "(다른 사용자의 닉네임을 바꾸거나 이 계정을 수동으로 만들어야 함), 동시 기동 중인"
+                            + " 다른 인스턴스가 같은 이메일로 먼저 계정을 만들었을 수 있습니다(이 경우 재기동"
+                            + " 없이도 다음 요청부터 정상 동작). 원인은 cause 메시지를 확인하세요.",
                     normalizedEmail, e);
         }
     }

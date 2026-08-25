@@ -3,6 +3,7 @@ package com.algogyeyak.global.exception;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.response.ApiError;
 import com.algogyeyak.global.response.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import java.util.List;
 import org.slf4j.Logger;
@@ -19,12 +20,18 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    // JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE와 같은 문자열이어야 한다(global 패키지가
+    // auth 패키지를 의존하면 안 되므로 상수를 직접 import하지 못하고 리터럴로 맞춰둔 것) - 그쪽 상수
+    // 값이 바뀌면 이 값도 같이 바꿔야 한다.
+    private static final String AUTH_FAILURE_REASON_ATTRIBUTE = "auth.failureReason";
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException exception) {
@@ -76,6 +83,20 @@ public class GlobalExceptionHandler {
         return buildErrorResponse(ErrorCode.BAD_REQUEST, message);
     }
 
+    // spring.servlet.multipart.max-file-size/max-request-size(둘 다 10MB)를 넘는 요청은
+    // 컨트롤러/서비스 코드(예: ContractAnalysisOcrService의 자체 10MB 체크)에 도달하기도 전에
+    // 멀티파트 리졸버가 이 예외를 던진다 - 핸들러가 없으면 catch-all Exception으로 떨어져
+    // 500이 나간다. 현재 멀티파트 업로드를 직접 받는 곳이 contract-analysis(/inputs, /ocr)뿐이라
+    // CONTRACT_ANALYSIS_FILE_TOO_LARGE로 매핑한다 - 다른 도메인이 멀티파트 업로드를 추가하면
+    // 그때 이 매핑을 다시 검토해야 한다.
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUploadSizeExceededException(
+            MaxUploadSizeExceededException exception
+    ) {
+        return buildErrorResponse(
+                ErrorCode.CONTRACT_ANALYSIS_FILE_TOO_LARGE, ErrorCode.CONTRACT_ANALYSIS_FILE_TOO_LARGE.getMessage());
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleHttpMessageNotReadableException(
             HttpMessageNotReadableException exception
@@ -96,9 +117,19 @@ public class GlobalExceptionHandler {
         return buildErrorResponse(ErrorCode.INVALID_SORT_FIELD, ErrorCode.INVALID_SORT_FIELD.getMessage());
     }
 
+    // 오늘 기준으로는 JwtAuthenticationFilter가 실패해도 예외를 던지지 않고 SecurityConfig의
+    // authenticationEntryPoint가 대신 응답을 만들기 때문에 이 핸들러까지는 도달하지 않지만,
+    // 앞으로 어떤 컨트롤러/서비스가 AuthenticationException을 직접 던지게 되면 여기로 들어온다 -
+    // 그때도 UNAUTHORIZED로 뭉뚱그리지 않고 SecurityConfig와 동일하게 필터가 남긴 세부 사유
+    // (AUTH_TOKEN_MISSING/EXPIRED/INVALID 등)를 우선하도록 같은 방식으로 맞춘다.
     @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<ApiResponse<Void>> handleAuthenticationException(AuthenticationException exception) {
-        return buildErrorResponse(ErrorCode.UNAUTHORIZED, ErrorCode.UNAUTHORIZED.getMessage());
+    public ResponseEntity<ApiResponse<Void>> handleAuthenticationException(
+            AuthenticationException exception,
+            HttpServletRequest request
+    ) {
+        Object reason = request.getAttribute(AUTH_FAILURE_REASON_ATTRIBUTE);
+        ErrorCode errorCode = reason instanceof ErrorCode code ? code : ErrorCode.UNAUTHORIZED;
+        return buildErrorResponse(errorCode, errorCode.getMessage());
     }
 
     @ExceptionHandler(AccessDeniedException.class)

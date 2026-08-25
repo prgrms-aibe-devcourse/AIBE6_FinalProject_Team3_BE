@@ -126,7 +126,7 @@ class PriceAnomalyDetectorTest {
         SignalCheckResult result = detector.detect(property(), success(-0.10));
 
         assertThat(result.status()).isEqualTo(RiskCheckStatus.SUCCESS);
-        assertThat(result.description()).isEqualTo("시세보다 10% 낮은 가격이에요 — 왜 이렇게 저렴한지 확인해보세요");
+        assertThat(result.description()).isEqualTo("시세보다 10% 낮은 가격이에요");
     }
 
     @Test
@@ -136,7 +136,7 @@ class PriceAnomalyDetectorTest {
 
         SignalCheckResult result = detector.detect(property(), success(-0.20));
 
-        assertThat(result.description()).isEqualTo("시세보다 20% 낮은 가격이에요 — 왜 이렇게 저렴한지 확인해보세요");
+        assertThat(result.description()).isEqualTo("시세보다 20% 낮은 가격이에요");
     }
 
     @Test

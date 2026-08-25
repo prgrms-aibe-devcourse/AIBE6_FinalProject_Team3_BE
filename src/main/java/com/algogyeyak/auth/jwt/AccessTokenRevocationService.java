@@ -49,10 +49,12 @@ public class AccessTokenRevocationService {
         }
     }
 
-    // JwtAuthenticationFilter는 예외를 던지지 않는 설계이므로(클래스 주석 참고), 여기서도 절대
-    // 예외를 던지지 않는다 — Redis 장애 시에는 "무효화된 것으로 간주"(true)해 인증을 거부하는
-    // fail-closed로 처리한다. 즉, 이 메서드가 false를 반환한다는 것은 "블랙리스트에 없음이 확인됨"을
-    // 뜻하지 "확인이 안 됐지만 일단 통과"를 뜻하지 않는다.
+    // Redis 장애 시에는 fail-closed로 인증을 거부해야 하지만(무효화 여부를 확신할 수 없으므로
+    // "유효하다"로 오인하면 안 됨), 예전엔 그 장애를 "블랙리스트에 있음"(true)과 똑같이 취급했다 -
+    // 그러면 JwtAuthenticationFilter가 이 결과를 AUTH_TOKEN_INVALID(401)로만 처리해, Redis가
+    // 잠깐 다운된 것뿐인데 사용자에게는 "로그아웃됨"으로 보였다(revoke()/DB 조회 실패는 이미
+    // AUTH_TOKEN_STORE_UNAVAILABLE(503)로 구분해 응답하는데 이것만 어긋나 있었다). 장애는 예외로
+    // 던져 호출부가 진짜 블랙리스트 여부와 구분해 503으로 응답할 수 있게 한다.
     public boolean isRevoked(String jti) {
         if (jti == null) {
             return false;
@@ -61,8 +63,7 @@ public class AccessTokenRevocationService {
         try {
             return Boolean.TRUE.equals(redisTemplate.hasKey(key(jti)));
         } catch (DataAccessException e) {
-            log.error("Redis 장애로 access token 블랙리스트 확인 불가 — fail-closed로 인증을 거부합니다. jti={}", jti, e);
-            return true;
+            throw redisUnavailable(e);
         }
     }
 

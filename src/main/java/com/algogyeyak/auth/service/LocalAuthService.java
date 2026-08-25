@@ -1,12 +1,18 @@
 package com.algogyeyak.auth.service;
 
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.auth.util.EmailNormalizer;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.repository.UserRepository;
+import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -17,6 +23,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class LocalAuthService {
 
+    private static final Logger log = LoggerFactory.getLogger(LocalAuthService.class);
+
     // login()이 계정 없음/소셜 전용 계정(passwordHash 없음)일 때 BCrypt 비교 자체를 건너뛰면,
     // 그 경로가 실제 비밀번호 불일치 경로보다 눈에 띄게 빨라 응답 시간만으로 "이 이메일에 로컬
     // 비밀번호가 있는지"를 알아낼 수 있다(에러 메시지/코드는 이미 동일하게 처리돼 있었지만 처리
@@ -25,24 +33,38 @@ public class LocalAuthService {
     private static final String DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY =
             "$2a$10$CwTycUXWue0Thq9StjUM0uJ8Q0kQAr9Z6FkQx9F.C2t2CSqDNXW0e";
 
+    private static final String LOGIN_ATTEMPTS_KEY_PREFIX = "auth:login:attempts:";
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailVerificationService emailVerificationService;
     private final TransactionTemplate requiresNewTransactionTemplate;
+    private final StringRedisTemplate redisTemplate;
+    private final UserAuthStatusCacheService userAuthStatusCacheService;
 
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
+
+    @Value("${app.login.max-attempts}")
+    private int loginMaxAttempts;
+
+    @Value("${app.login.lockout-window-seconds}")
+    private long loginLockoutWindowSeconds;
 
     public LocalAuthService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             EmailVerificationService emailVerificationService,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            StringRedisTemplate redisTemplate,
+            UserAuthStatusCacheService userAuthStatusCacheService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailVerificationService = emailVerificationService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.redisTemplate = redisTemplate;
+        this.userAuthStatusCacheService = userAuthStatusCacheService;
     }
 
     @Transactional
@@ -112,7 +134,35 @@ public class LocalAuthService {
 
     @Transactional(readOnly = true)
     public User login(String email, String rawPassword) {
-        User user = userRepository.findByEmail(EmailNormalizer.normalize(email))
+        String normalizedEmail = EmailNormalizer.normalize(email);
+
+        // 무차별대입 방지 - 이메일 존재 여부와 무관하게(계정이 없어도) 항상 같은 방식으로
+        // 카운트해야 위 타이밍 안전장치와 같은 이유로 계정 존재 여부가 새어나가지 않는다.
+        // EmailVerificationService.confirmCode()의 maxAttempts와 동일한 패턴 - Redis 장애 시에는
+        // 가용성을 우선해 로그인 자체를 막지 않는다(무차별대입 방지가 로그인 가용성보다 우선순위가
+        // 높지 않다는 판단).
+        String attemptsKeyName = loginAttemptsKey(normalizedEmail);
+        Long attempts = null;
+        try {
+            // increment() 후 attempts == 1일 때만 expire()를 별도 호출하면, increment는 성공하고
+            // expire만 실패하는 경우(네트워크 순간 장애 등) 그 키가 TTL 없이 영구히 남아 이후
+            // 시도 때마다 만료 없이 계속 증가해, 이 이메일이 사실상 영구 잠금될 수 있다.
+            // setIfAbsent로 키 생성과 동시에 TTL을 확정해두면, increment가 그 뒤에 실패하더라도
+            // 이미 설정된 TTL로 자연 정리되므로 이 경합이 생기지 않는다.
+            redisTemplate.opsForValue().setIfAbsent(attemptsKeyName, "0", Duration.ofSeconds(loginLockoutWindowSeconds));
+            attempts = redisTemplate.opsForValue().increment(attemptsKeyName);
+            if (attempts != null && attempts > loginMaxAttempts) {
+                // 브루트포스 의심 신호 - Redis TTL 카운터는 만료되면 사라져 사후 조사가 불가능하므로,
+                // 잠금이 실제로 걸리는 시점만큼은 반드시 로그로 남겨 나중에 "이 계정이 언제/몇 번
+                // 공격받았는지" 추적할 수 있게 한다. 비밀번호는 절대 로그에 남기지 않는다.
+                log.warn("로그인 시도 횟수 초과로 잠금 처리 email={} attempts={}", normalizedEmail, attempts);
+                throw new BusinessException(ErrorCode.AUTH_TOO_MANY_LOGIN_ATTEMPTS);
+            }
+        } catch (DataAccessException e) {
+            log.warn("Redis 장애로 로그인 시도 횟수 확인 실패 - 가용성을 우선해 로그인은 계속 진행합니다", e);
+        }
+
+        User user = userRepository.findByEmail(normalizedEmail)
                 .filter(found -> !found.isWithdrawn() && !found.isSuspended())
                 .orElse(null);
 
@@ -125,10 +175,28 @@ public class LocalAuthService {
         boolean matches = passwordEncoder.matches(
                 rawPassword, passwordHash != null ? passwordHash : DUMMY_PASSWORD_HASH_FOR_TIMING_SAFETY);
         if (user == null || passwordHash == null || !matches) {
+            // 최초 1회 실패(오타 등)는 흔한 정상 케이스라 매번 WARN을 남기면 노이즈만 커지지만,
+            // 같은 이메일에 연속으로 실패가 쌓이는 것은 브루트포스를 의심할 신호이므로 그때만
+            // WARN으로 남긴다. attempts는 위에서 Redis 장애로 못 구한 경우 null일 수 있다.
+            // 비밀번호는 절대 로그에 남기지 않는다.
+            if (attempts != null && attempts > 1) {
+                log.warn("로그인 자격 증명 반복 실패 email={} attempts={}", normalizedEmail, attempts);
+            }
             throw new BusinessException(ErrorCode.AUTH_INVALID_CREDENTIALS);
         }
 
+        // 로그인 성공 - 이 이메일에 대한 시도 횟수를 리셋한다(실패하면 TTL로 자연 정리되므로 무시해도 무방).
+        try {
+            redisTemplate.delete(attemptsKeyName);
+        } catch (DataAccessException e) {
+            log.warn("로그인 성공 후 시도 횟수 초기화 실패(TTL로 자연 정리됨) email={}", normalizedEmail, e);
+        }
+
         return user;
+    }
+
+    private static String loginAttemptsKey(String normalizedEmail) {
+        return LOGIN_ATTEMPTS_KEY_PREFIX + normalizedEmail;
     }
 
     /**
@@ -171,5 +239,9 @@ public class LocalAuthService {
         }
 
         user.updatePasswordHash(passwordEncoder.encode(newPassword));
+        // passwordChangedAt이 캐시에 최대 30초 stale하게 남아있으면 이번에 바꾼 비밀번호 이전에
+        // 발급된 access token(탈취됐거나 다른 기기에 열려 있던)이 그동안 계속 통과한다 - 커밋
+        // 직후 지워 다음 요청부터 바로 DB의 새 passwordChangedAt을 보게 한다.
+        userAuthStatusCacheService.evictAfterCommit(userId);
     }
 }

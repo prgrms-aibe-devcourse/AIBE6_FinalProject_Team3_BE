@@ -13,17 +13,20 @@ import com.algogyeyak.property.client.RegionCodeResult;
 import com.algogyeyak.property.entity.Property;
 import com.algogyeyak.property.entity.PropertyAddress;
 import com.algogyeyak.property.entity.PropertyType;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 매물과 국토부 매매 실거래가를 비교해 매매 기준가(전세가율 계산용 분모)를 구한다.
@@ -41,6 +44,14 @@ import java.util.concurrent.ConcurrentHashMap;
  *   "1**"처럼 마스킹돼서 오므로(전세 API와 다름), toSample()에서 이미 null로 정규화된 표본이
  *   자연스럽게 지오코딩 후보에서 빠져 표본부족으로 이어진다.
  * - differenceRate가 없다 - 매물 자체 가격과 비교하는 게 아니라 매매 기준가 자체가 필요하다.
+ *
+ * compare()에 {@code @Cacheable(cacheNames = "marketSaleComparison")}을 두는 이유: 이전까지
+ * 이 메서드는 캐싱이 전혀 없어 호출마다 국토부 실거래가 API를 최대 6회 순차 호출했다(전수조사
+ * 성능 감사 결과, 2026-08-24 - MarketComparisonService.compare()는 이미 캐싱돼 있었는데
+ * 이 형제 메서드만 빠져 있었음). RedisCacheConfig에 marketComparison과 동일한 TTL로
+ * marketSaleComparison 캐시를 등록해 재사용한다. evictCache()는 MarketComparisonService와
+ * 동일한 패턴으로, 매물 가격/면적이 바뀌어 매매 기준가 재계산이 필요할 때 호출부(PropertyService)가
+ * 명시적으로 캐시를 비운다.
  */
 @Slf4j
 @Service
@@ -52,8 +63,17 @@ public class MarketSaleComparisonService {
     private final MolitTradeClient molitTradeClient;
     private final MarketComparisonProperties properties;
 
-    private final Map<String, AddressResolutionResult> geocodeCache = new ConcurrentHashMap<>();
+    // MarketComparisonService.geocodeCache와 동일한 이유(2026-08-21 멘토링 피드백)로 Caffeine을
+    // 쓴다 - 이 클래스도 독립된 인메모리 지오코딩 캐시를 갖고 있어 똑같이 무제한 누적 문제가 있었다.
+    private static final long GEOCODE_CACHE_MAX_SIZE = 10_000;
+    private static final Duration GEOCODE_CACHE_EXPIRE_AFTER_WRITE = Duration.ofHours(6);
 
+    private final Cache<String, AddressResolutionResult> geocodeCache = Caffeine.newBuilder()
+            .maximumSize(GEOCODE_CACHE_MAX_SIZE)
+            .expireAfterWrite(GEOCODE_CACHE_EXPIRE_AFTER_WRITE)
+            .build();
+
+    @Cacheable(cacheNames = "marketSaleComparison", key = "#property.id")
     public MarketSaleComparisonResponse compare(Property property) {
         PropertyAddress address = property.getAddress();
         if (address == null || address.getLatitude() == null || address.getLongitude() == null) {
@@ -108,6 +128,11 @@ public class MarketSaleComparisonService {
         );
     }
 
+    @CacheEvict(cacheNames = "marketSaleComparison", key = "#propertyId")
+    public void evictCache(Long propertyId) {
+        // 캐시 삭제는 어노테이션이 처리 - 메서드 본문은 필요 없음.
+    }
+
     private List<TradeTransactionSample> fetchRecentTransactions(PropertyType propertyType, String lawdCd) {
         List<TradeTransactionSample> result = new ArrayList<>();
         YearMonth current = YearMonth.now();
@@ -134,7 +159,7 @@ public class MarketSaleComparisonService {
             }
             String fullAddress = sggPrefix + " " + sample.getLegalDongName() + " " + sample.getJibunAddress();
 
-            AddressResolutionResult resolution = geocodeCache.computeIfAbsent(
+            AddressResolutionResult resolution = geocodeCache.get(
                     fullAddress, kakaoAddressClient::resolve
             );
 

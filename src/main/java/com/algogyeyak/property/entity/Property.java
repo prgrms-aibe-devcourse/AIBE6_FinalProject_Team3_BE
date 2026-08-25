@@ -6,11 +6,14 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -30,7 +33,19 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
  * (User 엔티티가 생기면 연관관계로 바꿀지 팀과 논의 필요).
  */
 @Entity
-@Table(name = "property")
+@Table(name = "property", indexes = {
+        // 관리자 통계 대시보드의 기간별 매물 등록 조회(PropertyRepository.countByCreatedAtBetween/
+        // findCreatedAtBetween, AdminStatsService 참고)가 이 컬럼으로 조회한다 - User/PropertyReport는
+        // 같은 이유로 이미 created_at 인덱스가 있는데 Property만 빠져 있어 이 조회만 풀스캔이었다
+        // (2026-08-20 멘토링 피드백에서 지적).
+        @Index(name = "idx_property_created_at", columnList = "created_at"),
+        // PropertyRepository.search()가 매 호출마다 user_id + status로 필터링하는데(마이페이지
+        // 매물 목록, hasSignal 필터 등 대부분의 조회 경로가 이 메서드를 거친다) 그동안 이 두
+        // 컬럼을 커버하는 인덱스가 없어 매물 수가 늘어날수록 풀스캔 비용이 커지는 구조였다
+        // (2026-08-21 멘토링 피드백에서 지적). WHERE 절 등장 순서(userId 먼저, status 다음)와
+        // 맞춰 컬럼 순서를 둔다.
+        @Index(name = "idx_property_user_status", columnList = "user_id, status")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)
@@ -73,10 +88,18 @@ public class Property {
     @Column(nullable = false, length = 20)
     private PropertyStatus status;
 
-    @OneToOne(mappedBy = "property", cascade = CascadeType.ALL, orphanRemoval = true)
+    // mappedBy(비소유) 쪽 @OneToOne은 fetch 타입과 무관하게 조인으로 한 번에 못 가져오고 매물마다
+    // 별도 SELECT가 나가는 게 JPA의 잘 알려진 한계다 - 기본값(EAGER)이면 이 SELECT가 프록시 지연 없이
+    // 즉시 나가 default_batch_fetch_size로 묶을 수 없으므로, LAZY로 명시해야 배치 효과가 적용된다.
+    @OneToOne(mappedBy = "property", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private PropertyAddress address;
 
+    // sortOrder는 PropertyService.applyImages()가 등록/수정 요청 리스트의 인덱스로 채운다 -
+    // @OrderBy가 없으면 조회 순서가 DB/쿼리 플랜에 따라 흔들릴 수 있어, 대표사진(첫 이미지) 지정이
+    // 삽입 순서라는 관찰된 동작에만 암묵적으로 의존하던 문제를 명시적 정렬로 해소한다
+    // (전수조사 결과 버그/정확성 2번).
     @OneToMany(mappedBy = "property", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC")
     private List<PropertyImage> images = new ArrayList<>();
 
     @CreatedDate

@@ -3,6 +3,7 @@ package com.algogyeyak.auth.controller;
 import com.algogyeyak.auth.dto.PasswordPolicy;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
+import com.algogyeyak.auth.jwt.UserAuthStatusCacheService;
 import com.algogyeyak.auth.service.EmailVerificationService;
 import com.algogyeyak.auth.service.PasswordResetService;
 import com.algogyeyak.auth.token.RefreshTokenService;
@@ -94,6 +95,15 @@ class AuthControllerTest {
 
     @MockitoBean
     private PasswordResetService passwordResetService;
+
+    // JwtAuthenticationFilter가 매 요청 이 캐시(진짜 Redis, 30초 TTL)를 먼저 보고 미스일 때만
+    // userRepository(mock)로 폴백한다 - 이걸 막아두지 않으면, 같은 userId(1L)를 재사용하는 여러
+    // /auth/me 테스트가 앞선 테스트의 캐시를 그대로 물려받아(예: 정상 유저로 캐시된 뒤 "정지된
+    // 유저" 테스트가 돌아도 캐시부터 맞아 mock한 정지 상태를 못 봄) 순서에 따라 실패가 갈리는
+    // 테스트 오염이 생긴다. mock으로 등록만 해두면 find()가 항상 Optional.empty()를 반환해
+    // (Mockito의 Optional 기본 응답) 모든 테스트가 매번 DB(mock) 경로를 확실히 타게 된다.
+    @MockitoBean
+    private UserAuthStatusCacheService userAuthStatusCacheService;
 
     @Test
     void passwordPolicyReturnsPatternWithoutSurroundingAnchorsAndMessage() throws Exception {
@@ -662,6 +672,36 @@ class AuthControllerTest {
     // AuthControllerDevLoginStartupTest(ApplicationContextRunner로 실제 컨텍스트를 새로 띄워봄)에서
     // 검증한다 - 이미 뜬 컨텍스트에서 validateDevLoginConfig()를 reflection으로 직접 호출하는 방식은
     // @PostConstruct 애너테이션이 실수로 빠져도 통과해버려 그 계약을 보장하지 못하기 때문이다.
+
+    // 회귀 테스트(2026-08-20, 멘토링 피드백) - 관리자 외 일반 회원 화면도 로그인 없이 바로 확인할
+    // 수 있도록 role=USER 쿼리 파라미터를 추가했다. 기본값(role 생략)은 여전히 ADMIN이어야 한다
+    // (위 테스트들이 이미 그걸 검증).
+    @Test
+    void devLoginWithUserRoleIssuesAuthCookiesForSeededTestUser() throws Exception {
+        ReflectionTestUtils.setField(authController, "devLoginEnabled", true);
+        ReflectionTestUtils.setField(authController, "devLoginUserEmail", "tester@algogyeyak.local");
+        ReflectionTestUtils.setField(authController, "devLoginSecret", "test-secret");
+        try {
+            User testUser = User.createLocalUser("tester@algogyeyak.local", null, "테스트유저");
+            ReflectionTestUtils.setField(testUser, "id", 2L);
+            ReflectionTestUtils.setField(testUser, "role", Role.USER);
+            when(userRepository.findByEmail("tester@algogyeyak.local")).thenReturn(Optional.of(testUser));
+            when(refreshTokenService.issue(testUser)).thenReturn("new-refresh-token");
+            when(refreshTokenService.getValiditySeconds()).thenReturn(1209600L);
+
+            mockMvc.perform(post("/auth/dev-login?role=USER").header("X-Dev-Login-Key", "test-secret"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.role").value("USER"))
+                    .andExpect(header().string("Set-Cookie",
+                            containsString(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME + "=")));
+            // ADMIN 계정 이메일로는 조회하지 않아야 한다 - role=USER는 devLoginUserEmail을 써야 한다.
+            verify(userRepository, never()).findByEmail("admin@algogyeyak.local");
+        } finally {
+            ReflectionTestUtils.setField(authController, "devLoginEnabled", false);
+            ReflectionTestUtils.setField(authController, "devLoginSecret", "");
+        }
+    }
 
     @Test
     void devLoginReturnsNotFoundWhenEnabledButSeededAdminMissing() throws Exception {

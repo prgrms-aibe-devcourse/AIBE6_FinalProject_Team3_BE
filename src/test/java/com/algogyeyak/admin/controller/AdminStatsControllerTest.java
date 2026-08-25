@@ -2,6 +2,7 @@ package com.algogyeyak.admin.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.algogyeyak.auth.jwt.AccessTokenRevocationService;
 import com.algogyeyak.auth.jwt.JwtAuthenticationFilter;
 import com.algogyeyak.auth.jwt.JwtProvider;
+import com.algogyeyak.property.entity.PropertyReportReason;
 import com.algogyeyak.property.entity.PropertyReportStatus;
 import com.algogyeyak.property.repository.PropertyReportRepository;
 import com.algogyeyak.property.repository.PropertyRepository;
@@ -107,7 +109,7 @@ class AdminStatsControllerTest {
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of(LocalDateTime.now()));
         when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
         when(propertyRepository.countDistinctUserIdIn(userIdsJoinedInRange)).thenReturn(4L);
-        when(propertyReportRepository.countByReasonAndCreatedAtBetween(any(), any(), any())).thenReturn(0L);
+        when(propertyReportRepository.countGroupedByReasonAndCreatedAtBetween(any(), any())).thenReturn(List.of());
 
         mockMvc.perform(get("/admin/stats/dashboard").cookie(adminCookie()))
                 .andExpect(status().isOk())
@@ -122,6 +124,32 @@ class AdminStatsControllerTest {
                 .andExpect(jsonPath("$.data.distributions.byPropertyRegistration[1].count").value(6));
     }
 
+    // 회귀 테스트 - 신고 사유별 분포가 사유별 COUNT 쿼리 여러 번(enum 5개)이 아니라 GROUP BY
+    // 집계 쿼리 한 번으로 바뀌었다 - 실제 접수된 사유는 그 건수가, 접수되지 않은 사유는 0건이
+    // 그대로 응답에 나타나야 한다(모든 사유가 항상 목록에 나타난다는 기존 계약 유지).
+    @Test
+    void 신고_사유별_분포는_GROUP_BY_결과를_사유별_건수로_매핑하고_나머지는_0건으로_채운다() throws Exception {
+        when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(0L);
+        when(userRepository.findIdsByCreatedAtBetween(any(), any())).thenReturn(List.of());
+        when(propertyRepository.countByCreatedAtBetween(any(), any())).thenReturn(0L);
+        when(propertyReportRepository.countByStatusAndCreatedAtBetween(eq(PropertyReportStatus.RECEIVED), any(), any()))
+                .thenReturn(0L);
+        when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
+        when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
+
+        PropertyReportRepository.ReasonCount duplicateCount = mock(PropertyReportRepository.ReasonCount.class);
+        when(duplicateCount.getReason()).thenReturn(PropertyReportReason.DUPLICATE);
+        when(duplicateCount.getCount()).thenReturn(3L);
+        when(propertyReportRepository.countGroupedByReasonAndCreatedAtBetween(any(), any()))
+                .thenReturn(List.of(duplicateCount));
+
+        mockMvc.perform(get("/admin/stats/dashboard").cookie(adminCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.distributions.byReportReason.length()").value(5))
+                .andExpect(jsonPath("$.data.distributions.byReportReason[?(@.reason=='DUPLICATE')].count").value(3))
+                .andExpect(jsonPath("$.data.distributions.byReportReason[?(@.reason=='ETC')].count").value(0));
+    }
+
     @Test
     void 기간_내_가입자가_없으면_등록자_조회를_건너뛰고_0으로_집계한다() throws Exception {
         when(userRepository.countByCreatedAtBetween(any(), any())).thenReturn(10L);
@@ -131,7 +159,7 @@ class AdminStatsControllerTest {
                 .thenReturn(2L);
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
         when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
-        when(propertyReportRepository.countByReasonAndCreatedAtBetween(any(), any(), any())).thenReturn(0L);
+        when(propertyReportRepository.countGroupedByReasonAndCreatedAtBetween(any(), any())).thenReturn(List.of());
 
         mockMvc.perform(get("/admin/stats/dashboard").cookie(adminCookie()))
                 .andExpect(status().isOk())
@@ -150,7 +178,7 @@ class AdminStatsControllerTest {
                 .thenReturn(2L);
         when(userRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
         when(propertyRepository.findCreatedAtBetween(any(), any())).thenReturn(List.of());
-        when(propertyReportRepository.countByReasonAndCreatedAtBetween(any(), any(), any())).thenReturn(0L);
+        when(propertyReportRepository.countGroupedByReasonAndCreatedAtBetween(any(), any())).thenReturn(List.of());
 
         mockMvc.perform(get("/admin/stats/dashboard")
                         .param("startDate", "2026-01-01")

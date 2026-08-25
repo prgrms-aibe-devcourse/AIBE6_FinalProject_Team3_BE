@@ -20,6 +20,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,7 +61,8 @@ public class AdminChecklistTemplateService {
      * (문항이 하나도 없으면 1로 시작).
      */
     @Transactional
-    public AdminChecklistItemTemplateResponse create(Long actorId, AdminChecklistItemTemplateCreateRequest request) {
+    public AdminChecklistItemTemplateResponse create(
+            Long actorId, String actorEmail, AdminChecklistItemTemplateCreateRequest request) {
         // 새로 만드는 문항은 항상 active=true라, 다른 활성 문항과의 code 중복도 그 기준으로 검사한다.
         validateCode(request.code(), request.itemType(), true, null);
         validateApplicablePropertyTypes(request.applicablePropertyTypes());
@@ -86,7 +88,7 @@ public class AdminChecklistTemplateService {
                 .build();
 
         ChecklistItemTemplate saved = checklistItemTemplateRepository.save(template);
-        adminAuditLogger.log(actorId, AdminAuditAction.CREATE_CHECKLIST_TEMPLATE, saved.getId(),
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.CREATE_CHECKLIST_TEMPLATE, saved.getId(),
                 Map.of("content", saved.getContent(), "category", saved.getCategory(), "active", saved.isActive()));
         return AdminChecklistItemTemplateResponse.from(saved);
     }
@@ -102,7 +104,7 @@ public class AdminChecklistTemplateService {
      */
     @Transactional
     public AdminChecklistItemTemplateResponse update(
-            Long actorId, Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
+            Long actorId, String actorEmail, Long templateId, AdminChecklistItemTemplateUpdateRequest request) {
         ChecklistItemTemplate template = findTemplate(templateId);
         validateCode(request.code(), request.itemType(), request.active(), templateId);
         validateNotDeactivatingLastActiveTemplate(template, request.active());
@@ -134,7 +136,7 @@ public class AdminChecklistTemplateService {
         if (versionOnReactivation != null) {
             template.realignVersionOnReactivation(versionOnReactivation);
         }
-        adminAuditLogger.log(actorId, AdminAuditAction.UPDATE_CHECKLIST_TEMPLATE, templateId, Map.of(
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.UPDATE_CHECKLIST_TEMPLATE, templateId, Map.of(
                 "beforeContent", previousContent, "afterContent", template.getContent(),
                 "beforeActive", previousActive, "afterActive", template.isActive()));
         return AdminChecklistItemTemplateResponse.from(template);
@@ -240,7 +242,7 @@ public class AdminChecklistTemplateService {
      * 동시에 삭제를 시도하면 둘 다 통과해 0개가 될 수 있다. 같은 이유(관리자 전용, 저빈도)로 감수한다.
      */
     @Transactional
-    public void delete(Long actorId, Long templateId) {
+    public void delete(Long actorId, String actorEmail, Long templateId) {
         ChecklistItemTemplate template = findTemplate(templateId);
         if (checklistItemTemplateRepository.count() <= 1) {
             throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM);
@@ -252,8 +254,12 @@ public class AdminChecklistTemplateService {
         validateNotDeactivatingLastActiveTemplate(template, false);
         // 삭제 후에는 다시 조회할 수 없으니, 감사 로그에 남길 내용을 삭제 전에 미리 캡처해둔다.
         Map<String, Object> deletedSummary = Map.of("content", template.getContent(), "category", template.getCategory());
+        // template_id는 nullable=false FK라(ChecklistItemTemplateImage 참고), cascade/orphanRemoval
+        // 없이 템플릿만 지우면 예시 이미지가 하나라도 있는 템플릿에서 FK 제약 위반이 난다 - 템플릿
+        // 삭제 전에 딸린 이미지부터 지운다.
+        checklistItemTemplateImageRepository.deleteByTemplateId(templateId);
         checklistItemTemplateRepository.delete(template);
-        adminAuditLogger.log(actorId, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE, templateId, deletedSummary);
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE, templateId, deletedSummary);
     }
 
     private ChecklistItemTemplate findTemplate(Long templateId) {
@@ -273,9 +279,18 @@ public class AdminChecklistTemplateService {
                 .toList();
     }
 
+    /**
+     * 조회 후 저장 방식이라 원자적이지 않다 - 같은 문항에 관리자 두 명이 거의 동시에 이미지를
+     * 추가하면 둘 다 같은 nextDisplayOrder를 읽어 같은 값으로 저장을 시도할 수 있다.
+     * ChecklistItemTemplateImage의 (template_id, display_order) DB 유니크 제약(2026-08-19,
+     * ChecklistTemplateSeeder의 동시 기동 시더 이미지 중복 삽입을 막기 위해 추가됨 - 그 제약이
+     * 이 경로의 레이스도 함께 막아준다)이 이제 이 경합을 실제로 막는다 - 뒤늦게 커밋하는 쪽은
+     * DataIntegrityViolationException을 받는데, 그대로 두면 사용자 친화적인 응답 없이 500으로
+     * 올라가므로 여기서 잡아 재시도를 안내하는 409로 변환한다.
+     */
     @Transactional
     public AdminChecklistItemTemplateImageResponse addImage(
-            Long actorId, Long templateId, AdminChecklistItemTemplateImageCreateRequest request) {
+            Long actorId, String actorEmail, Long templateId, AdminChecklistItemTemplateImageCreateRequest request) {
         ChecklistItemTemplate template = findTemplate(templateId);
         // 신규 이미지는 항상 맨 뒤에 추가된다 - 관리자가 이미지 순서를 바꾸고 싶으면 삭제 후 재추가.
         int nextDisplayOrder = checklistItemTemplateImageRepository.findByTemplateIdOrderByDisplayOrderAsc(templateId).stream()
@@ -283,22 +298,32 @@ public class AdminChecklistTemplateService {
                 .max()
                 .orElse(0) + 1;
 
-        ChecklistItemTemplateImage saved = checklistItemTemplateImageRepository.save(ChecklistItemTemplateImage.builder()
-                .template(template)
-                .imageUrl(request.imageUrl())
-                .displayOrder(nextDisplayOrder)
-                .build());
-        adminAuditLogger.log(actorId, AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE, saved.getId(),
-                Map.of("templateId", templateId, "imageUrl", saved.getImageUrl()));
+        ChecklistItemTemplateImage saved;
+        try {
+            saved = checklistItemTemplateImageRepository.save(ChecklistItemTemplateImage.builder()
+                    .template(template)
+                    .imageUrl(request.imageUrl())
+                    .displayOrder(nextDisplayOrder)
+                    .build());
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException(ErrorCode.ADMIN_CHECKLIST_TEMPLATE_IMAGE_ORDER_CONFLICT);
+        }
+        // targetType이 CHECKLIST_TEMPLATE이므로 targetId도 이미지 자신이 아니라 소속 템플릿 id여야
+        // 한다 - 이미지/템플릿은 시퀀스가 서로 달라, 이미지 id를 넣으면 나중에 targetType=
+        // CHECKLIST_TEMPLATE&targetId=X로 이력 조회 시 이 이벤트가 아예 안 잡히거나(대부분) 우연히
+        // id가 같은 엉뚱한 템플릿의 이력으로 잡힐 수 있다(2026-08-20 전수조사에서 발견).
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.ADD_CHECKLIST_TEMPLATE_IMAGE, templateId,
+                Map.of("imageId", saved.getId(), "imageUrl", saved.getImageUrl()));
         return AdminChecklistItemTemplateImageResponse.from(saved);
     }
 
     @Transactional
-    public void deleteImage(Long actorId, Long templateId, Long imageId) {
+    public void deleteImage(Long actorId, String actorEmail, Long templateId, Long imageId) {
         ChecklistItemTemplateImage image = findImageOwnedByTemplate(templateId, imageId);
         checklistItemTemplateImageRepository.delete(image);
-        adminAuditLogger.log(actorId, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE, imageId,
-                Map.of("templateId", templateId));
+        // addImage()와 같은 이유로 targetId는 이미지가 아니라 소속 템플릿 id여야 한다.
+        adminAuditLogger.log(actorId, actorEmail, AdminAuditAction.DELETE_CHECKLIST_TEMPLATE_IMAGE, templateId,
+                Map.of("imageId", imageId));
     }
 
     // templateId를 경로에서 받지만 실제 소속 확인은 image.getTemplate()로 하므로, 다른 문항 소유의

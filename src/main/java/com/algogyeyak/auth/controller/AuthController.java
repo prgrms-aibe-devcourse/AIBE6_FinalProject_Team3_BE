@@ -45,6 +45,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
@@ -70,6 +71,11 @@ public class AuthController {
 
     @Value("${app.dev-login.email}")
     private String devLoginEmail;
+
+    // 관리자 외 일반 회원 화면도 로그인 없이 바로 확인할 수 있도록(QA/멘토링 등 외부 테스트,
+    // 2026-08-20 피드백) - DevTestUserSeeder가 시딩하는 USER 역할 테스트 계정.
+    @Value("${app.dev-login.user-email}")
+    private String devLoginUserEmail;
 
     // @Operation/@ApiResponse의 description은 어노테이션 속성이라 컴파일타임 상수만 허용된다 -
     // EmailVerificationService/PasswordResetService처럼 @Value로 런타임 주입할 수 없어, 아래 값은
@@ -146,7 +152,6 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "발송 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 가입된 이메일 (AUTH_EMAIL_VERIFICATION_EMAIL_ALREADY_EXISTS)")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "재발송 쿨다운(" + EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS + "초) 이내 재요청 (AUTH_EMAIL_VERIFICATION_TOO_MANY_REQUESTS)")
-    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "메일 발송 실패 (EMAIL_SEND_FAILED)")
     @PostMapping("/email-verification/request")
     public ResponseEntity<ApiResponse<Void>> requestEmailVerification(
             @Valid @RequestBody EmailVerificationRequest request) {
@@ -222,6 +227,7 @@ public class AuthController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "로그인 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 형식이 올바르지 않음 (이메일/비밀번호 누락)")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "이메일 또는 비밀번호가 올바르지 않음 (AUTH_INVALID_CREDENTIALS)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "같은 이메일로 로그인 시도가 너무 많음 (AUTH_TOO_MANY_LOGIN_ATTEMPTS)")
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<MeResponse>> login(
             @Valid @RequestBody LoginRequest request, HttpServletResponse response) {
@@ -266,21 +272,25 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.successWithoutData());
     }
 
-    // 개발 편의용 "관리자로 로그인" 버튼. AdminAccountSeeder가 만들어둔 admin 계정으로 자격 증명
-    // 없이 바로 로그인시킨다 — devLoginEnabled가 false(운영 등)면, 그리고 key가 devLoginSecret과
-    // 일치하지 않으면 엔드포인트가 존재하는지조차 드러내지 않도록 둘 다 동일하게 404로 응답한다.
-    // key는 쿼리 파라미터가 아니라 헤더로 받는다 - 쿼리스트링은 서버 액세스 로그, 프록시/LB 로그,
-    // APM, 브라우저 히스토리 등에 평문으로 남기 쉬워 공유 비밀값을 싣기에 적절하지 않다.
+    // 개발 편의용 "관리자로 로그인"/"일반회원으로 로그인" 버튼. AdminAccountSeeder/DevTestUserSeeder가
+    // 만들어둔 계정으로 자격 증명 없이 바로 로그인시킨다 — devLoginEnabled가 false(운영 등)면,
+    // 그리고 key가 devLoginSecret과 일치하지 않으면 엔드포인트가 존재하는지조차 드러내지 않도록
+    // 둘 다 동일하게 404로 응답한다. key는 쿼리 파라미터가 아니라 헤더로 받는다 - 쿼리스트링은
+    // 서버 액세스 로그, 프록시/LB 로그, APM, 브라우저 히스토리 등에 평문으로 남기 쉬워 공유
+    // 비밀값을 싣기에 적절하지 않다. role은 민감하지 않은 단순 선택값이라 쿼리 파라미터로 받는다.
     @Hidden
     @PostMapping("/dev-login")
     public ResponseEntity<ApiResponse<MeResponse>> devLogin(
-            @RequestHeader(value = "X-Dev-Login-Key", required = false) String key, HttpServletResponse response) {
+            @RequestHeader(value = "X-Dev-Login-Key", required = false) String key,
+            @RequestParam(value = "role", required = false, defaultValue = "ADMIN") Role role,
+            HttpServletResponse response) {
         if (!devLoginEnabled || !constantTimeEquals(devLoginSecret, key)) {
             throw new BusinessException(ErrorCode.NOT_FOUND);
         }
 
-        User user = userRepository.findByEmail(EmailNormalizer.normalize(devLoginEmail))
-                .filter(found -> found.getRole() == Role.ADMIN)
+        String targetEmail = role == Role.USER ? devLoginUserEmail : devLoginEmail;
+        User user = userRepository.findByEmail(EmailNormalizer.normalize(targetEmail))
+                .filter(found -> found.getRole() == role)
                 .filter(found -> !found.isWithdrawn() && !found.isSuspended())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         issueAuthCookies(response, user);

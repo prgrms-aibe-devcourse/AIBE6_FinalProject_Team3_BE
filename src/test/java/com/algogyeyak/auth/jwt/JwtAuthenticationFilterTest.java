@@ -5,10 +5,12 @@ import com.algogyeyak.user.entity.User;
 import com.algogyeyak.user.enums.Role;
 import com.algogyeyak.user.repository.UserRepository;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.Authentication;
@@ -16,13 +18,17 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class JwtAuthenticationFilterTest {
@@ -33,8 +39,18 @@ class JwtAuthenticationFilterTest {
     private final AccessTokenRevocationService accessTokenRevocationService =
             new AccessTokenRevocationService(redisTemplate);
     private final UserRepository userRepository = mock(UserRepository.class);
+    @SuppressWarnings("unchecked")
+    private final ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+    private final UserAuthStatusCacheService userAuthStatusCacheService =
+            new UserAuthStatusCacheService(redisTemplate);
     private final JwtAuthenticationFilter filter =
-            new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository);
+            new JwtAuthenticationFilter(jwtProvider, accessTokenRevocationService, userRepository, userAuthStatusCacheService);
+
+    JwtAuthenticationFilterTest() {
+        // 캐시는 기본적으로 미스로 두어(get()이 null 반환) 기존 테스트가 전부 DB 경로를 그대로
+        // 타도록 한다 - 캐시 적중 시나리오는 별도 테스트에서 명시적으로 stub한다.
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+    }
 
     @AfterEach
     void clearSecurityContext() {
@@ -129,7 +145,7 @@ class JwtAuthenticationFilterTest {
     void doesNotSetAuthenticationWhenTokenExpired() throws Exception {
         JwtProvider shortLivedProvider = new JwtProvider("test-secret-key-must-be-at-least-32-bytes-long", 0);
         String token = shortLivedProvider.createAccessToken(1L, "test@example.com", Role.USER);
-        Thread.sleep(1100);
+        awaitTokenExpiry(token);
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
@@ -273,6 +289,28 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    void failsClosedWithStoreUnavailableWhenRevocationCheckThrows() throws Exception {
+        // 회귀 테스트 - Redis 장애로 isRevoked()가 예전엔 "블랙리스트에 있음"(true)과 똑같이
+        // 처리돼 AUTH_TOKEN_INVALID(401)로 응답했다. 진짜 로그아웃된 토큰과 장애 상황을 구분해
+        // failsClosedWithStoreUnavailableWhenDbLookupThrows()와 동일하게 503으로 응답해야 한다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        Claims claims = jwtProvider.parseClaims(token);
+        when(redisTemplate.hasKey("auth:revoked-access-token:" + claims.getId()))
+                .thenThrow(new org.springframework.dao.QueryTimeoutException("redis down"));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, filterChain);
+
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertEquals(ErrorCode.AUTH_TOKEN_STORE_UNAVAILABLE, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
     void doesNotSetAuthenticationWhenTokenJtiIsRevoked() throws Exception {
         String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
         Claims claims = jwtProvider.parseClaims(token);
@@ -286,5 +324,105 @@ class JwtAuthenticationFilterTest {
 
         assertNull(SecurityContextHolder.getContext().getAuthentication());
         assertEquals(ErrorCode.AUTH_TOKEN_INVALID, request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
+    }
+
+    @Test
+    void skipsTokenProcessingEntirelyForPublicPaths() throws Exception {
+        // shouldNotFilter() 회귀 테스트 - permitAll이면서 로그인 여부와 무관하게 항상 같은
+        // 경로(/auth/login 등)는 토큰이 유효해도 Redis/DB 조회 자체가 발생하면 안 된다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/auth/login");
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, filterChain);
+
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertNull(request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
+        verifyNoInteractions(userRepository);
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    void skipsTokenProcessingForBasePathWithoutTrailingSlash() throws Exception {
+        // 회귀 테스트 - SecurityConfig의 "/v3/api-docs/**" 패턴은 트레일링 슬래시 없는 베이스
+        // 경로 자체("/v3/api-docs", springdoc이 실제로 쓰는 정확한 경로)도 permitAll로 매칭한다.
+        // shouldNotFilter()가 단순 접두사(prefix + "/") 비교만 했다면 이 베이스 경로 자체는
+        // 스킵되지 않아 그때마다 불필요한 Redis/DB 조회가 발생했다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/v3/api-docs");
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, filterChain);
+
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertNull(request.getAttribute(JwtAuthenticationFilter.AUTH_FAILURE_REASON_ATTRIBUTE));
+        verifyNoInteractions(userRepository);
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    void doesNotHitDbWhenUserStatusCacheHits() throws Exception {
+        // UserAuthStatusCacheService 캐시 적중 시 DB(userRepository)를 아예 건드리지 않아야 한다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.ADMIN);
+        UserAuthStatusCacheService.CachedUserStatus cached = new UserAuthStatusCacheService.CachedUserStatus(
+                "test@example.com", Role.ADMIN, com.algogyeyak.user.enums.UserStatus.ACTIVE,
+                "캐시닉네임", null, null);
+        when(valueOperations.get("auth:user-status:1"))
+                .thenReturn(new com.fasterxml.jackson.databind.ObjectMapper()
+                        .findAndRegisterModules()
+                        .writeValueAsString(cached));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, mock(FilterChain.class));
+
+        JwtUserPrincipal principal =
+                (JwtUserPrincipal) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        assertEquals("캐시닉네임", principal.nickname());
+        assertEquals(Role.ADMIN, principal.role());
+        verify(userRepository, never()).findById(any());
+    }
+
+    @Test
+    void populatesUserStatusCacheOnCacheMiss() throws Exception {
+        // 캐시 미스로 DB를 읽은 뒤에는 다음 요청이 캐시를 쓸 수 있도록 결과를 저장해야 한다.
+        String token = jwtProvider.createAccessToken(1L, "test@example.com", Role.USER);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(activeUser(1L, "test@example.com", Role.USER)));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setCookies(new jakarta.servlet.http.Cookie(JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, mock(FilterChain.class));
+
+        verify(valueOperations).set(
+                org.mockito.ArgumentMatchers.eq("auth:user-status:1"),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(java.time.Duration.ofSeconds(30)));
+    }
+
+    // 고정 sleep(1100ms)은 느린 CI/컨테이너 등에서 실제 만료보다 먼저 깨어날 수 있어 드물게
+    // 흔들린다 - RefreshTokenServiceRedisIntegrationTest.awaitKeyAbsence()와 동일하게, "얼마나
+    // 기다릴지" 추측하는 대신 토큰이 실제로 만료됐는지(파싱이 실제로 실패하는지)를 짧은 간격으로
+    // 직접 확인(polling)한다.
+    private void awaitTokenExpiry(String token) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                jwtProvider.parseClaims(token);
+            } catch (JwtException e) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("토큰이 TTL로 자연 만료되지 않았다: " + token);
     }
 }

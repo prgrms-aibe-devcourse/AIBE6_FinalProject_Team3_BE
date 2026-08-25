@@ -1,6 +1,5 @@
 package com.algogyeyak.user.dto;
 
-import com.algogyeyak.user.enums.CurrentStage;
 import com.algogyeyak.user.enums.TransactionType;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
@@ -21,6 +20,4 @@ public class ProfileUpdateRequest {
     private String interestRegion;
 
     private TransactionType transactionType;
-
-    private CurrentStage currentStage;
 }

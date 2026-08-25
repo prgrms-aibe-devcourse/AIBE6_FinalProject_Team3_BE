@@ -1,100 +1,127 @@
 import http from 'k6/http';
 import { check } from 'k6';
-import { BASE_URL } from './common/config.js';
-import { login } from './common/auth.js';
+import { BASE_URL, CSRF_HEADERS } from './common/config.js';
+import { login, extractAuthCookies, authCookieHeader } from './common/auth.js';
 
 const TEST_EMAIL = __ENV.TEST_EMAIL;
 const TEST_PASSWORD = __ENV.TEST_PASSWORD;
 
-// 3-1과 3-2 둘 다 "정확히 같은 순간에 여러 요청이 같은 리소스를 두고 경쟁"해야 재현되는
-// 시나리오라, VU마다 정확히 1회씩만 실행하는 per-vu-iterations executor를 쓴다(부하량이
-// 아니라 동시 타이밍이 목적).
+// "정확히 같은 순간에 여러 요청이 같은 리소스를 두고 경쟁"해야 재현되는 시나리오라, VU마다
+// 정확히 1회씩만 실행하는 per-vu-iterations executor를 쓴다(부하량이 아니라 동시 타이밍이 목적).
+//
+// 원래는 회원가입 동시 요청(동일 이메일/닉네임) 시나리오도 있었으나, LocalAuthService.signup()에
+// 이메일 인증(POST /auth/email-verification/{request,confirm}) 완료가 선행 조건으로 추가되면서
+// 제외했다 - 인증 코드가 실제 이메일로만 발송되고 테스트용 우회가 없어 k6에서 자동화할 방법이
+// 없다(2026-08-20 기준). signup()의 REQUIRES_NEW 동시성 보호 자체는 코드 리뷰로 이미 검증된 패턴
+// (auth 도메인이 원조, risk-analysis/checklist에도 동일 패턴 이식)이라 신뢰하고, 부하 테스트로는
+// 더 이상 재확인하지 않는다.
 export const options = {
   scenarios: {
-    // 3-1. 체크리스트 생성 동시 요청 - ChecklistService.createOrGetChecklist()가
-    // check-then-act(findByUserIdAndPropertyId → 없으면 save)인데 DataIntegrityViolationException에
-    // 대한 방어가 없다(risk-analysis에서 고쳤던 것과 동일한 패턴이 여기는 아직 안 고쳐진 상태) -
-    // 그래서 아래 checklistCreate의 결과를 "200이어야 함"으로 단정하지 않고 상태코드를 그대로
-    // 기록한다. 500이 나오면 실제로 버그가 재현된 것.
+    // 체크리스트 생성 동시 요청 - ChecklistService.createOrGetChecklist()에 REQUIRES_NEW +
+    // DataIntegrityViolationException/CannotAcquireLockException 복구 패턴을 적용해
+    // (2026-08-20/21) 몇 명이 동시에 요청해도 항상 200/201로 정상 처리돼야 한다. 50명으로
+    // 해봤더니 REQUIRES_NEW가 요청당 커넥션을 2개씩(바깥 트랜잭션+복구용) 물어서 HikariCP
+    // 풀(20)이 부족해 30초 connectionTimeout으로 대량 실패했음 - 50명이 정확히 같은 순간에
+    // 같은 매물의 체크리스트를 동시에 시작하는 건 비현실적인 극단값이고, 이 테스트의 목적은
+    // 부하량이 아니라 동시성 정합성 검증이라 풀 용량 안에서 도는 20명으로 낮춤.
     checklistCreate: {
       executor: 'per-vu-iterations',
       exec: 'checklistCreateScenario',
-      vus: 5,
+      vus: 20,
       iterations: 1,
       startTime: '0s',
       maxDuration: '30s',
     },
-    // 3-2. 회원가입 동시 요청(동일 이메일/닉네임) - LocalAuthService.signup()은 REQUIRES_NEW +
-    // DataIntegrityViolationException 복구 패턴이 이미 적용돼 있어(이번 세션에 risk-analysis에
-    // 도입한 것과 같은 패턴, auth 도메인이 원조), 정확히 1명만 성공(200)하고 나머지는 409
-    // (AUTH_EMAIL_ALREADY_EXISTS 또는 AUTH_NICKNAME_ALREADY_EXISTS)로 정상 처리되는지 확인한다.
-    // 500이 나오면 이 패턴이 실제로는 안 지켜지고 있다는 뜻.
-    duplicateSignup: {
+    // 위험 신호 재계산 동시 요청 - FakeListingSignalService.upsertCheck()/upsertRisk()도 checklist와
+    // 동일한 REQUIRES_NEW insert-race 복구 패턴을 쓴다(2026-08-24 CannotAcquireLockException catch
+    // 보강). checklistCreate와 같은 매물을 재사용하되, 두 시나리오 결과가 섞이지 않도록
+    // checklistCreate(최대 30s)가 끝난 뒤 시작한다.
+    riskAnalysisRecalculate: {
       executor: 'per-vu-iterations',
-      exec: 'signupScenario',
-      vus: 5,
+      exec: 'riskAnalysisRecalculateScenario',
+      vus: 20,
       iterations: 1,
-      startTime: '30s', // checklistCreate와 시간대를 분리해서 결과를 헷갈리지 않게
+      startTime: '35s',
+      maxDuration: '30s',
+    },
+    // 보증금 안전성 재계산 동시 요청 - DepositSafetyCheckService.upsertUnavailable()/upsertCalculated()도
+    // 동일한 REQUIRES_NEW insert-race 복구 패턴을 쓴다(2026-08-24 CannotAcquireLockException catch
+    // 보강). riskAnalysisRecalculate가 끝난 뒤 시작해서 시나리오 결과가 섞이지 않게 한다.
+    depositSafetyRecalculate: {
+      executor: 'per-vu-iterations',
+      exec: 'depositSafetyRecalculateScenario',
+      vus: 20,
+      iterations: 1,
+      startTime: '70s',
       maxDuration: '30s',
     },
   },
 };
 
-function cookieHeader(cookies) {
-  return Object.entries(cookies)
-    .map(([name, jar]) => `${name}=${jar[0].value}`)
-    .join('; ');
-}
-
-// 전체 테스트 시작 전 한 번만 실행 - 로그인 + 체크리스트가 아직 없는 매물을 새로 만들고,
-// 회원가입 경쟁에 쓸 유니크한 이메일/닉네임도 이때 미리 정해둔다(재실행해도 안 겹치게
-// Date.now() 사용).
+// 전체 테스트 시작 전 한 번만 실행 - 로그인 + 체크리스트가 아직 없는 매물을 새로 만든다.
 export function setup() {
   const loginRes = login(TEST_EMAIL, TEST_PASSWORD);
-  const cookies = loginRes.cookies;
-  const headers = { Cookie: cookieHeader(cookies), 'Content-Type': 'application/json' };
+  const authCookies = extractAuthCookies(loginRes);
+  const headers = { Cookie: authCookieHeader(authCookies), 'Content-Type': 'application/json', ...CSRF_HEADERS };
 
+  // PropertyService.register()가 "같은 유저 + 같은 거래유형 + 같은 도로명주소"면
+  // PROPERTY_DUPLICATE(409)로 막는다 - title만 Date.now()로 바꾸고 주소를 고정해두면, 이
+  // 스크립트를 같은 계정으로 두 번째 실행하는 순간부터 매번 중복으로 막힌다. 도로명 번지수를
+  // 매 실행마다 바꿔서 다른 도로명주소로 지오코딩되게 한다(테헤란로는 번지수 폭이 넓어 100~499
+  // 사이 대부분이 유효하게 resolve됨).
+  const streetNumber = 100 + (Date.now() % 400);
   const propertyRes = http.post(`${BASE_URL}/properties`, JSON.stringify({
     title: `[LOADTEST] 동시성 테스트 매물 ${Date.now()}`,
-    address: '서울특별시 강남구 테헤란로 123',
+    address: `서울특별시 강남구 테헤란로 ${streetNumber}`,
     propertyType: 'OFFICETEL',
     transactionType: 'JEONSE',
     deposit: 100000000,
     area: 20.0,
   }), { headers });
 
-  check(propertyRes, { '테스트 매물 생성 200/201': (r) => r.status === 200 || r.status === 201 });
+  const propertyCreated = check(propertyRes, { '테스트 매물 생성 200/201': (r) => r.status === 200 || r.status === 201 });
+  if (!propertyCreated) {
+    console.log(`[setup] 매물 생성 실패 status=${propertyRes.status} body=${propertyRes.body}`);
+  }
   const propertyId = propertyRes.json('data.propertyId');
 
-  const runId = Date.now();
-  const signupEmail = `loadtest_${runId}@example.com`;
-  const signupNickname = `lt${runId}`.slice(0, 20);
-
-  return { cookies, propertyId, signupEmail, signupNickname };
+  return { authCookies, propertyId };
 }
 
-// 3-1
 export function checklistCreateScenario(data) {
-  const headers = { Cookie: cookieHeader(data.cookies) };
+  const headers = { Cookie: authCookieHeader(data.authCookies), ...CSRF_HEADERS };
   const res = http.post(`${BASE_URL}/properties/${data.propertyId}/checklists`, null, { headers });
 
-  check(res, {
-    '체크리스트 생성 500 아님(버그 미재현)': (r) => r.status < 500,
+  const created = check(res, {
+    '체크리스트 생성 200/201(동시 요청에도 정상 처리됨)': (r) => r.status === 200 || r.status === 201,
   });
-  console.log(`[checklistCreate] VU=${__VU} status=${res.status}`);
+  if (!created) {
+    console.log(`[checklistCreate] VU=${__VU} status=${res.status} body=${res.body}`);
+  }
 }
 
-// 3-2
-export function signupScenario(data) {
-  const res = http.post(`${BASE_URL}/auth/signup`, JSON.stringify({
-    email: data.signupEmail,
-    password: 'Test1234!',
-    nickname: data.signupNickname,
-  }), { headers: { 'Content-Type': 'application/json' } });
+export function riskAnalysisRecalculateScenario(data) {
+  const headers = { Cookie: authCookieHeader(data.authCookies), ...CSRF_HEADERS };
+  const res = http.post(`${BASE_URL}/properties/${data.propertyId}/risk-analysis`, null, { headers });
 
-  check(res, {
-    '회원가입 200(승자) 또는 409(중복, 정상 처리됨)': (r) => r.status === 200 || r.status === 409,
-    '회원가입 500이 아님': (r) => r.status < 500,
+  const succeeded = check(res, {
+    '위험 신호 재계산 200(동시 요청에도 정상 처리됨)': (r) => r.status === 200,
   });
-  console.log(`[duplicateSignup] VU=${__VU} status=${res.status}`);
+  if (!succeeded) {
+    console.log(`[riskAnalysisRecalculate] VU=${__VU} status=${res.status} body=${res.body}`);
+  }
+}
+
+export function depositSafetyRecalculateScenario(data) {
+  const headers = { Cookie: authCookieHeader(data.authCookies), 'Content-Type': 'application/json', ...CSRF_HEADERS };
+  const res = http.post(`${BASE_URL}/properties/${data.propertyId}/deposit-safety/recalculate`, JSON.stringify({
+    seniorDeposit: 0,
+  }), { headers });
+
+  const succeeded = check(res, {
+    '보증금 안전성 재계산 200(동시 요청에도 정상 처리됨)': (r) => r.status === 200,
+  });
+  if (!succeeded) {
+    console.log(`[depositSafetyRecalculate] VU=${__VU} status=${res.status} body=${res.body}`);
+  }
 }

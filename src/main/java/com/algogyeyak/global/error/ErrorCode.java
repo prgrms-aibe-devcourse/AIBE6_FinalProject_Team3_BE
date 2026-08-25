@@ -16,6 +16,10 @@ public enum ErrorCode {
     AUTH_EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "AUTH_EMAIL_ALREADY_EXISTS", "이미 가입된 이메일입니다."),
     AUTH_NICKNAME_ALREADY_EXISTS(HttpStatus.CONFLICT, "AUTH_NICKNAME_ALREADY_EXISTS", "이미 사용 중인 닉네임입니다."),
     AUTH_INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "AUTH_INVALID_CREDENTIALS", "이메일 또는 비밀번호가 올바르지 않습니다."),
+    // login()에 무차별대입 방지 장치가 전혀 없어(EmailVerificationService.confirmCode()의
+    // maxAttempts와 달리) 알려진 이메일에 대해 무제한 로그인 시도가 가능했던 문제를 막는다 - 이메일
+    // 존재 여부와 무관하게 항상 같은 방식으로 카운트한다(계정 존재 여부 비노출 원칙 유지).
+    AUTH_TOO_MANY_LOGIN_ATTEMPTS(HttpStatus.TOO_MANY_REQUESTS, "AUTH_TOO_MANY_LOGIN_ATTEMPTS", "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요."),
     AUTH_TOKEN_MISSING(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_MISSING", "인증 토큰이 없습니다."),
     AUTH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_INVALID", "유효하지 않은 토큰입니다."),
     AUTH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_TOKEN_EXPIRED", "토큰이 만료되었습니다."),
@@ -43,6 +47,11 @@ public enum ErrorCode {
     AUTH_TOKEN_STORE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AUTH_TOKEN_STORE_UNAVAILABLE", "인증 저장소에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해주세요."),
     // CookieUtils.SameSite=None 전환(크로스오리진 배포) 이후 최소 CSRF 방어로 추가 - CsrfHeaderFilter 참고.
     CSRF_HEADER_MISSING(HttpStatus.FORBIDDEN, "CSRF_HEADER_MISSING", "잘못된 요청입니다."),
+    // /actuator/prometheus는 인증 없이 permitAll이라 리버스 프록시(nginx-proxy-manager, 이
+    // 저장소 밖에서 설정됨) 설정 실수만으로도 외부에 그대로 노출될 수 있었다 - MetricsScrapeTokenFilter
+    // 참고. health와 달리 이 엔드포인트는 내부 지표(JVM/DB 커넥션 풀 등)를 담고 있어 별도 공유 비밀로
+    // 한 번 더 막는다(defense in depth).
+    METRICS_SCRAPE_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "METRICS_SCRAPE_TOKEN_INVALID", "메트릭 조회 인증에 실패했습니다."),
 
     // 이메일 인증(회원가입) - EmailVerificationService
     // 인증번호 발송 대상 이메일이 이미 가입되어 있는 경우 - AUTH_EMAIL_ALREADY_EXISTS와 별개 코드로
@@ -81,7 +90,9 @@ public enum ErrorCode {
     // Property 도메인
     PROPERTY_NOT_FOUND(HttpStatus.NOT_FOUND, "PROPERTY_NOT_FOUND", "존재하지 않는 매물입니다."),
     PROPERTY_ACCESS_DENIED(HttpStatus.FORBIDDEN, "PROPERTY_ACCESS_DENIED", "본인이 등록한 매물만 접근할 수 있습니다."),
-    PROPERTY_REQUIRED_FIELD_MISSING(HttpStatus.BAD_REQUEST, "PROPERTY_REQUIRED_FIELD_MISSING", "필수 입력값이 누락되었습니다."),
+    // PROPERTY_REQUIRED_FIELD_MISSING은 죽은 에러코드였다 - 필수값 검증은 Bean Validation
+    // (@NotBlank/@NotNull)이 처리하고 일반 400으로 응답되어 이 코드는 선언 외에 참조되는 곳이 없었다
+    // (전수조사 결과 코드 품질 1번). PROPERTY_TYPE_NOT_SUPPORTED와 달리 "의도적 유지" 근거가 없어 제거함.
     PROPERTY_INVALID_PRICE(HttpStatus.BAD_REQUEST, "PROPERTY_INVALID_PRICE", "거래 유형에 맞지 않는 가격 정보입니다."),
     // propertyType이 enum 타입이라 잘못된 값은 Jackson 파싱 단계(HttpMessageNotReadableException)에서
     // 걸러져 이 코드까지 도달하지 않는다 - 의도적으로 유지한다. String으로 바꿔 직접 검증하는 것보다
@@ -108,7 +119,6 @@ public enum ErrorCode {
     CONTRACT_ANALYSIS_UNSUPPORTED_FILE_TYPE(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_UNSUPPORTED_FILE_TYPE", "지원하지 않는 이미지 형식입니다."),
     CONTRACT_ANALYSIS_FILE_TOO_LARGE(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_FILE_TOO_LARGE", "이미지 크기가 허용 범위를 초과했습니다."),
     CONTRACT_ANALYSIS_TEXT_TOO_SHORT(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_TEXT_TOO_SHORT", "입력한 텍스트가 너무 짧습니다."),
-    CONTRACT_ANALYSIS_NOT_RELATED(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_NOT_RELATED", "부동산 계약과 관련이 없는 입력입니다."),
     CONTRACT_ANALYSIS_FORBIDDEN(HttpStatus.FORBIDDEN, "CONTRACT_ANALYSIS_FORBIDDEN", "본인이 등록한 매물만 계약 분석에 사용할 수 있습니다."),
     CONTRACT_ANALYSIS_OCR_EMPTY_RESULT(HttpStatus.UNPROCESSABLE_CONTENT, "CONTRACT_ANALYSIS_OCR_EMPTY_RESULT", "OCR 인식 결과가 없습니다."),
     CONTRACT_ANALYSIS_OCR_API_ERROR(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_OCR_API_ERROR", "OCR 서비스 연동 중 오류가 발생했습니다."),
@@ -119,12 +129,19 @@ public enum ErrorCode {
     CONTRACT_ANALYSIS_AI_HALLUCINATION(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_HALLUCINATION", "AI가 입력에 없는 내용을 생성했습니다."),
     CONTRACT_ANALYSIS_AI_API_ERROR(HttpStatus.BAD_GATEWAY, "CONTRACT_ANALYSIS_AI_API_ERROR", "AI 분석 서비스 연동 중 오류가 발생했습니다."),
     CONTRACT_ANALYSIS_QUESTION_REQUIRED(HttpStatus.BAD_REQUEST, "CONTRACT_ANALYSIS_QUESTION_REQUIRED", "질문을 입력해주세요."),
+    CONTRACT_ANALYSIS_HISTORY_NOT_FOUND(HttpStatus.NOT_FOUND, "CONTRACT_ANALYSIS_HISTORY_NOT_FOUND", "존재하지 않는 계약 분석 이력입니다."),
+    // Gemini 무료 티어 호출 한도(분당/일별) 사전 방어용 - AUTH_TOO_MANY_LOGIN_ATTEMPTS와 동일하게 429.
+    CONTRACT_ANALYSIS_AI_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "CONTRACT_ANALYSIS_AI_RATE_LIMITED", "지금 요청이 많아 잠시 후 다시 시도해주세요."),
 
     // Admin 도메인
     ADMIN_USER_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_USER_NOT_FOUND", "존재하지 않는 사용자입니다."),
     ADMIN_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "ADMIN_INVALID_STATUS_TRANSITION", "허용되지 않는 상태 변경입니다."),
     ADMIN_INVALID_ROLE_TRANSITION(HttpStatus.CONFLICT, "ADMIN_INVALID_ROLE_TRANSITION", "허용되지 않는 권한 변경입니다."),
     ADMIN_LAST_ADMIN_ACCOUNT(HttpStatus.CONFLICT, "ADMIN_LAST_ADMIN_ACCOUNT", "마지막 남은 관리자 계정은 강등하거나 정지할 수 없습니다."),
+    // ADMIN_PROPERTY_REPORT_SELF_REVIEW와 같은 성격(관리자 자기 대상 액션 금지)의 코드를 유저
+    // 쪽에도 맞춘다 - 예전엔 이 경로만 BAD_REQUEST(400, 코드 없이 메시지만)로 응답해, 프론트가
+    // "본인 계정이라 막힘"을 구분해 처리하려면 문자열 메시지를 비교해야 했다.
+    ADMIN_USER_SELF_ACTION_FORBIDDEN(HttpStatus.CONFLICT, "ADMIN_USER_SELF_ACTION_FORBIDDEN", "자기 자신의 권한/상태는 변경할 수 없습니다."),
     ADMIN_PROPERTY_REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_PROPERTY_REPORT_NOT_FOUND", "존재하지 않는 신고입니다."),
     ADMIN_PROPERTY_REPORT_SELF_REVIEW(HttpStatus.CONFLICT, "ADMIN_PROPERTY_REPORT_SELF_REVIEW", "본인이 등록한 신고는 직접 처리할 수 없습니다."),
     ADMIN_INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "ADMIN_INVALID_DATE_RANGE", "조회 기간이 올바르지 않습니다."),
@@ -134,6 +151,7 @@ public enum ErrorCode {
     ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_LAST_ITEM", "마지막 문항은 삭제할 수 없습니다. 노출 여부를 꺼서 숨겨주세요."),
     ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE(HttpStatus.BAD_REQUEST, "ADMIN_CHECKLIST_TEMPLATE_INVALID_PROPERTY_TYPE", "존재하지 않는 매물유형입니다."),
     ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND(HttpStatus.NOT_FOUND, "ADMIN_CHECKLIST_TEMPLATE_IMAGE_NOT_FOUND", "존재하지 않는 이미지입니다."),
+    ADMIN_CHECKLIST_TEMPLATE_IMAGE_ORDER_CONFLICT(HttpStatus.CONFLICT, "ADMIN_CHECKLIST_TEMPLATE_IMAGE_ORDER_CONFLICT", "다른 관리자가 방금 같은 문항에 이미지를 추가했습니다. 새로고침 후 다시 시도해주세요."),
 
     // 파일 업로드(S3) 공통 - profile/property/contract 이미지 업로드가 전부 이 코드를 공유한다.
     FILE_EXTENSION_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "FILE_EXTENSION_NOT_ALLOWED", "허용되지 않는 파일 확장자입니다."),

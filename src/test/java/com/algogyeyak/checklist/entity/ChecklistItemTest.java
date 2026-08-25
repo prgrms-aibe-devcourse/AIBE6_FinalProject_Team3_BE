@@ -327,4 +327,40 @@ class ChecklistItemTest {
                         assertThat(((BusinessException) exception).getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST)
                 );
     }
+
+    // 양호/보통/미흡처럼 상태를 3단계로 답하는 MULTIPLE_CHOICE 문항(채광/수압/냉난방시설 전환 예정) -
+    // 선택지 이름은 문항마다 달라도 "미흡"이라는 값 자체는 항상 같은 의미(주의 필요)로 쓰기로 함.
+    private ChecklistItem gradedMultipleChoiceItem() {
+        return ChecklistItem.builder()
+                .category(ChecklistCategory.INDOOR)
+                .content("채광 상태는 어떤가요?")
+                .importance(ChecklistImportance.GENERAL)
+                .itemType(ChecklistItemType.MULTIPLE_CHOICE)
+                .options("양호,보통,미흡")
+                .displayOrder(1)
+                .build();
+    }
+
+    @Test
+    @DisplayName("MULTIPLE_CHOICE 문항에 \"미흡\"으로 답하면 주의 항목(issueFound)으로 표시된다")
+    void answerMultipleChoiceMarksIssueFoundWhenInsufficient() {
+        ChecklistItem item = gradedMultipleChoiceItem();
+
+        item.answer("미흡");
+
+        assertThat(item.getValue()).isEqualTo("미흡");
+        assertThat(item.isIssueFound()).isTrue();
+        assertThat(item.hasIssue()).isTrue();
+    }
+
+    @Test
+    @DisplayName("MULTIPLE_CHOICE 문항에 \"미흡\" 외의 값으로 답하면 주의 항목으로 표시되지 않는다")
+    void answerMultipleChoiceDoesNotMarkIssueFoundForOtherValues() {
+        ChecklistItem item = gradedMultipleChoiceItem();
+
+        item.answer("양호");
+
+        assertThat(item.isIssueFound()).isFalse();
+        assertThat(item.hasIssue()).isFalse();
+    }
 }

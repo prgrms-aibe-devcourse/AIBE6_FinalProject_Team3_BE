@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,6 +14,12 @@ import org.springframework.data.repository.query.Param;
 public interface ChecklistRepository extends JpaRepository<Checklist, Long> {
 
     // 유저-매물 조합당 활성 체크리스트는 1개뿐이므로, 생성 요청이 멱등인지 확인할 때 사용한다.
+    // items까지 즉시 로딩한다 - ChecklistService.createChecklist()의 동시 생성 경쟁 복구 경로가
+    // 이 메서드를 REQUIRES_NEW(별도 세션)에서 호출하는데, 그 세션은 execute()가 끝나면 바로 닫혀서
+    // items가 LAZY면 컨트롤러가 ChecklistResponse.from()에서 items를 읽으려는 순간
+    // LazyInitializationException(no session)이 터진다(k6 03-race-conditions.js로 재현 확인,
+    // 2026-08-24). 단일 Optional 결과라 컬렉션 fetch join이어도 페이지네이션 row 배수 문제는 없다.
+    @EntityGraph(attributePaths = "items")
     Optional<Checklist> findByUserIdAndPropertyId(Long userId, Long propertyId);
 
     // 매물 하나당 체크리스트는(소유자만 만들 수 있어) 최대 1개뿐이라, propertyId만으로 조회해도 안전하다.
@@ -30,8 +37,13 @@ public interface ChecklistRepository extends JpaRepository<Checklist, Long> {
     // 이 ORDER BY 뒤에 추가 정렬이 덧붙어 의도와 다른 결과가 나올 수 있음).
     // property 도메인이 checklist를 몰라도 되도록(기존 컨벤션), 이 JOIN 쿼리는 property 쪽이 아니라
     // 여기(checklist 쪽, 이미 Property를 참조하는 도메인)에 둔다.
+    // p.address도 LEFT JOIN FETCH로 같이 가져온다 - PropertyAddress는 mappedBy(비소유) 쪽 @OneToOne이라
+    // Hibernate가 지연 로딩용 프록시 자체를 못 만들어 default_batch_fetch_size로도 안 묶이고 매물마다
+    // 개별 SELECT가 나가는 게 실측으로 확인됨(ChecklistOverviewResponse.from()이 매물마다
+    // property.getAddress()를 호출). 1:1 관계라 fetch join을 페이지네이션과 같이 써도 row가 안
+    // 불어나 안전함(items 같은 컬렉션 fetch join과는 다름).
     @Query("""
-            SELECT p, c FROM Property p LEFT JOIN Checklist c ON c.property = p AND c.user.id = :userId
+            SELECT p, c FROM Property p LEFT JOIN FETCH p.address LEFT JOIN Checklist c ON c.property = p AND c.user.id = :userId
             WHERE p.userId = :userId AND p.status = :status
             ORDER BY COALESCE(c.updatedAt, p.updatedAt) DESC
             """)

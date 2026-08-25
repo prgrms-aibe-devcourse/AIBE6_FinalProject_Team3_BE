@@ -100,7 +100,7 @@ class AdminUserServiceConcurrentDemotionIntegrationTest {
 
     private void attemptDemote(Long actorId, Long targetUserId, AtomicInteger successCount, AtomicInteger conflictCount) {
         try {
-            adminUserService.updateRole(actorId, targetUserId, Role.USER);
+            adminUserService.updateRole(actorId, "actor" + actorId + "@example.com", targetUserId, Role.USER);
             successCount.incrementAndGet();
         } catch (BusinessException e) {
             if (e.getErrorCode() == ErrorCode.ADMIN_LAST_ADMIN_ACCOUNT) {

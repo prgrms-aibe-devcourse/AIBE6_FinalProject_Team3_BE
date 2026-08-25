@@ -98,7 +98,7 @@ class RiskAnalysisControllerTest {
         String token = tokenFor(1L);
         RiskSignalResponse signal = new RiskSignalResponse(
                 RiskSignalType.DUPLICATE_LISTING, RiskCheckStatus.SUCCESS, null,
-                "동일 주소로 등록된 다른 매물이 있어요", LocalDateTime.now());
+                "동일 주소로 등록된 다른 매물이 있어요", List.of(), LocalDateTime.now());
         RiskSignalListResponse signalList = new RiskSignalListResponse(
                 10L, 1, List.of(signal), RiskSignalListResponse.DISCLAIMER);
         when(fakeListingSignalService.getSignals(1L, 10L)).thenReturn(signalList);

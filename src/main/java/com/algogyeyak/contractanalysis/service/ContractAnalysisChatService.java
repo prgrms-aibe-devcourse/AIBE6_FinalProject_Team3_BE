@@ -29,6 +29,11 @@ public class ContractAnalysisChatService {
         }
 
         List<ContractAnalysisChatMessage> history = request.history() != null ? request.history() : List.of();
+        for (ContractAnalysisChatMessage message : history) {
+            if (message == null || !StringUtils.hasText(message.role()) || !StringUtils.hasText(message.content())) {
+                throw new BusinessException(ErrorCode.CONTRACT_ANALYSIS_INVALID_INPUT);
+            }
+        }
 
         GeminiGenerateContentResponse response = geminiClient.chat(request.clause(), request.question(), history);
         String answer = extractResponseText(response);

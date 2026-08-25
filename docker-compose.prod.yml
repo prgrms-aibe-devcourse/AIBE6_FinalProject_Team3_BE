@@ -1,5 +1,6 @@
 services:
   backend:
+    image: ghcr.io/prgrms-aibe-devcourse/algogyeyak-backend:latest
     environment:
       SERVER_FORWARD_HEADERS_STRATEGY: framework
     ports:

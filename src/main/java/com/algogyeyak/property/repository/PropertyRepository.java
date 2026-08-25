@@ -38,16 +38,18 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
 
     /**
      * risk-analysis의 중복매물 탐지용 - 위 두 메서드와 달리 userId 조건이 없다(다른 계정이 올린
-     * 매물도 잡아야 함). 본인 자신은 idNot으로 제외한다.
+     * 매물도 잡아야 함). 본인 자신은 idNot으로 제외한다. exists 대신 엔티티를 직접 가져오는 이유는
+     * DuplicateListingDetector가 가격·등록일을 비교 정보로 보여줘야 하기 때문(단순 존재 여부만으로는
+     * 부족함) - 여러 건이 있을 수 있어 가장 최근 것을 비교 대상으로 쓰도록 정렬해서 반환한다.
      */
-    boolean existsByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddress(
+    List<Property> findAllByIdNotAndTransactionTypeAndStatusAndAddress_RoadAddressOrderByCreatedAtDesc(
             Long id,
             TransactionType transactionType,
             PropertyStatus status,
             String roadAddress
     );
 
-    boolean existsByIdNotAndTransactionTypeAndStatusAndAddress_JibunAddress(
+    List<Property> findAllByIdNotAndTransactionTypeAndStatusAndAddress_JibunAddressOrderByCreatedAtDesc(
             Long id,
             TransactionType transactionType,
             PropertyStatus status,
@@ -84,20 +86,31 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
 
     /**
      * 본인이 등록한 매물 목록 조회 (개인 분석 도구 성격상 마켓플레이스식 전체 조회가 아닌 본인 소유 매물만 대상).
-     * 지역(주소 부분일치)/면적범위/거래유형/주택유형/보증금범위/월세범위 전부 선택 조건이라, null인
-     * 파라미터는 조건 자체를 무시하도록 각 절을 "(:param IS NULL OR ...)" 형태로 구성했다.
+     * region은 메인 검색창 하나로 받는 자유 텍스트 검색어다 - 주소(도로명/지번)든 건물명(title)이든
+     * 부분일치(LIKE)하면 매칭된다(5차 멘토링 피드백 6-3, OR 조건, 2026-08-21). 처음엔 title을 별도
+     * 파라미터+AND 조건으로 뒀었는데, 사용자가 상단 검색창 하나에 주소든 건물명이든 입력하면 찾아지길
+     * 기대해서 단일 검색어의 OR 매칭으로 수정함.
+     * 면적범위/거래유형/주택유형/보증금범위/월세범위 등 나머지는 전부 선택 조건이라, null인 파라미터는
+     * 조건 자체를 무시하도록 각 절을 "(:param IS NULL OR ...)" 형태로 구성했다.
      * monthlyRent는 전세 매물에서 항상 null이라 minMonthlyRent/maxMonthlyRent가 넘어오면 전세 매물은
      * 자연히 결과에서 제외된다(별도 분기 불필요).
      * 정렬은 메서드명이 아니라 Pageable의 Sort로 받는다 - 정렬 기준을 여러 개 허용하기 위함
      * (PageableUtils.validateSort로 허용된 필드인지 Service에서 먼저 검증한다).
+     * signalPropertyIds는 hasSignal=true 필터(#233)를 위한 것 - property는 위험신호 데이터를
+     * 직접 모르므로(risk-analysis 소관), Service가 PropertyRiskSummaryProvider로 미리 구한 id
+     * 목록을 여기 넘겨서 다른 조건들과 동일한 "(:param IS NULL OR ...)" 패턴으로 필터링한다.
+     * region 파라미터는 호출부(PropertyService.getMyProperties)가 LIKE 와일드카드(%, _)를 이스케이프한
+     * 뒤 넘긴다는 전제다 - ESCAPE '\'로 그 이스케이프를 실제로 해석한다(UserRepository.search와 동일한
+     * 패턴, 전수조사 결과 버그/정확성 1번).
      */
     @Query("""
             SELECT p FROM Property p
-            LEFT JOIN p.address a
+            LEFT JOIN FETCH p.address a
             WHERE p.userId = :userId
               AND p.status = :status
-              AND (:region IS NULL OR a.roadAddress LIKE CONCAT('%', :region, '%')
-                   OR a.jibunAddress LIKE CONCAT('%', :region, '%'))
+              AND (:region IS NULL OR a.roadAddress LIKE CONCAT('%', :region, '%') ESCAPE '\\'
+                   OR a.jibunAddress LIKE CONCAT('%', :region, '%') ESCAPE '\\'
+                   OR p.title LIKE CONCAT('%', :region, '%') ESCAPE '\\')
               AND (:minArea IS NULL OR p.area >= :minArea)
               AND (:maxArea IS NULL OR p.area <= :maxArea)
               AND (:transactionType IS NULL OR p.transactionType = :transactionType)
@@ -106,6 +119,7 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
               AND (:maxDeposit IS NULL OR p.deposit <= :maxDeposit)
               AND (:minMonthlyRent IS NULL OR p.monthlyRent >= :minMonthlyRent)
               AND (:maxMonthlyRent IS NULL OR p.monthlyRent <= :maxMonthlyRent)
+              AND (:signalPropertyIds IS NULL OR p.id IN :signalPropertyIds)
             """)
     Page<Property> search(
             @Param("userId") Long userId,
@@ -119,6 +133,7 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
             @Param("maxDeposit") Long maxDeposit,
             @Param("minMonthlyRent") Long minMonthlyRent,
             @Param("maxMonthlyRent") Long maxMonthlyRent,
+            @Param("signalPropertyIds") List<Long> signalPropertyIds,
             Pageable pageable
     );
 

@@ -13,7 +13,4 @@ public record UserSearchCondition(
         Role role,
         UserStatus status
 ) {
-    public static UserSearchCondition empty() {
-        return new UserSearchCondition(null, null, null, null);
-    }
 }

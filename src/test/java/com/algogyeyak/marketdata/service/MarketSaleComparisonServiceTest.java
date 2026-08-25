@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -232,6 +233,29 @@ class MarketSaleComparisonServiceTest {
 
         assertThat(response.status()).isEqualTo("UNAVAILABLE");
         verify(kakaoAddressClient, never()).resolve(prefix + "a-3");
+    }
+
+    // 2026-08-21 멘토링 피드백(#272) - MarketComparisonService와 마찬가지로 이 서비스의
+    // geocodeCache도 Caffeine으로 교체됐다. 같은 조합 주소는 여전히 지오코딩 API를 한 번만
+    // 호출해야 한다.
+    @Test
+    void 같은_조합주소를_가진_표본이_여러_건이면_지오코딩_API는_한_번만_호출된다() {
+        init();
+        Property property = officetel(25.0);
+        when(kakaoRegionCodeClient.resolve(PROPERTY_LAT, PROPERTY_LNG)).thenReturn(resolvedRegion());
+
+        List<TradeTransactionSample> samples = List.of(
+                sample("1-1", 900_000_000L, 24.0),
+                sample("1-1", 1_000_000_000L, 24.0),
+                sample("1-1", 1_100_000_000L, 24.0)
+        );
+        stubFirstMonthOnly(samples);
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAt(PROPERTY_LAT, PROPERTY_LNG));
+
+        MarketSaleComparisonResponse response = service.compare(property);
+
+        assertThat(response.status()).isEqualTo("AVAILABLE");
+        verify(kakaoAddressClient, times(1)).resolve(anyString());
     }
 
     @Test

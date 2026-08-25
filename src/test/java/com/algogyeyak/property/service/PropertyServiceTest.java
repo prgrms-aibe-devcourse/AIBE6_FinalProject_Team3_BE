@@ -6,7 +6,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +18,7 @@ import com.algogyeyak.checklist.repository.ChecklistRepository;
 import com.algogyeyak.global.error.ErrorCode;
 import com.algogyeyak.global.exception.BusinessException;
 import com.algogyeyak.global.response.PageResponse;
+import com.algogyeyak.global.s3.service.S3PresignService;
 import com.algogyeyak.marketdata.dto.MarketComparisonResponse;
 import com.algogyeyak.marketdata.dto.MarketComparisonUnavailableReason;
 import com.algogyeyak.marketdata.service.MarketComparisonService;
@@ -83,6 +86,9 @@ class PropertyServiceTest {
     private PropertyRiskSummaryProvider propertyRiskSummaryProvider;
 
     @Mock
+    private S3PresignService s3PresignService;
+
+    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private PropertyService propertyService;
@@ -94,8 +100,13 @@ class PropertyServiceTest {
         propertyService = new PropertyService(
                 propertyRepository, kakaoAddressClient, marketComparisonService,
                 checklistRepository, checklistItemRepository, propertyReportRepository,
-                propertyImageRepository, propertyRiskSummaryProvider, eventPublisher
+                propertyImageRepository, propertyRiskSummaryProvider, s3PresignService, eventPublisher
         );
+        // 이미지 소유권 검증(전수조사 결과 보안 2번)의 기본값 - 이 스텁을 실제로 쓰지 않는 테스트가
+        // 대부분이라 strict stubbing이 "unnecessary stubbing"으로 막지 않도록 lenient로 등록한다.
+        // 소유권 검증 자체를 테스트하는 케이스는 이 기본값을 필요에 따라 개별적으로 덮어쓴다.
+        lenient().when(s3PresignService.extractOwnedKey(anyString()))
+                .thenReturn(Optional.of("property-images/" + USER_ID + "/dummy.jpg"));
     }
 
     private AddressResolutionResult resolvedAddress() {
@@ -113,6 +124,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -142,11 +154,54 @@ class PropertyServiceTest {
         verify(eventPublisher).publishEvent(any(PropertyUpdatedEvent.class));
     }
 
+    // 회귀 테스트 - 예전엔 sortOrder가 항상 null로 남아있어(applyImages()가 imageUrl/roomType만
+    // 설정) 대표사진(첫 이미지) 지정이 삽입 순서라는 관찰된 동작에만 암묵적으로 의존했다
+    // (전수조사 결과 버그/정확성 2번). 요청 리스트의 인덱스가 그대로 sortOrder로 저장되는지 확인한다.
+    @Test
+    void 등록_요청의_이미지_순서가_sortOrder로_저장된다() {
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                "역세권 오피스텔",
+                List.of(
+                        new PropertyImageRequest("https://cdn.algogyeyak.com/img/first.jpg", null),
+                        new PropertyImageRequest("https://cdn.algogyeyak.com/img/second.jpg", null)
+                )
+        );
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
+        )).thenReturn(false);
+        when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        propertyService.register(USER_ID, request);
+
+        org.mockito.ArgumentCaptor<Property> captor = org.mockito.ArgumentCaptor.forClass(Property.class);
+        verify(propertyRepository).save(captor.capture());
+        assertThat(captor.getValue().getImages()).extracting(
+                com.algogyeyak.property.entity.PropertyImage::getImageUrl,
+                com.algogyeyak.property.entity.PropertyImage::getSortOrder
+        ).containsExactly(
+                org.assertj.core.groups.Tuple.tuple("https://cdn.algogyeyak.com/img/first.jpg", 0),
+                org.assertj.core.groups.Tuple.tuple("https://cdn.algogyeyak.com/img/second.jpg", 1)
+        );
+    }
+
     @Test
     void 관리비를_입력하면_등록_응답에_반영된다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -172,10 +227,41 @@ class PropertyServiceTest {
     }
 
     @Test
+    void 이름을_입력하지_않으면_매물유형으로_대체된다() {
+        // 이름 없는 건물도 있어 title은 선택 입력이다(#222) - 비어 있으면 매물유형의 한글 라벨로
+        // 대체해서 저장한다.
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                null,
+                null
+        );
+
+        when(kakaoAddressClient.resolve(anyString())).thenReturn(resolvedAddress());
+        when(propertyRepository.existsByUserIdAndTransactionTypeAndStatusAndAddress_RoadAddress(
+                eq(USER_ID), eq(TransactionType.JEONSE), eq(PropertyStatus.ACTIVE), anyString()
+        )).thenReturn(false);
+        when(propertyRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        PropertyRegisterResponse response = propertyService.register(USER_ID, request);
+
+        assertThat(response.title()).isEqualTo("오피스텔");
+    }
+
+    @Test
     void 주소_확인에_실패하면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "존재하지 않는 주소",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -198,6 +284,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -222,6 +309,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 종로구 충신동 1",
+                null,
                 PropertyType.DETACHED_HOUSE,
                 TransactionType.JEONSE,
                 200_000_000L,
@@ -254,6 +342,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 종로구 청운동 1",
+                null,
                 PropertyType.MULTI_FAMILY,
                 TransactionType.JEONSE,
                 200_000_000L,
@@ -289,6 +378,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -310,6 +400,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -334,6 +425,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -350,11 +442,68 @@ class PropertyServiceTest {
                 .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
     }
 
+    // 회귀 테스트 - 이미지 URL이 우리 S3 버킷을 가리키지 않으면(extractOwnedKey가 empty) 소유권
+    // 검증 자체가 불가능하다고 보고 거부한다. 예전엔 확장자/프로토콜만 맞으면 임의의 외부 URL도
+    // 그대로 통과·저장됐다(전수조사 결과 보안 2번).
+    @Test
+    void 우리_버킷_URL이_아닌_이미지면_예외가_발생한다() {
+        when(s3PresignService.extractOwnedKey("https://cdn.algogyeyak.com/img/abc.jpg"))
+                .thenReturn(Optional.empty());
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                null,
+                List.of(new PropertyImageRequest("https://cdn.algogyeyak.com/img/abc.jpg", null))
+        );
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
+    // 회귀 테스트 - 우리 버킷 URL이더라도 key가 다른 유저(property-images/{다른 userId}/...) 소유면
+    // 거부한다. 이미 확정된 타인의 매물 이미지 URL을 그대로 넣는 시나리오를 막는다.
+    @Test
+    void 타인_소유의_이미지_key면_예외가_발생한다() {
+        Long otherUserId = 999L;
+        when(s3PresignService.extractOwnedKey("https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg"))
+                .thenReturn(Optional.of("property-images/" + otherUserId + "/abc.jpg"));
+        PropertyRegisterRequest request = new PropertyRegisterRequest(
+                "테스트 매물",
+                "서울특별시 강남구 테헤란로 123",
+                null,
+                PropertyType.OFFICETEL,
+                TransactionType.JEONSE,
+                30_000_000L,
+                null,
+                23.5,
+                null,
+                null,
+                List.of(new PropertyImageRequest(
+                        "https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg", null
+                ))
+        );
+
+        assertThatThrownBy(() -> propertyService.register(USER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
     @Test
     void 월세인데_월임대료가_없으면_예외가_발생한다() {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.MONTHLY_RENT,
                 5_000_000L,
@@ -374,6 +523,7 @@ class PropertyServiceTest {
         PropertyRegisterRequest request = new PropertyRegisterRequest(
                 "테스트 매물",
                 "서울특별시 강남구 테헤란로 123",
+                null,
                 PropertyType.OFFICETEL,
                 TransactionType.JEONSE,
                 30_000_000L,
@@ -413,7 +563,7 @@ class PropertyServiceTest {
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
         PageResponse<PropertyListResponse> result =
@@ -444,19 +594,54 @@ class PropertyServiceTest {
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
 
         MarketComparisonResponse comparison = MarketComparisonResponse.available(
-                28_000_000L, 0.07, 5, "2026-06-20", 300
+                28_000_000L, 0.07, 5, "2026-06-20", 300, 0.2, 6, List.of()
         );
-        when(marketComparisonService.compare(property)).thenReturn(comparison);
+        // 목록 조회는 compare()가 아니라 캐시만 읽는 getCachedOnly()를 호출한다 - 매물 수만큼
+        // 국토부/카카오 API를 순차 호출하지 않기 위한 성능 개선(fix/property-list-cached-market-comparison).
+        when(marketComparisonService.getCachedOnly(property.getId())).thenReturn(comparison);
 
         PageResponse<PropertyListResponse> result =
                 propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
 
         assertThat(result.content()).hasSize(1);
         assertThat(result.content().get(0).marketComparison()).isEqualTo(comparison);
+    }
+
+    @Test
+    void 매물_목록조회_응답에_시세비교_캐시가_없으면_NOT_YET_CALCULATED로_응답한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .build();
+        ReflectionTestUtils.setField(property, "id", 1L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(property), pageable, 1));
+
+        MarketComparisonResponse notYetCalculated = MarketComparisonResponse.unavailable(
+                MarketComparisonUnavailableReason.NOT_YET_CALCULATED, "아직 시세 비교가 계산되지 않았어요. 매물 상세 화면에서 확인해보세요.");
+        when(marketComparisonService.getCachedOnly(property.getId())).thenReturn(notYetCalculated);
+
+        PageResponse<PropertyListResponse> result =
+                propertyService.getMyProperties(USER_ID, pageable, PropertySearchCondition.empty());
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).marketComparison().reason())
+                .isEqualTo(MarketComparisonUnavailableReason.NOT_YET_CALCULATED);
+        verify(marketComparisonService, never()).compare(any());
     }
 
     @Test
@@ -487,7 +672,7 @@ class PropertyServiceTest {
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(propertyWithChecklist, propertyWithoutChecklist), pageable, 2));
 
         // 문항 4개 중 3개 체크됨 -> 75%. propertyId 2번은 체크리스트가 아예 없어(집계 자체가 안 잡힘)
@@ -527,7 +712,7 @@ class PropertyServiceTest {
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(checkedWithRisks, checkedClean, neverChecked), pageable, 3));
 
         // checkedWithRisks/checkedClean은 4종 신호 판정이 이미 돌았다는 것만 표시하면 되므로, 이제는
@@ -565,7 +750,7 @@ class PropertyServiceTest {
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(calculated, unavailable), pageable, 2));
 
         // unavailable(판정불가)은 요약 맵에 아예 안 나타난다(PropertyRiskSummaryProviderImpl이
@@ -598,7 +783,7 @@ class PropertyServiceTest {
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)
+                isNull(), eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(withImages, withoutImages), pageable, 2));
 
         // id 오름차순(=업로드 순서)으로 정렬된 상태로 Repository가 내려준다고 가정하고, 매물당
@@ -647,14 +832,40 @@ class PropertyServiceTest {
     }
 
     @Test
-    void 지역_검색어로_필터링하면_repository_search에_region이_전달된다() {
+    void 검색어로_필터링하면_repository_search에_region이_전달된다() {
+        // region은 메인 검색창 하나로 받는 검색어다 - 주소든 건물명이든 이 값 하나로 repository에
+        // 그대로 전달되고, 실제 주소/건물명 OR 매칭은 repository 쿼리(PropertyRepositoryTest)가 검증한다.
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                "역삼동", null, null, null, null, null, null, null, null
+                "래미안", null, null, null, null, null, null, null, null, null
         );
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
-                eq("역삼동"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq("래미안"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable, condition);
+
+        assertThat(result.content()).isEmpty();
+    }
+
+    // 회귀 테스트 - region 검색어에 리터럴 "%"/"_"가 들어있으면 repository.search()에 넘기기 전에
+    // 이스케이프해야 한다(escapeLikePattern, 전수조사 결과 버그/정확성 1번). 그러지 않으면 이 문자들이
+    // SQL LIKE 와일드카드로 해석돼 사용자가 의도한 것보다 훨씬 넓거나 좁게 매칭된다 - 실제 이스케이프
+    // 해석(ESCAPE '\')이 결과에 반영되는지는 PropertyRepositoryTest가 검증하고, 여기서는 Service가
+    // repository에 넘기는 값 자체가 이스케이프됐는지만 확인한다.
+    @Test
+    void region_검색어의_와일드카드_문자는_이스케이프되어_repository_search에_전달된다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                "100%_동", null, null, null, null, null, null, null, null, null
+        );
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                eq("100\\%\\_동"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
 
@@ -668,13 +879,13 @@ class PropertyServiceTest {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
                 null, 20.0, 30.0, TransactionType.JEONSE, PropertyType.OFFICETEL,
-                10_000_000L, 50_000_000L, null, null
+                10_000_000L, 50_000_000L, null, null, null
         );
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), eq(20.0), eq(30.0),
                 eq(TransactionType.JEONSE), eq(PropertyType.OFFICETEL),
-                eq(10_000_000L), eq(50_000_000L), isNull(), isNull(),
+                eq(10_000_000L), eq(50_000_000L), isNull(), isNull(), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
 
@@ -687,13 +898,13 @@ class PropertyServiceTest {
     void 월세_범위_조건이_repository_search에_그대로_전달된다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                null, null, null, TransactionType.MONTHLY_RENT, null, null, null, 300_000L, 800_000L
+                null, null, null, TransactionType.MONTHLY_RENT, null, null, null, 300_000L, 800_000L, null
         );
         when(propertyRepository.search(
                 eq(USER_ID), eq(PropertyStatus.ACTIVE),
                 isNull(), isNull(), isNull(),
                 eq(TransactionType.MONTHLY_RENT), isNull(),
-                isNull(), isNull(), eq(300_000L), eq(800_000L),
+                isNull(), isNull(), eq(300_000L), eq(800_000L), isNull(),
                 eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(), pageable, 0));
 
@@ -706,7 +917,7 @@ class PropertyServiceTest {
     void 면적_최소값이_최대값보다_크면_예외가_발생한다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                null, 30.0, 20.0, null, null, null, null, null, null
+                null, 30.0, 20.0, null, null, null, null, null, null, null
         );
 
         assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, condition))
@@ -719,7 +930,7 @@ class PropertyServiceTest {
     void 보증금_최소값이_최대값보다_크면_예외가_발생한다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                null, null, null, null, null, 50_000_000L, 10_000_000L, null, null
+                null, null, null, null, null, 50_000_000L, 10_000_000L, null, null, null
         );
 
         assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, condition))
@@ -732,13 +943,66 @@ class PropertyServiceTest {
     void 월세_최소값이_최대값보다_크면_예외가_발생한다() {
         Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
         PropertySearchCondition condition = new PropertySearchCondition(
-                null, null, null, null, null, null, null, 800_000L, 300_000L
+                null, null, null, null, null, null, null, 800_000L, 300_000L, null
         );
 
         assertThatThrownBy(() -> propertyService.getMyProperties(USER_ID, pageable, condition))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.PROPERTY_INVALID_SEARCH_CONDITION);
+    }
+
+    @Test
+    void hasSignal이_true이면_확인_필요_신호가_있는_매물_id만_repository_search에_전달된다() {
+        Property signaled = Property.builder()
+                .userId(USER_ID).title("신호 있는 매물").propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE).deposit(30_000_000L).area(23.5).build();
+        ReflectionTestUtils.setField(signaled, "id", 1L);
+
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                null, null, null, null, null, null, null, null, null, true
+        );
+
+        // 매물 1번은 신호 2개, 2번은 신호 0개(=필터링에서 제외돼야 함) - id 1번만 담긴 리스트가
+        // repository.search()로 넘어가는지 확인한다.
+        when(propertyRiskSummaryProvider.getSummariesByUserId(USER_ID)).thenReturn(Map.of(
+                1L, new PropertyRiskSummary(2, "시세 대비 높은 가격", null),
+                2L, new PropertyRiskSummary(0, null, null)
+        ));
+        when(propertyRepository.search(
+                eq(USER_ID), eq(PropertyStatus.ACTIVE),
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(List.of(1L)),
+                eq(pageable)
+        )).thenReturn(new PageImpl<>(List.of(signaled), pageable, 1));
+
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable, condition);
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).checkSignalCount()).isEqualTo(2);
+    }
+
+    @Test
+    void hasSignal이_true인데_신호_있는_매물이_없으면_repository_조회_없이_빈_페이지를_반환한다() {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PropertySearchCondition condition = new PropertySearchCondition(
+                null, null, null, null, null, null, null, null, null, true
+        );
+
+        when(propertyRiskSummaryProvider.getSummariesByUserId(USER_ID)).thenReturn(Map.of(
+                1L, new PropertyRiskSummary(0, null, null)
+        ));
+
+        PageResponse<PropertyListResponse> result = propertyService.getMyProperties(USER_ID, pageable, condition);
+
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isEqualTo(0);
+        // 신호 있는 매물이 없으면 DB 조회 자체를 건너뛰어야 한다 - 호출됐다면 이 mock은 스텁이 안 돼
+        // 있어 Mockito가 기본값(null)을 반환하고 NPE가 나거나, strict stubbing이면 여기서 실패한다.
+        verify(propertyRepository, org.mockito.Mockito.never()).search(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()
+        );
     }
 
     @Test
@@ -843,7 +1107,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, "수정된 설명", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, "수정된 설명", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -856,6 +1120,65 @@ class PropertyServiceTest {
         // risk-analysis가 위험 신호·전세가율을 재계산할 수 있도록 이벤트를 발행한다 - property는
         // risk-analysis를 직접 참조하지 않고 이벤트로만 알린다(도메인 결합 방지).
         verify(eventPublisher).publishEvent(new PropertyUpdatedEvent(1L));
+    }
+
+    // 회귀 테스트 - 이미지 소유권 검증(전수조사 결과 보안 2번)이 register()뿐 아니라 update()에서도
+    // 동작하는지 확인한다. register() 쪽 검증은 위쪽 이미지 테스트들이 이미 커버하므로, 여기서는
+    // update()가 userId를 validateImages()에 제대로 전달하는지만 별도로 확인한다.
+    @Test
+    void 매물_수정_시_타인_소유의_이미지_key면_예외가_발생한다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description("역세권 오피스텔")
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+
+        Long otherUserId = 999L;
+        when(s3PresignService.extractOwnedKey("https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg"))
+                .thenReturn(Optional.of("property-images/" + otherUserId + "/abc.jpg"));
+        PropertyUpdateRequest request = new PropertyUpdateRequest(
+                "테스트 매물", null, 35_000_000L, null, 25.0, null, "수정된 설명",
+                List.of(new PropertyImageRequest(
+                        "https://bucket.s3.ap-northeast-2.amazonaws.com/property-images/" + otherUserId + "/abc.jpg", null
+                ))
+        );
+
+        assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PROPERTY_IMAGE_INVALID);
+    }
+
+    @Test
+    void 수정_시_이름을_비우면_매물유형으로_대체된다() {
+        Property property = Property.builder()
+                .userId(USER_ID)
+                .title("테스트 매물")
+                .propertyType(PropertyType.DETACHED_HOUSE)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(30_000_000L)
+                .monthlyRent(null)
+                .area(23.5)
+                .description("역세권 오피스텔")
+                .build();
+        property.assignAddress(resolvedPropertyAddress());
+
+        when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
+        when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
+
+        PropertyUpdateRequest request = new PropertyUpdateRequest("", null, 35_000_000L, null, 25.0, null, "수정된 설명", null);
+
+        PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
+
+        assertThat(response.title()).isEqualTo("단독/다가구");
     }
 
     @Test
@@ -876,7 +1199,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
         when(marketComparisonService.compare(any())).thenReturn(MarketComparisonResponse.unavailable(MarketComparisonUnavailableReason.INSUFFICIENT_SAMPLE, "stub"));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 30_000_000L, null, 23.5, 200_000L, "역세권 오피스텔", null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 30_000_000L, null, 23.5, 200_000L, "역세권 오피스텔", null);
 
         PropertyDetailResponse response = propertyService.update(USER_ID, 1L, request);
 
@@ -887,7 +1210,7 @@ class PropertyServiceTest {
     void 존재하지_않는_매물을_수정하면_예외가_발생한다() {
         when(propertyRepository.findById(999L)).thenReturn(Optional.empty());
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 999L, request))
                 .isInstanceOf(BusinessException.class);
@@ -910,7 +1233,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, null, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, null, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);
@@ -932,7 +1255,7 @@ class PropertyServiceTest {
 
         when(propertyRepository.findById(1L)).thenReturn(Optional.of(property));
 
-        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", 35_000_000L, 500_000L, 25.0, null, null, null);
+        PropertyUpdateRequest request = new PropertyUpdateRequest("테스트 매물", null, 35_000_000L, 500_000L, 25.0, null, null, null);
 
         assertThatThrownBy(() -> propertyService.update(USER_ID, 1L, request))
                 .isInstanceOf(BusinessException.class);

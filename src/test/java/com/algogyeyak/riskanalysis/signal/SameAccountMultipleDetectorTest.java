@@ -120,4 +120,34 @@ class SameAccountMultipleDetectorTest {
         assertThat(result.status()).isEqualTo(RiskCheckStatus.SUCCESS);
         assertThat(result.description()).isNull();
     }
+
+    @Test
+    @DisplayName("최근 매물 중 주소가 없는 매물이 섞여 있어도 NPE 없이 그 매물만 지역 구분에서 제외한다")
+    void detectSkipsPropertiesWithoutAddressInsteadOfThrowing() {
+        ReflectionTestUtils.setField(policyConfig, "sameAccountThresholdCount", 3);
+        ReflectionTestUtils.setField(policyConfig, "sameAccountWindowDays", 7);
+        Property target = property("서울시 강남구 역삼동 1");
+        Property withoutAddress = Property.builder()
+                .userId(1L)
+                .title("주소 없는 매물")
+                .propertyType(PropertyType.OFFICETEL)
+                .transactionType(TransactionType.JEONSE)
+                .deposit(10_000_000L)
+                .area(20.0)
+                .build();
+        List<Property> recentProperties = List.of(
+                property("서울시 강남구 역삼동 1"),
+                property("서울시 마포구 합정동 2"),
+                withoutAddress
+        );
+        when(propertyRepository.findAllByUserIdAndStatusAndCreatedAtAfter(any(), any(), any()))
+                .thenReturn(recentProperties);
+
+        SignalCheckResult result = detector.detect(target, null);
+
+        // 주소 있는 매물 2건(강남구/마포구)만 지역으로 잡혀 MIN_DISTINCT_REGIONS(2) 조건은 충족하지만,
+        // 이 어서션의 핵심은 NPE 없이 끝까지 도달했다는 것 자체다.
+        assertThat(result.status()).isEqualTo(RiskCheckStatus.SUCCESS);
+        assertThat(result.description()).isEqualTo("동일 계정이 여러 매물을 동시에 등록했어요");
+    }
 }

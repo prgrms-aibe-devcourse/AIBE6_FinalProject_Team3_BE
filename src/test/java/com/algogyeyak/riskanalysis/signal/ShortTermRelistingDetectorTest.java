@@ -14,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,11 +68,12 @@ class ShortTermRelistingDetectorTest {
     }
 
     @Test
-    @DisplayName("동일 주소·유사 가격/면적으로 삭제된 매물이 최근에 있으면 SUCCESS와 설명을 반환한다")
+    @DisplayName("동일 주소·유사 가격/면적으로 삭제된 매물이 최근에 있으면 SUCCESS와 며칠 전 삭제됐는지를 담은 설명을 반환한다")
     void detectReturnsSuccessWithDescriptionWhenSimilarDeletedPropertyExistsRecently() {
         setPolicy(30, 5, 10);
         Property target = property(10L, "서울시 강남구 테헤란로 1", "서울시 강남구 역삼동 1", 100_000_000L, 20.0);
         Property deletedSimilar = property(9L, "서울시 강남구 테헤란로 1", "서울시 강남구 역삼동 1", 102_000_000L, 21.0);
+        ReflectionTestUtils.setField(deletedSimilar, "updatedAt", LocalDateTime.now().minusDays(5));
         when(propertyRepository.findAllByUserIdAndStatusAndAddress_RoadAddressAndUpdatedAtAfter(
                 any(), any(), any(), any()))
                 .thenReturn(List.of(deletedSimilar));
@@ -79,7 +81,10 @@ class ShortTermRelistingDetectorTest {
         SignalCheckResult result = detector.detect(target, null);
 
         assertThat(result.status()).isEqualTo(RiskCheckStatus.SUCCESS);
-        assertThat(result.description()).isEqualTo("이 매물, 최근에 삭제됐다가 비슷한 조건으로 다시 등록됐어요");
+        // "의심된다"고 단정하지 않고, 언제 삭제됐다가 다시 등록된 건지 사실만 담는다 - 이 서비스는
+        // 매물이 계정별 비공개라 "다른 사람 눈을 속이려 재등록"할 동기 자체가 없어서(오타 수정, 마음이
+        // 바뀜 등 정상적인 이유가 대부분), 판정은 사용자 몫으로 남긴다.
+        assertThat(result.description()).isEqualTo("이 매물, 5일 전 삭제됐다가 비슷한 조건으로 다시 등록됐어요");
     }
 
     @Test
@@ -135,6 +140,7 @@ class ShortTermRelistingDetectorTest {
         setPolicy(30, 5, 10);
         Property target = property(10L, null, "서울시 강남구 역삼동 1", 100_000_000L, 20.0);
         Property deletedSimilar = property(9L, null, "서울시 강남구 역삼동 1", 101_000_000L, 20.5);
+        ReflectionTestUtils.setField(deletedSimilar, "updatedAt", LocalDateTime.now().minusDays(2));
         when(propertyRepository.findAllByUserIdAndStatusAndAddress_JibunAddressAndUpdatedAtAfter(
                 any(), any(), any(), any()))
                 .thenReturn(List.of(deletedSimilar));
@@ -142,6 +148,6 @@ class ShortTermRelistingDetectorTest {
         SignalCheckResult result = detector.detect(target, null);
 
         assertThat(result.status()).isEqualTo(RiskCheckStatus.SUCCESS);
-        assertThat(result.description()).isEqualTo("이 매물, 최근에 삭제됐다가 비슷한 조건으로 다시 등록됐어요");
+        assertThat(result.description()).isEqualTo("이 매물, 2일 전 삭제됐다가 비슷한 조건으로 다시 등록됐어요");
     }
 }

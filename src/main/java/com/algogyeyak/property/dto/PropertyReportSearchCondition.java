@@ -10,7 +10,4 @@ public record PropertyReportSearchCondition(
         PropertyReportStatus status,
         PropertyReportReason reason
 ) {
-    public static PropertyReportSearchCondition empty() {
-        return new PropertyReportSearchCondition(null, null);
-    }
 }
